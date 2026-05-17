@@ -381,822 +381,24 @@ impl<'a> ResolveDriver<'a> {
     /// resolve.
     #[allow(clippy::too_many_lines)]
     async fn process_task(&mut self, mut task: ResolveTask) -> Result<(), Error> {
-        // Apply bare-name overrides + npm-alias rewrites in a
-        // small fixed-point loop. Two interleavings need to
-        // work simultaneously:
-        //   1. The override *value* is itself a `npm:` alias
-        //      (e.g. `"foo": "npm:bar@^2"`). The first override
-        //      pass rewrites `task.range`; the alias pass then
-        //      rewrites `task.name` to `bar`.
-        //   2. The user's *declared dep* is an `npm:` alias
-        //      (e.g. `"foo": "npm:bar@^1"`) and the override
-        //      targets the real package (`"overrides":
-        //      {"bar": "2.0.0"}`). The first override pass
-        //      misses (`task.name` is still `foo`), the alias
-        //      pass rewrites `task.name = "bar"`, and the
-        //      second override pass catches it.
-        // A two-iteration cap is enough — after one alias
-        // rewrite the name is canonical, and an override that
-        // points at a third package is itself constrained by
-        // the same rule, so there's no infinite chain.
-        //
-        // We deliberately don't touch `original_specifier`,
-        // since the lockfile/importer record should still
-        // reflect what the user wrote in package.json —
-        // overrides are a graph-shaping rule, not a rewrite of
-        // the user's declared deps.
-        // Catalog protocol: rewrite `catalog:` and
-        // `catalog:<name>` to the workspace catalog's actual
-        // range *before* the override loop, so overrides can
-        // still target a catalog dep by bare name. The original
-        // `catalog:...` text stays in `original_specifier` so
-        // the lockfile importer keeps the catalog reference and
-        // drift detection works.
-        if let Some((catalog_name, real_range)) = self
-            .resolver
-            .resolve_catalog_spec(&task.name, &task.range)?
-        {
-            tracing::trace!("catalog: {} {} -> {}", task.name, task.range, real_range);
-            self.catalog_picks
-                .entry(catalog_name)
-                .or_default()
-                .insert(task.name.clone(), real_range.clone());
-            task.range = real_range;
+        if !self.preprocess_task(&mut task)? {
+            return Ok(());
         }
 
-        for _ in 0..2 {
-            let mut changed = false;
-            if let Some(override_spec) = pick_override_spec(
-                &self.resolver.override_rules,
-                &task.name,
-                &task.range,
-                &task.ancestors,
-            ) {
-                // pnpm's removal marker: an override value of
-                // `"-"` drops the dep edge entirely. Skip before
-                // catalog/alias rewrites so `-` never reaches
-                // the registry resolver. The dropped edge never
-                // gets written to the parent's `.dependencies`
-                // map (that write happens downstream) and, for
-                // direct deps, never gets pushed into the
-                // importer's direct-dep list.
-                if override_spec == "-" {
-                    tracing::trace!("override: {}@{} -> dropped", task.name, task.range,);
-                    if task.is_root {
-                        self.note_root_done();
-                    }
-                    return Ok(());
-                }
-                // An override may itself point at a catalog
-                // entry (e.g. `"overrides": {"foo": "catalog:"}`).
-                // The catalog pre-pass above already ran against
-                // the original range, so resolve the indirection
-                // here before assigning — otherwise `catalog:`
-                // leaks through to the registry resolver.
-                // Stash the catalog pick in a local so we only
-                // record it if the override actually moves
-                // `task.range`.
-                let (effective_spec, pending_pick) = match self
-                    .resolver
-                    .resolve_catalog_spec(&task.name, &override_spec)?
-                {
-                    Some((catalog_name, real_range)) => {
-                        (real_range.clone(), Some((catalog_name, real_range)))
-                    }
-                    None => (override_spec, None),
-                };
-                if task.range != effective_spec {
-                    if let Some((catalog_name, real_range)) = pending_pick {
-                        self.catalog_picks
-                            .entry(catalog_name)
-                            .or_default()
-                            .insert(task.name.clone(), real_range);
-                    }
-                    tracing::trace!(
-                        "override: {}@{} -> {}",
-                        task.name,
-                        task.range,
-                        effective_spec
-                    );
-                    // Overrides are declared at the project root,
-                    // so a substituted `link:./libs/x` /
-                    // `file:./vendor/y` path is project-root-
-                    // relative — never importer- or parent-
-                    // relative. Mark the task so the local-source
-                    // branch anchors the path correctly even when
-                    // the consumer is a workspace pkg or a nested
-                    // local parent.
-                    if is_non_registry_specifier(&effective_spec) {
-                        task.range_from_override = true;
-                    }
-                    task.range = effective_spec;
-                    // If the override replaced the spec with a
-                    // bare range (not itself an `npm:` / `jsr:`
-                    // alias), it's targeting `task.name` —
-                    // implicitly undoing any prior alias
-                    // rewrite. Without this, an override that
-                    // fires after a catalog-aliased entry
-                    // (e.g. catalog `js-yaml:
-                    // npm:@zkochan/js-yaml@0.0.11`, override
-                    // `js-yaml@<3.14.2: ^3.14.2`) would keep
-                    // `task.real_name = @zkochan/js-yaml` and
-                    // try to fetch `^3.14.2` from a packument
-                    // that only carries `0.0.x`. If the
-                    // override's value is itself an alias, the
-                    // alias pass below picks up the new target
-                    // on the next loop iteration.
-                    if task.real_name.is_some()
-                        && !task.range.starts_with("npm:")
-                        && !task.range.starts_with("jsr:")
-                    {
-                        task.real_name = None;
-                    }
-                    changed = true;
-                }
-            }
-            if let Some(rest) = task.range.strip_prefix("npm:")
-                && let Some(at_idx) = rest.rfind('@')
-            {
-                let real_name = rest[..at_idx].to_string();
-                let real_range = rest[at_idx + 1..].to_string();
-                // Keep `task.name` as the user-facing alias
-                // (the key the package.json used) and stash
-                // the registry name on `real_name` so every
-                // identity-facing site — dep_path formation,
-                // direct-dep records, parent wiring — sees
-                // the alias, while only packument/tarball
-                // fetch sites (via `task.registry_name()`)
-                // hit the real package. Overwriting
-                // `task.name` here would collapse
-                // `node_modules/h3-v2/` to `node_modules/h3/`
-                // and any `require("h3-v2")` would break.
-                if task.real_name.as_deref() != Some(real_name.as_str()) || real_range != task.range
-                {
-                    tracing::trace!("npm alias: {} -> {}@{}", task.name, real_name, real_range);
-                    task.real_name = Some(real_name);
-                    task.range = real_range;
-                    changed = true;
-                }
-            }
-            // `jsr:<range>` and `jsr:<@scope/name>[@<range>]` both
-            // land here. JSR's npm-compat endpoint serves every
-            // package under `@jsr/<scope>__<name>`, but the
-            // user-facing dependency name stays the JSR name (or
-            // explicit alias) from package.json. Keep `task.name`
-            // unchanged for dep_path/importer/link identity and
-            // stash the npm-compat name in `real_name`, matching
-            // the npm-alias path above. Only registry IO should
-            // see `@jsr/...`.
-            if let Some(rest) = task.range.strip_prefix("jsr:") {
-                let (jsr_name_raw, jsr_range) = if let Some(body) = rest.strip_prefix('@') {
-                    match body.rfind('@') {
-                        Some(rel_at) => {
-                            // Indices are relative to `body`; add 1 for
-                            // the `@` we just stripped so we can slice
-                            // against the original `rest`.
-                            let at_idx = rel_at + 1;
-                            (rest[..at_idx].to_string(), rest[at_idx + 1..].to_string())
-                        }
-                        None => (rest.to_string(), "latest".to_string()),
-                    }
-                } else {
-                    // Bare range form — the manifest key carries the
-                    // JSR name (e.g. `"@std/collections": "jsr:^1"`).
-                    (task.name.clone(), rest.to_string())
-                };
-                match aube_registry::jsr::jsr_to_npm_name(&jsr_name_raw) {
-                    Some(npm_name) => {
-                        if task.real_name.as_deref() != Some(npm_name.as_str())
-                            || jsr_range != task.range
-                        {
-                            tracing::trace!("jsr: {} -> {}@{}", task.name, npm_name, jsr_range,);
-                            task.real_name = Some(npm_name);
-                            task.range = jsr_range;
-                            changed = true;
-                        }
-                    }
-                    None => {
-                        return Err(Error::Registry(
-                            task.name.clone(),
-                            format!(
-                                "invalid jsr: spec `{}` — expected `jsr:@scope/name[@range]`",
-                                task.range,
-                            ),
-                        ));
-                    }
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-
-        // Handle file: / link: / git: protocols — the dep points
-        // at a path on disk or a remote git repo rather than a
-        // registry package. Root deps anchor on the importer's
-        // directory; transitive `link:`/`file:` deps anchor on
-        // the parent package's source root, but only when the
-        // parent itself was a `file:`/`link:` source (a workspace
-        // sibling or a directly-linked local dir). Registry-
-        // hosted parents have no on-disk source to resolve a
-        // relative path against, so transitive `link:`/`file:`
-        // from them stays an error.
         if is_non_registry_specifier(&task.range) {
-            // Root-declared `pnpm.overrides` opts the user into
-            // the rewritten `link:`/`file:` target by name, so
-            // they bypass the exotic-subdep block — otherwise
-            // an override aimed at a transitive of a registry
-            // package would always lose to the default-on
-            // guard.
-            if !task.range_from_override
-                && should_block_exotic_subdep(
-                    &task,
-                    &self.resolved,
-                    self.resolver.dependency_policy.block_exotic_subdeps,
-                )
-            {
-                return Err(Error::BlockedExoticSubdep(Box::new(ExoticSubdepDetails {
-                    name: task.name.clone(),
-                    spec: task.range.clone(),
-                    parent: task
-                        .parent
-                        .clone()
-                        .unwrap_or_else(|| "<unknown>".to_string()),
-                    ancestors: task.ancestors.clone(),
-                    importer: task.importer.clone(),
-                })));
-            }
-            // Pull the parent's on-disk package root, when the
-            // parent is a directory-backed source. `exec:` stores
-            // the generator script path, not the generated package
-            // directory, so it cannot safely anchor relative
-            // transitive local specifiers.
-            let parent_source_root: Option<std::path::PathBuf> = (!task.is_root)
-                .then(|| {
-                    task.parent
-                        .as_ref()
-                        .and_then(|dp| self.resolved.get(dp))
-                        .and_then(|pkg| pkg.local_source.as_ref())
-                        .and_then(|src| match src {
-                            LocalSource::Directory(p)
-                            | LocalSource::Link(p)
-                            | LocalSource::Portal(p) => Some(self.resolver.project_root.join(p)),
-                            _ => None,
-                        })
-                })
-                .flatten();
-            // Override-substituted link:/file: paths are
-            // project-root-relative regardless of where the
-            // consumer lives — pin them at the root before any
-            // importer/parent fallback wins.
-            let importer_root = if task.range_from_override {
-                self.resolver.project_root.clone()
-            } else {
-                parent_source_root.clone().unwrap_or_else(|| {
-                    if task.importer == "." {
-                        self.resolver.project_root.clone()
-                    } else {
-                        self.resolver.project_root.join(&task.importer)
-                    }
-                })
-            };
-            let Some(raw_local) = LocalSource::parse(&task.range, &importer_root) else {
-                return Err(Error::Registry(
-                    task.name.clone(),
-                    format!("unparseable local specifier: {}", task.range),
-                ));
-            };
-            // Git and remote-tarball specifiers don't reference
-            // a path, so they pass through regardless of parent
-            // shape. `link:`/`file:` transitives only resolve
-            // when we either (a) located a parent source root
-            // or (b) inherited the path from a project-root-
-            // anchored override.
-            if !task.is_root
-                && parent_source_root.is_none()
-                && !task.range_from_override
-                && matches!(
-                    raw_local,
-                    LocalSource::Directory(_)
-                        | LocalSource::Tarball(_)
-                        | LocalSource::Link(_)
-                        | LocalSource::Portal(_)
-                        | LocalSource::Exec(_)
-                )
-            {
-                return Err(Error::Registry(
-                    task.name.clone(),
-                    format!(
-                        "transitive local specifier {} cannot be self.resolved without the parent package source root",
-                        task.range
-                    ),
-                ));
-            }
-            let (local, real_version, target_deps) = if let LocalSource::Git(ref g) = raw_local {
-                let shallow =
-                    aube_store::git_host_in_list(&g.url, &self.resolver.git_shallow_hosts);
-                let (resolved_local, version, deps) =
-                    resolve_git_source(&task.name, g, shallow, Some(self.resolver.client.as_ref()))
-                        .await
-                        .map_err(|e| {
-                            Error::Registry(
-                                task.name.clone(),
-                                format!("git resolve {}: {e}", task.range),
-                            )
-                        })?;
-                (resolved_local, version, deps)
-            } else if let LocalSource::RemoteTarball(ref t) = raw_local {
-                let (resolved_local, version, deps) =
-                    resolve_remote_tarball(&task.name, t, self.resolver.client.as_ref())
-                        .await
-                        .map_err(|e| {
-                            Error::Registry(
-                                task.name.clone(),
-                                format!("remote tarball {}: {e}", task.range),
-                            )
-                        })?;
-                (resolved_local, version, deps)
-            } else {
-                // Rewrite the path to be relative to the
-                // project root so every downstream consumer
-                // can resolve it with a single
-                // `project_root.join(rel)`.
-                let local = rebase_local(&raw_local, &importer_root, &self.resolver.project_root);
-                let (version, deps) = if matches!(local, LocalSource::Exec(_)) {
-                    if self.resolver.ignore_scripts {
-                        return Err(Error::Registry(
-                            task.name.clone(),
-                            format!(
-                                "{} requires executing its generator, but scripts are disabled",
-                                local.specifier()
-                            ),
-                        ));
-                    }
-                    resolve_exec_manifest(&task.name, &local, &self.resolver.project_root).await?
-                } else {
-                    let (_target_name, version, deps) =
-                        read_local_manifest(&raw_local, &importer_root).unwrap_or_else(|_| {
-                            (task.name.clone(), "0.0.0".to_string(), BTreeMap::new())
-                        });
-                    (version, deps)
-                };
-                (local, version, deps)
-            };
-            let dep_path = local.dep_path(&task.name);
-            let linked_name = task.name.clone();
+            return self.handle_local_source_task(task).await;
+        }
 
-            if task.is_root
-                && let Some(deps) = self.importers.get_mut(&task.importer)
-            {
-                deps.push(DirectDep {
-                    name: task.name.clone(),
-                    dep_path: dep_path.clone(),
-                    dep_type: task.dep_type,
-                    specifier: task.original_specifier.clone(),
-                });
-            }
-
-            // Wire parent -> this exotic transitive. Without
-            // this, the parent snapshot's `dependencies` map
-            // omits the git/url/file subdep entirely, so the
-            // linker never creates the sibling symlink inside
-            // the parent's node_modules and the package fails
-            // to resolve at runtime. The value is the dep_path
-            // tail (e.g. `git+<hash>`) so the linker can
-            // reconstruct the full dep_path by concatenating
-            // `{name}@{value}` — matching the key format used
-            // when inserting the resolved package below.
-            if let Some(ref parent_dp) = task.parent
-                && let Some(parent_pkg) = self.resolved.get_mut(parent_dp)
-            {
-                // `local.dep_path(name)` always returns
-                // `{name}@{tail}`; if that invariant ever
-                // breaks we'd silently store a malformed dep
-                // value that the pnpm writer would emit as-is.
-                let name_prefix = format!("{}@", task.name);
-                debug_assert!(
-                    dep_path.starts_with(&name_prefix),
-                    "local.dep_path returned {dep_path:?} without expected prefix {name_prefix:?}"
-                );
-                let dep_tail = dep_path
-                    .strip_prefix(&name_prefix)
-                    .unwrap_or(&dep_path)
-                    .to_string();
-                parent_pkg
-                    .dependencies
-                    .insert(task.name.clone(), dep_tail.clone());
-                if task.dep_type == DepType::Optional {
-                    parent_pkg
-                        .optional_dependencies
-                        .insert(task.name.clone(), dep_tail);
-                }
-            }
-
-            if self.visited.insert(std::sync::Arc::from(dep_path.as_str())) {
-                self.resolved.insert(
-                    dep_path.clone(),
-                    LockedPackage {
-                        name: linked_name.clone(),
-                        version: real_version.clone(),
-                        dep_path: dep_path.clone(),
-                        local_source: Some(local.clone()),
-                        ..Default::default()
-                    },
-                );
-                if let Some(ref tx) = self.resolver.resolved_tx {
-                    let pending = self.queue.len()
-                        + self.fetcher.in_flight_count()
-                        + self.deferred_transitives.len();
-                    let _ = tx
-                        .send(ResolvedPackage {
-                            dep_path: dep_path.clone(),
-                            name: linked_name.clone(),
-                            version: real_version.clone(),
-                            integrity: None,
-                            tarball_url: None,
-                            // local_source deps aren't aliased —
-                            // `file:`/`link:` specifiers go
-                            // through the local-source branch,
-                            // not the `npm:` rewrite.
-                            alias_of: None,
-                            local_source: Some(local.clone()),
-                            // Local `file:`/`link:` packages never
-                            // carry npm-style platform constraints
-                            // — they're whatever the user points
-                            // at, so the fetch coordinator treats
-                            // them as unconstrained (always fetch).
-                            os: aube_lockfile::PlatformList::new(),
-                            cpu: aube_lockfile::PlatformList::new(),
-                            libc: aube_lockfile::PlatformList::new(),
-                            deprecated: None,
-                            unpacked_size: None,
-                            pending,
-                        })
-                        .await;
-                }
-                // Enqueue transitive deps of the local package
-                // (directories, tarballs, portals, and exec
-                // outputs — `link:` deps are fully the
-                // target's responsibility).
-                if !matches!(local, LocalSource::Link(_)) {
-                    let mut child_ancestors = task.ancestors.clone();
-                    child_ancestors.push((linked_name.clone(), real_version.clone()));
-                    for (child_name, child_range) in target_deps {
-                        self.queue.push_back(ResolveTask::transitive(
-                            child_name,
-                            child_range,
-                            DepType::Production,
-                            dep_path.clone(),
-                            task.importer.clone(),
-                            child_ancestors.clone(),
-                        ));
-                    }
-                }
-            }
-            if task.is_root {
-                self.note_root_done();
-            }
+        if self.try_workspace_link(&task) {
             return Ok(());
         }
 
-        // Handle workspace linkage. Two cases resolve to the
-        // workspace package rather than the registry:
-        //   1. Explicit `workspace:` protocol (pnpm/yarn-berry
-        //      style). The range after the prefix is accepted
-        //      unconditionally — the user asserted this should
-        //      link.
-        //   2. Bare semver range whose name matches a workspace
-        //      package whose version satisfies the range. This
-        //      is the yarn-v1 / npm / bun default: siblings pin
-        //      each other with normal version strings and
-        //      expect the workspace to win over the registry.
-        //      A workspace is typically either unpublished or
-        //      is itself the source of truth for its name, so
-        //      preferring the local copy matches every other
-        //      mainstream pm.
-        if let Some(ws_version) = self.workspace_packages.get(&task.name)
-            && (match task.range.strip_prefix("workspace:") {
-                // workspace:*, workspace:^, workspace:~
-                // bind to whatever local workspace version is.
-                // These are pnpm's "don't pin me, just track
-                // local" sigils. Match them before range check.
-                Some("" | "*" | "^" | "~") => true,
-                // workspace:<range> like workspace:^2.0.0 or
-                // workspace:1.x. Must still satisfy local
-                // version. Before this fix, any workspace:
-                // prefix short-circuited. Consumer could pin
-                // workspace:^2 against local 1.0.0 and aube
-                // would silently link the wrong version.
-                // pnpm errors here with no-matching-version.
-                Some(rest) => version_satisfies(ws_version, rest),
-                // Bare semver (no workspace: prefix) path.
-                // Linker walks up to workspace yarn-v1 style.
-                // Special case `*` and `""` (bare catch-all)
-                // to always match the workspace copy, even
-                // when the ws version is a prerelease like
-                // `0.0.0-0` which semver strict rules would
-                // otherwise exclude. Placeholder versions
-                // are common in fresh changesets-managed
-                // workspaces and would silently fall through
-                // to registry resolution otherwise, picking
-                // up a stale published build instead of the
-                // local source.
-                None if task.range.is_empty() || task.range == "*" => true,
-                None => version_satisfies(ws_version, &task.range),
-            })
-        {
-            let dep_path = dep_path_for(&task.name, ws_version);
-            if task.is_root
-                && let Some(deps) = self.importers.get_mut(&task.importer)
-            {
-                deps.push(DirectDep {
-                    name: task.name.clone(),
-                    dep_path: dep_path.clone(),
-                    dep_type: task.dep_type,
-                    specifier: task.original_specifier.clone(),
-                });
-            }
-            if let Some(ref parent_dp) = task.parent
-                && let Some(parent_pkg) = self.resolved.get_mut(parent_dp)
-            {
-                parent_pkg
-                    .dependencies
-                    .insert(task.name.clone(), ws_version.clone());
-                if task.dep_type == DepType::Optional {
-                    parent_pkg
-                        .optional_dependencies
-                        .insert(task.name.clone(), ws_version.clone());
-                }
-            }
-            if task.is_root {
-                self.note_root_done();
-            }
+        if self.try_sibling_dedupe(&task) {
             return Ok(());
         }
 
-        // Sibling dedupe. If another task for this same name
-        // has already settled on a version that satisfies
-        // this task's range, wire up to that resolution and
-        // short-circuit. In the old wave code this check
-        // lived in the post-fetch loop as `existing_match`;
-        // in the pipelined loop we run it up front so
-        // dedupable tasks never block on a fetch or a
-        // lockfile scan.
-        if let Some(matched_ver) = self.resolved_versions.get(&task.name).and_then(|versions| {
-            versions
-                .iter()
-                .find(|v| {
-                    version_satisfies(v, &task.range)
-                        && !is_vulnerable(task.registry_name(), v, &self.resolver.vulnerable_ranges)
-                })
-                .cloned()
-        }) {
-            let dep_path = dep_path_for(&task.name, &matched_ver);
-            if task.is_root
-                && let Some(deps) = self.importers.get_mut(&task.importer)
-            {
-                deps.push(DirectDep {
-                    name: task.name.clone(),
-                    dep_path: dep_path.clone(),
-                    dep_type: task.dep_type,
-                    specifier: task.original_specifier.clone(),
-                });
-            }
-            if let Some(ref parent_dp) = task.parent
-                && let Some(parent_pkg) = self.resolved.get_mut(parent_dp)
-            {
-                parent_pkg
-                    .dependencies
-                    .insert(task.name.clone(), matched_ver.clone());
-                if task.dep_type == DepType::Optional {
-                    parent_pkg
-                        .optional_dependencies
-                        .insert(task.name.clone(), matched_ver);
-                }
-            }
-            if task.is_root {
-                self.note_root_done();
-            }
+        if self.try_lockfile_reuse(&task).await {
             return Ok(());
-        }
-
-        // Lockfile reuse. Runs unconditionally after sibling
-        // dedupe fails — the old code gated this behind a
-        // `cache.contains_key` check, but in the pipelined
-        // loop the cache is populated incrementally and the
-        // gate was a false optimization.
-        {
-            if let Some(locked_pkg) = self.existing.and_then(|g| {
-                g.packages.values().find(|p| {
-                    p.name == task.name
-                        && version_satisfies(&p.version, &task.range)
-                        && !is_vulnerable(
-                            task.registry_name(),
-                            &p.version,
-                            &self.resolver.vulnerable_ranges,
-                        )
-                })
-            }) {
-                // Drop optional deps whose platform constraints
-                // don't match the active host / supported set.
-                // This is the path that handles frozen/lockfile
-                // installs on a different machine than the one
-                // that wrote the lockfile.
-                if task.dep_type == DepType::Optional
-                    && !is_supported(
-                        &locked_pkg.os,
-                        &locked_pkg.cpu,
-                        &locked_pkg.libc,
-                        &self.resolver.supported_architectures,
-                    )
-                {
-                    tracing::debug!(
-                        "skipping optional dep {}@{}: platform mismatch",
-                        task.name,
-                        locked_pkg.version
-                    );
-                    if task.is_root
-                        && let Some(spec) = task.original_specifier.as_ref()
-                    {
-                        self.skipped_optional_dependencies
-                            .entry(task.importer.clone())
-                            .or_default()
-                            .insert(task.name.clone(), spec.clone());
-                    }
-                    if task.is_root {
-                        self.note_root_done();
-                    }
-                    return Ok(());
-                }
-                let version = locked_pkg.version.clone();
-                let dep_path = dep_path_for(&task.name, &version);
-
-                if task.is_root
-                    && let Some(deps) = self.importers.get_mut(&task.importer)
-                {
-                    deps.push(DirectDep {
-                        name: task.name.clone(),
-                        dep_path: dep_path.clone(),
-                        dep_type: task.dep_type,
-                        specifier: task.original_specifier.clone(),
-                    });
-                }
-                if let Some(ref parent_dp) = task.parent
-                    && let Some(parent_pkg) = self.resolved.get_mut(parent_dp)
-                {
-                    parent_pkg
-                        .dependencies
-                        .insert(task.name.clone(), version.clone());
-                    if task.dep_type == DepType::Optional {
-                        parent_pkg
-                            .optional_dependencies
-                            .insert(task.name.clone(), version.clone());
-                    }
-                }
-                if self.visited.insert(std::sync::Arc::from(dep_path.as_str())) {
-                    self.resolved_versions
-                        .entry(task.name.clone())
-                        .or_default()
-                        .push(version.clone());
-
-                    // Carry any round-tripped publish time
-                    // forward so (a) the cutoff computation at
-                    // the end of wave 0 can see reused directs
-                    // alongside freshly-resolved ones and
-                    // (b) the next lockfile write preserves the
-                    // existing `time:` entry even when this
-                    // install reuses the locked version without
-                    // re-fetching a packument.
-                    if self.resolver.should_record_times()
-                        && let Some(g) = self.existing
-                        && let Some(t) = g.times.get(&dep_path)
-                    {
-                        self.resolved_times.insert(dep_path.clone(), t.clone());
-                    }
-
-                    if let Some(ref tx) = self.resolver.resolved_tx {
-                        let pending = self.queue.len()
-                            + self.fetcher.in_flight_count()
-                            + self.deferred_transitives.len();
-                        let _ = tx
-                            .send(ResolvedPackage {
-                                dep_path: dep_path.clone(),
-                                name: task.name.clone(),
-                                version: version.clone(),
-                                integrity: locked_pkg.integrity.clone(),
-                                tarball_url: locked_pkg.tarball_url.clone(),
-                                // Carry the alias identity
-                                // through the reuse path — the
-                                // existing `locked_pkg` already
-                                // records it if the lockfile held
-                                // an aliased entry, so the
-                                // streaming fetch still hits the
-                                // real registry name.
-                                alias_of: locked_pkg.alias_of.clone(),
-                                local_source: locked_pkg.local_source.clone(),
-                                os: locked_pkg.os.clone(),
-                                cpu: locked_pkg.cpu.clone(),
-                                libc: locked_pkg.libc.clone(),
-                                // Lockfile reuse skips the packument
-                                // fetch, so we have no deprecation
-                                // message to forward here. The
-                                // `aube deprecations` command re-queries
-                                // packuments live for the
-                                // after-the-fact view.
-                                deprecated: None,
-                                // Same reasoning: lockfile reuse
-                                // doesn't refetch the packument and
-                                // LockedPackage doesn't carry size
-                                // metadata, so the size-estimate
-                                // segment stays absent for these
-                                // packages. The progress UI displays
-                                // a running download total instead
-                                // when the estimate is unavailable.
-                                unpacked_size: None,
-                                pending,
-                            })
-                            .await;
-                    }
-
-                    // Carry declared peer deps forward from the
-                    // existing lockfile so subsequent peer-context
-                    // computation sees them without a re-fetch.
-                    self.resolved.insert(
-                        dep_path.clone(),
-                        LockedPackage {
-                            name: task.name.clone(),
-                            version: version.clone(),
-                            integrity: locked_pkg.integrity.clone(),
-                            dependencies: BTreeMap::new(),
-                            optional_dependencies: BTreeMap::new(),
-                            peer_dependencies: locked_pkg.peer_dependencies.clone(),
-                            peer_dependencies_meta: locked_pkg.peer_dependencies_meta.clone(),
-                            dep_path: dep_path.clone(),
-                            local_source: locked_pkg.local_source.clone(),
-                            os: locked_pkg.os.clone(),
-                            cpu: locked_pkg.cpu.clone(),
-                            libc: locked_pkg.libc.clone(),
-                            bundled_dependencies: locked_pkg.bundled_dependencies.clone(),
-                            optional: locked_pkg.optional,
-                            transitive_peer_dependencies: locked_pkg
-                                .transitive_peer_dependencies
-                                .clone(),
-                            tarball_url: locked_pkg.tarball_url.clone(),
-                            alias_of: locked_pkg.alias_of.clone(),
-                            yarn_checksum: locked_pkg.yarn_checksum.clone(),
-                            engines: locked_pkg.engines.clone(),
-                            bin: locked_pkg.bin.clone(),
-                            declared_dependencies: locked_pkg.declared_dependencies.clone(),
-                            license: locked_pkg.license.clone(),
-                            funding_url: locked_pkg.funding_url.clone(),
-                            extra_meta: locked_pkg.extra_meta.clone(),
-                        },
-                    );
-
-                    // Enqueue transitive deps from the locked package.
-                    // Strip any peer-context suffix off the version
-                    // before treating it as a semver range — a
-                    // locked `"18.2.0(react@18.2.0)"` tail should
-                    // match against packuments as just `18.2.0`.
-                    // Also strip a leading `name@` if present:
-                    // bun/yarn parsers store transitive deps in
-                    // `name@version` (full dep_path) form, while
-                    // pnpm stores bare versions. Without the
-                    // strip, a yarn/bun-locked `is-odd` would
-                    // emit a transitive task for is-number with
-                    // range `"is-number@6.0.0"`, which doesn't
-                    // parse as semver and fails resolution.
-                    // The lockfile already omitted bundled dep
-                    // edges on write, so iterating
-                    // `locked_pkg.dependencies` naturally skips them.
-                    let mut child_ancestors = task.ancestors.clone();
-                    child_ancestors.push((task.name.clone(), version.clone()));
-                    for (dep_name, dep_version) in &locked_pkg.dependencies {
-                        let prefix = format!("{dep_name}@");
-                        let stripped = dep_version.strip_prefix(&prefix).unwrap_or(dep_version);
-                        let canonical_version =
-                            stripped.split('(').next().unwrap_or(stripped).to_string();
-                        let dep_type = if locked_pkg.optional_dependencies.contains_key(dep_name) {
-                            DepType::Optional
-                        } else {
-                            DepType::Production
-                        };
-                        self.queue.push_back(ResolveTask::transitive(
-                            dep_name.clone(),
-                            canonical_version,
-                            dep_type,
-                            dep_path.clone(),
-                            task.importer.clone(),
-                            child_ancestors.clone(),
-                        ));
-                    }
-                }
-                self.lockfile_reuse_count += 1;
-                if task.is_root {
-                    self.note_root_done();
-                }
-                return Ok(());
-            }
         }
 
         // Packument not in cache. Spawn its fetch if one
@@ -1600,7 +802,7 @@ impl<'a> ResolveDriver<'a> {
         }
         self.visited.insert(std::sync::Arc::from(dep_path.as_str()));
 
-        tracing::trace!("self.resolved {}@{}", task.name, version);
+        tracing::trace!("resolved {}@{}", task.name, version);
 
         // Forward a deprecation message to the install command,
         // subject to `allowedDeprecatedVersions` suppression.
@@ -1967,5 +1169,751 @@ impl<'a> ResolveDriver<'a> {
             self.note_root_done();
         }
         Ok(())
+    }
+
+    /// Resolve a `file:` / `link:` / `git:` / remote-tarball task.
+    ///
+    /// Anchors `link:`/`file:` paths against the importer for root
+    /// deps and against the parent package's source root for
+    /// transitives (and the project root for override-substituted
+    /// paths, since overrides are declared at the root). Git +
+    /// remote-tarball specs anchor on nothing. Transitive
+    /// `link:`/`file:` from a registry-hosted parent errors out —
+    /// there's no on-disk path to resolve against.
+    ///
+    /// Side effects: wires the importer + parent edges, inserts the
+    /// package into `resolved`, streams to the early-fetch consumer,
+    /// and enqueues the local package's transitives (except for
+    /// `link:`, whose transitives are the target's responsibility).
+    async fn handle_local_source_task(&mut self, task: ResolveTask) -> Result<(), Error> {
+        // Root-declared `pnpm.overrides` opts the user into the
+        // rewritten `link:`/`file:` target by name, so they bypass
+        // the exotic-subdep block — otherwise an override aimed at a
+        // transitive of a registry package would always lose to the
+        // default-on guard.
+        if !task.range_from_override
+            && should_block_exotic_subdep(
+                &task,
+                &self.resolved,
+                self.resolver.dependency_policy.block_exotic_subdeps,
+            )
+        {
+            return Err(Error::BlockedExoticSubdep(Box::new(ExoticSubdepDetails {
+                name: task.name.clone(),
+                spec: task.range.clone(),
+                parent: task
+                    .parent
+                    .clone()
+                    .unwrap_or_else(|| "<unknown>".to_string()),
+                ancestors: task.ancestors.clone(),
+                importer: task.importer.clone(),
+            })));
+        }
+        // Pull the parent's on-disk package root, when the parent
+        // is a directory-backed source. `exec:` stores the
+        // generator script path, not the generated package
+        // directory, so it cannot safely anchor relative transitive
+        // local specifiers.
+        let parent_source_root: Option<std::path::PathBuf> = (!task.is_root)
+            .then(|| {
+                task.parent
+                    .as_ref()
+                    .and_then(|dp| self.resolved.get(dp))
+                    .and_then(|pkg| pkg.local_source.as_ref())
+                    .and_then(|src| match src {
+                        LocalSource::Directory(p)
+                        | LocalSource::Link(p)
+                        | LocalSource::Portal(p) => Some(self.resolver.project_root.join(p)),
+                        _ => None,
+                    })
+            })
+            .flatten();
+        // Override-substituted link:/file: paths are
+        // project-root-relative regardless of where the consumer
+        // lives — pin them at the root before any importer/parent
+        // fallback wins.
+        let importer_root = if task.range_from_override {
+            self.resolver.project_root.clone()
+        } else {
+            parent_source_root.clone().unwrap_or_else(|| {
+                if task.importer == "." {
+                    self.resolver.project_root.clone()
+                } else {
+                    self.resolver.project_root.join(&task.importer)
+                }
+            })
+        };
+        let Some(raw_local) = LocalSource::parse(&task.range, &importer_root) else {
+            return Err(Error::Registry(
+                task.name.clone(),
+                format!("unparseable local specifier: {}", task.range),
+            ));
+        };
+        // Git and remote-tarball specifiers don't reference a path,
+        // so they pass through regardless of parent shape.
+        // `link:`/`file:` transitives only resolve when we either
+        // (a) located a parent source root or (b) inherited the
+        // path from a project-root-anchored override.
+        if !task.is_root
+            && parent_source_root.is_none()
+            && !task.range_from_override
+            && matches!(
+                raw_local,
+                LocalSource::Directory(_)
+                    | LocalSource::Tarball(_)
+                    | LocalSource::Link(_)
+                    | LocalSource::Portal(_)
+                    | LocalSource::Exec(_)
+            )
+        {
+            return Err(Error::Registry(
+                task.name.clone(),
+                format!(
+                    "transitive local specifier {} cannot be resolved without the parent package source root",
+                    task.range
+                ),
+            ));
+        }
+        let (local, real_version, target_deps) = if let LocalSource::Git(ref g) = raw_local {
+            let shallow = aube_store::git_host_in_list(&g.url, &self.resolver.git_shallow_hosts);
+            let (resolved_local, version, deps) =
+                resolve_git_source(&task.name, g, shallow, Some(self.resolver.client.as_ref()))
+                    .await
+                    .map_err(|e| {
+                        Error::Registry(
+                            task.name.clone(),
+                            format!("git resolve {}: {e}", task.range),
+                        )
+                    })?;
+            (resolved_local, version, deps)
+        } else if let LocalSource::RemoteTarball(ref t) = raw_local {
+            let (resolved_local, version, deps) =
+                resolve_remote_tarball(&task.name, t, self.resolver.client.as_ref())
+                    .await
+                    .map_err(|e| {
+                        Error::Registry(
+                            task.name.clone(),
+                            format!("remote tarball {}: {e}", task.range),
+                        )
+                    })?;
+            (resolved_local, version, deps)
+        } else {
+            // Rewrite the path to be relative to the project root so
+            // every downstream consumer can resolve it with a single
+            // `project_root.join(rel)`.
+            let local = rebase_local(&raw_local, &importer_root, &self.resolver.project_root);
+            let (version, deps) = if matches!(local, LocalSource::Exec(_)) {
+                if self.resolver.ignore_scripts {
+                    return Err(Error::Registry(
+                        task.name.clone(),
+                        format!(
+                            "{} requires executing its generator, but scripts are disabled",
+                            local.specifier()
+                        ),
+                    ));
+                }
+                resolve_exec_manifest(&task.name, &local, &self.resolver.project_root).await?
+            } else {
+                let (_target_name, version, deps) = read_local_manifest(&raw_local, &importer_root)
+                    .unwrap_or_else(|_| (task.name.clone(), "0.0.0".to_string(), BTreeMap::new()));
+                (version, deps)
+            };
+            (local, version, deps)
+        };
+        let dep_path = local.dep_path(&task.name);
+        let linked_name = task.name.clone();
+
+        if task.is_root
+            && let Some(deps) = self.importers.get_mut(&task.importer)
+        {
+            deps.push(DirectDep {
+                name: task.name.clone(),
+                dep_path: dep_path.clone(),
+                dep_type: task.dep_type,
+                specifier: task.original_specifier.clone(),
+            });
+        }
+
+        // Wire parent → this exotic transitive. Without this, the
+        // parent snapshot's `dependencies` map omits the
+        // git/url/file subdep entirely, so the linker never creates
+        // the sibling symlink inside the parent's node_modules and
+        // the package fails to resolve at runtime. The value is the
+        // dep_path tail (e.g. `git+<hash>`) so the linker can
+        // reconstruct the full dep_path by concatenating
+        // `{name}@{value}`.
+        if let Some(ref parent_dp) = task.parent
+            && let Some(parent_pkg) = self.resolved.get_mut(parent_dp)
+        {
+            // `local.dep_path(name)` always returns `{name}@{tail}`;
+            // if that invariant ever breaks we'd silently store a
+            // malformed dep value that the pnpm writer would emit
+            // as-is.
+            let name_prefix = format!("{}@", task.name);
+            debug_assert!(
+                dep_path.starts_with(&name_prefix),
+                "local.dep_path returned {dep_path:?} without expected prefix {name_prefix:?}"
+            );
+            let dep_tail = dep_path
+                .strip_prefix(&name_prefix)
+                .unwrap_or(&dep_path)
+                .to_string();
+            parent_pkg
+                .dependencies
+                .insert(task.name.clone(), dep_tail.clone());
+            if task.dep_type == DepType::Optional {
+                parent_pkg
+                    .optional_dependencies
+                    .insert(task.name.clone(), dep_tail);
+            }
+        }
+
+        if self.visited.insert(std::sync::Arc::from(dep_path.as_str())) {
+            self.resolved.insert(
+                dep_path.clone(),
+                LockedPackage {
+                    name: linked_name.clone(),
+                    version: real_version.clone(),
+                    dep_path: dep_path.clone(),
+                    local_source: Some(local.clone()),
+                    ..Default::default()
+                },
+            );
+            if let Some(ref tx) = self.resolver.resolved_tx {
+                let pending = self.queue.len()
+                    + self.fetcher.in_flight_count()
+                    + self.deferred_transitives.len();
+                let _ = tx
+                    .send(ResolvedPackage {
+                        dep_path: dep_path.clone(),
+                        name: linked_name.clone(),
+                        version: real_version.clone(),
+                        integrity: None,
+                        tarball_url: None,
+                        // local_source deps aren't aliased —
+                        // `file:`/`link:` specifiers go through the
+                        // local-source branch, not the `npm:`
+                        // rewrite.
+                        alias_of: None,
+                        local_source: Some(local.clone()),
+                        // Local `file:`/`link:` packages never carry
+                        // npm-style platform constraints — they're
+                        // whatever the user points at, so the fetch
+                        // coordinator treats them as unconstrained
+                        // (always fetch).
+                        os: aube_lockfile::PlatformList::new(),
+                        cpu: aube_lockfile::PlatformList::new(),
+                        libc: aube_lockfile::PlatformList::new(),
+                        deprecated: None,
+                        unpacked_size: None,
+                        pending,
+                    })
+                    .await;
+            }
+            // Enqueue transitive deps of the local package
+            // (directories, tarballs, portals, and exec outputs —
+            // `link:` deps are fully the target's responsibility).
+            if !matches!(local, LocalSource::Link(_)) {
+                let mut child_ancestors = task.ancestors.clone();
+                child_ancestors.push((linked_name.clone(), real_version.clone()));
+                for (child_name, child_range) in target_deps {
+                    self.queue.push_back(ResolveTask::transitive(
+                        child_name,
+                        child_range,
+                        DepType::Production,
+                        dep_path.clone(),
+                        task.importer.clone(),
+                        child_ancestors.clone(),
+                    ));
+                }
+            }
+        }
+        if task.is_root {
+            self.note_root_done();
+        }
+        Ok(())
+    }
+
+    /// Apply catalog, override, and `npm:`/`jsr:` alias rewrites
+    /// in-place on `task`.
+    ///
+    /// Runs a small fixed-point loop (capped at 2 iterations) over
+    /// override → npm-alias → jsr-alias, since two interleavings need
+    /// to work together: (1) an override whose value is itself an
+    /// `npm:` alias, and (2) an alias-declared dep whose override
+    /// targets the real package. After one alias rewrite the name is
+    /// canonical, so two iterations is enough.
+    ///
+    /// Returns `Ok(true)` to continue processing, `Ok(false)` when an
+    /// override of `"-"` dropped the dep entirely (caller should skip
+    /// to the next task), or `Err(_)` for malformed `jsr:` specs.
+    fn preprocess_task(&mut self, task: &mut ResolveTask) -> Result<bool, Error> {
+        // Catalog protocol: rewrite `catalog:` / `catalog:<name>` to
+        // the workspace catalog's actual range *before* the override
+        // loop, so overrides can still target a catalog dep by bare
+        // name. The original `catalog:...` text stays in
+        // `original_specifier` for the lockfile importer.
+        if let Some((catalog_name, real_range)) = self
+            .resolver
+            .resolve_catalog_spec(&task.name, &task.range)?
+        {
+            tracing::trace!("catalog: {} {} -> {}", task.name, task.range, real_range);
+            self.catalog_picks
+                .entry(catalog_name)
+                .or_default()
+                .insert(task.name.clone(), real_range.clone());
+            task.range = real_range;
+        }
+
+        for _ in 0..2 {
+            let mut changed = false;
+            if let Some(override_spec) = pick_override_spec(
+                &self.resolver.override_rules,
+                &task.name,
+                &task.range,
+                &task.ancestors,
+            ) {
+                // pnpm's removal marker: an override value of `"-"`
+                // drops the dep edge entirely. Skip before
+                // catalog/alias rewrites so `-` never reaches the
+                // registry resolver.
+                if override_spec == "-" {
+                    tracing::trace!("override: {}@{} -> dropped", task.name, task.range);
+                    if task.is_root {
+                        self.note_root_done();
+                    }
+                    return Ok(false);
+                }
+                // An override may itself point at a catalog entry
+                // (e.g. `"overrides": {"foo": "catalog:"}`). The
+                // catalog pre-pass above already ran against the
+                // original range, so resolve the indirection here
+                // before assigning — otherwise `catalog:` leaks
+                // through to the registry resolver.
+                let (effective_spec, pending_pick) = match self
+                    .resolver
+                    .resolve_catalog_spec(&task.name, &override_spec)?
+                {
+                    Some((catalog_name, real_range)) => {
+                        (real_range.clone(), Some((catalog_name, real_range)))
+                    }
+                    None => (override_spec, None),
+                };
+                if task.range != effective_spec {
+                    if let Some((catalog_name, real_range)) = pending_pick {
+                        self.catalog_picks
+                            .entry(catalog_name)
+                            .or_default()
+                            .insert(task.name.clone(), real_range);
+                    }
+                    tracing::trace!(
+                        "override: {}@{} -> {}",
+                        task.name,
+                        task.range,
+                        effective_spec
+                    );
+                    // Overrides are declared at the project root, so
+                    // a substituted `link:`/`file:` path is
+                    // project-root-relative — mark the task so the
+                    // local-source branch anchors it correctly.
+                    if is_non_registry_specifier(&effective_spec) {
+                        task.range_from_override = true;
+                    }
+                    task.range = effective_spec;
+                    // If the override replaced the spec with a bare
+                    // range (not itself an `npm:`/`jsr:` alias), it's
+                    // targeting `task.name` — implicitly undoing any
+                    // prior alias rewrite. The alias pass below
+                    // picks up a new target on the next iteration if
+                    // the override's value is itself an alias.
+                    if task.real_name.is_some()
+                        && !task.range.starts_with("npm:")
+                        && !task.range.starts_with("jsr:")
+                    {
+                        task.real_name = None;
+                    }
+                    changed = true;
+                }
+            }
+            if let Some(rest) = task.range.strip_prefix("npm:")
+                && let Some(at_idx) = rest.rfind('@')
+            {
+                let real_name = rest[..at_idx].to_string();
+                let real_range = rest[at_idx + 1..].to_string();
+                // Keep `task.name` as the user-facing alias; stash
+                // the registry name on `real_name`. Only packument /
+                // tarball fetch sites (via `task.registry_name()`)
+                // hit the real package.
+                if task.real_name.as_deref() != Some(real_name.as_str()) || real_range != task.range
+                {
+                    tracing::trace!("npm alias: {} -> {}@{}", task.name, real_name, real_range);
+                    task.real_name = Some(real_name);
+                    task.range = real_range;
+                    changed = true;
+                }
+            }
+            // `jsr:<range>` and `jsr:<@scope/name>[@<range>]` both
+            // land here. JSR's npm-compat endpoint serves every
+            // package under `@jsr/<scope>__<name>`; keep `task.name`
+            // as the JSR-facing identity and stash the npm-compat
+            // name in `real_name`. Only registry IO should see
+            // `@jsr/...`.
+            if let Some(rest) = task.range.strip_prefix("jsr:") {
+                let (jsr_name_raw, jsr_range) = if let Some(body) = rest.strip_prefix('@') {
+                    match body.rfind('@') {
+                        Some(rel_at) => {
+                            // Indices are relative to `body`; add 1
+                            // for the `@` we just stripped so we
+                            // can slice against the original `rest`.
+                            let at_idx = rel_at + 1;
+                            (rest[..at_idx].to_string(), rest[at_idx + 1..].to_string())
+                        }
+                        None => (rest.to_string(), "latest".to_string()),
+                    }
+                } else {
+                    // Bare range form — the manifest key carries the
+                    // JSR name (e.g. `"@std/collections": "jsr:^1"`).
+                    (task.name.clone(), rest.to_string())
+                };
+                match aube_registry::jsr::jsr_to_npm_name(&jsr_name_raw) {
+                    Some(npm_name) => {
+                        if task.real_name.as_deref() != Some(npm_name.as_str())
+                            || jsr_range != task.range
+                        {
+                            tracing::trace!("jsr: {} -> {}@{}", task.name, npm_name, jsr_range);
+                            task.real_name = Some(npm_name);
+                            task.range = jsr_range;
+                            changed = true;
+                        }
+                    }
+                    None => {
+                        return Err(Error::Registry(
+                            task.name.clone(),
+                            format!(
+                                "invalid jsr: spec `{}` — expected `jsr:@scope/name[@range]`",
+                                task.range,
+                            ),
+                        ));
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        Ok(true)
+    }
+
+    /// Wire `task` into the resolver graph as a reuse of an
+    /// already-known `version`.
+    ///
+    /// Updates the importer's direct-dep list (when `task.is_root`),
+    /// records the dep edge on the parent package's `dependencies`
+    /// map (plus `optional_dependencies` when applicable), and bumps
+    /// the pending-directs counter. Used by both the workspace-link
+    /// and sibling-dedupe branches, which differ only in where they
+    /// source the `version` from.
+    fn link_to_existing_version(&mut self, task: &ResolveTask, version: &str) {
+        let dep_path = dep_path_for(&task.name, version);
+        if task.is_root
+            && let Some(deps) = self.importers.get_mut(&task.importer)
+        {
+            deps.push(DirectDep {
+                name: task.name.clone(),
+                dep_path: dep_path.clone(),
+                dep_type: task.dep_type,
+                specifier: task.original_specifier.clone(),
+            });
+        }
+        if let Some(ref parent_dp) = task.parent
+            && let Some(parent_pkg) = self.resolved.get_mut(parent_dp)
+        {
+            parent_pkg
+                .dependencies
+                .insert(task.name.clone(), version.to_string());
+            if task.dep_type == DepType::Optional {
+                parent_pkg
+                    .optional_dependencies
+                    .insert(task.name.clone(), version.to_string());
+            }
+        }
+        if task.is_root {
+            self.note_root_done();
+        }
+    }
+
+    /// Try to resolve `task` against the workspace.
+    ///
+    /// Two cases link rather than going to the registry: an explicit
+    /// `workspace:` protocol (range accepted unconditionally for
+    /// `*`/`^`/`~`/`""`, range-checked otherwise) and a bare semver
+    /// range whose name matches a workspace package whose version
+    /// satisfies the range (yarn-v1 / npm / bun default). Returns
+    /// true when the task was wired to the local workspace copy.
+    fn try_workspace_link(&mut self, task: &ResolveTask) -> bool {
+        let Some(ws_version) = self.workspace_packages.get(&task.name) else {
+            return false;
+        };
+        let matches = match task.range.strip_prefix("workspace:") {
+            // workspace:*, workspace:^, workspace:~ bind to whatever
+            // local version is. pnpm's "don't pin me, just track
+            // local" sigils.
+            Some("" | "*" | "^" | "~") => true,
+            // workspace:<range> must still satisfy the local version.
+            Some(rest) => version_satisfies(ws_version, rest),
+            // Bare semver paths. Special-case `*`/`""` so a workspace
+            // with a placeholder version like `0.0.0-0` (common in
+            // changesets-managed repos) still links instead of falling
+            // through to the registry.
+            None if task.range.is_empty() || task.range == "*" => true,
+            None => version_satisfies(ws_version, &task.range),
+        };
+        if !matches {
+            return false;
+        }
+        let ws_version = ws_version.clone();
+        self.link_to_existing_version(task, &ws_version);
+        true
+    }
+
+    /// Try to resolve `task` against an entry in the existing
+    /// lockfile.
+    ///
+    /// Runs after sibling dedupe — these are the two "free" paths
+    /// that avoid registry IO. When the lockfile carries a satisfying
+    /// non-vulnerable entry, this:
+    ///   1. drops optional deps whose platform doesn't fit the host
+    ///      (so frozen installs work on a different machine than
+    ///      where the lockfile was written),
+    ///   2. wires up the importer + parent edges,
+    ///   3. streams the resolved package to the early-fetch
+    ///      consumer (`resolved_tx`),
+    ///   4. re-inserts the locked package into `resolved` (carrying
+    ///      peer deps forward so the post-pass sees them without a
+    ///      packument refetch),
+    ///   5. enqueues the locked package's transitives (stripping any
+    ///      peer-context suffix and any `name@` prefix yarn/bun
+    ///      writers carry).
+    ///
+    /// Returns true when a lockfile entry handled the task (whether
+    /// fully resolved or dropped as a platform-mismatched optional).
+    async fn try_lockfile_reuse(&mut self, task: &ResolveTask) -> bool {
+        let Some(locked_pkg) = self.existing.and_then(|g| {
+            g.packages.values().find(|p| {
+                p.name == task.name
+                    && version_satisfies(&p.version, &task.range)
+                    && !is_vulnerable(
+                        task.registry_name(),
+                        &p.version,
+                        &self.resolver.vulnerable_ranges,
+                    )
+            })
+        }) else {
+            return false;
+        };
+        // Drop optional deps whose platform constraints don't match
+        // the active host / supported set. Handles frozen/lockfile
+        // installs on a different machine than the one that wrote
+        // the lockfile.
+        if task.dep_type == DepType::Optional
+            && !is_supported(
+                &locked_pkg.os,
+                &locked_pkg.cpu,
+                &locked_pkg.libc,
+                &self.resolver.supported_architectures,
+            )
+        {
+            tracing::debug!(
+                "skipping optional dep {}@{}: platform mismatch",
+                task.name,
+                locked_pkg.version
+            );
+            if task.is_root
+                && let Some(spec) = task.original_specifier.as_ref()
+            {
+                self.skipped_optional_dependencies
+                    .entry(task.importer.clone())
+                    .or_default()
+                    .insert(task.name.clone(), spec.clone());
+            }
+            if task.is_root {
+                self.note_root_done();
+            }
+            return true;
+        }
+        let version = locked_pkg.version.clone();
+        let dep_path = dep_path_for(&task.name, &version);
+
+        if task.is_root
+            && let Some(deps) = self.importers.get_mut(&task.importer)
+        {
+            deps.push(DirectDep {
+                name: task.name.clone(),
+                dep_path: dep_path.clone(),
+                dep_type: task.dep_type,
+                specifier: task.original_specifier.clone(),
+            });
+        }
+        if let Some(ref parent_dp) = task.parent
+            && let Some(parent_pkg) = self.resolved.get_mut(parent_dp)
+        {
+            parent_pkg
+                .dependencies
+                .insert(task.name.clone(), version.clone());
+            if task.dep_type == DepType::Optional {
+                parent_pkg
+                    .optional_dependencies
+                    .insert(task.name.clone(), version.clone());
+            }
+        }
+        if self.visited.insert(std::sync::Arc::from(dep_path.as_str())) {
+            self.resolved_versions
+                .entry(task.name.clone())
+                .or_default()
+                .push(version.clone());
+
+            // Carry any round-tripped publish time forward so (a) the
+            // cutoff computation at the end of wave 0 can see reused
+            // directs alongside freshly-resolved ones and (b) the
+            // next lockfile write preserves the existing `time:`
+            // entry even when this install reuses the locked version
+            // without re-fetching a packument.
+            if self.resolver.should_record_times()
+                && let Some(g) = self.existing
+                && let Some(t) = g.times.get(&dep_path)
+            {
+                self.resolved_times.insert(dep_path.clone(), t.clone());
+            }
+
+            if let Some(ref tx) = self.resolver.resolved_tx {
+                let pending = self.queue.len()
+                    + self.fetcher.in_flight_count()
+                    + self.deferred_transitives.len();
+                let _ = tx
+                    .send(ResolvedPackage {
+                        dep_path: dep_path.clone(),
+                        name: task.name.clone(),
+                        version: version.clone(),
+                        integrity: locked_pkg.integrity.clone(),
+                        tarball_url: locked_pkg.tarball_url.clone(),
+                        // Carry the alias identity through the reuse
+                        // path — the existing `locked_pkg` already
+                        // records it if the lockfile held an aliased
+                        // entry, so the streaming fetch still hits
+                        // the real registry name.
+                        alias_of: locked_pkg.alias_of.clone(),
+                        local_source: locked_pkg.local_source.clone(),
+                        os: locked_pkg.os.clone(),
+                        cpu: locked_pkg.cpu.clone(),
+                        libc: locked_pkg.libc.clone(),
+                        // Lockfile reuse skips the packument fetch, so
+                        // we have no deprecation message to forward
+                        // here. `aube deprecations` re-queries
+                        // packuments live for the after-the-fact view.
+                        deprecated: None,
+                        // Same reasoning: lockfile reuse doesn't
+                        // refetch the packument and LockedPackage
+                        // doesn't carry size metadata, so the
+                        // size-estimate segment stays absent.
+                        unpacked_size: None,
+                        pending,
+                    })
+                    .await;
+            }
+
+            // Carry declared peer deps forward from the existing
+            // lockfile so subsequent peer-context computation sees
+            // them without a re-fetch.
+            self.resolved.insert(
+                dep_path.clone(),
+                LockedPackage {
+                    name: task.name.clone(),
+                    version: version.clone(),
+                    integrity: locked_pkg.integrity.clone(),
+                    dependencies: BTreeMap::new(),
+                    optional_dependencies: BTreeMap::new(),
+                    peer_dependencies: locked_pkg.peer_dependencies.clone(),
+                    peer_dependencies_meta: locked_pkg.peer_dependencies_meta.clone(),
+                    dep_path: dep_path.clone(),
+                    local_source: locked_pkg.local_source.clone(),
+                    os: locked_pkg.os.clone(),
+                    cpu: locked_pkg.cpu.clone(),
+                    libc: locked_pkg.libc.clone(),
+                    bundled_dependencies: locked_pkg.bundled_dependencies.clone(),
+                    optional: locked_pkg.optional,
+                    transitive_peer_dependencies: locked_pkg.transitive_peer_dependencies.clone(),
+                    tarball_url: locked_pkg.tarball_url.clone(),
+                    alias_of: locked_pkg.alias_of.clone(),
+                    yarn_checksum: locked_pkg.yarn_checksum.clone(),
+                    engines: locked_pkg.engines.clone(),
+                    bin: locked_pkg.bin.clone(),
+                    declared_dependencies: locked_pkg.declared_dependencies.clone(),
+                    license: locked_pkg.license.clone(),
+                    funding_url: locked_pkg.funding_url.clone(),
+                    extra_meta: locked_pkg.extra_meta.clone(),
+                },
+            );
+
+            // Enqueue transitive deps from the locked package. Strip
+            // any peer-context suffix off the version before treating
+            // it as a semver range — a locked `"18.2.0(react@18.2.0)"`
+            // tail should match against packuments as just `18.2.0`.
+            // Also strip a leading `name@` if present: bun/yarn
+            // parsers store transitive deps in `name@version` (full
+            // dep_path) form, while pnpm stores bare versions. Without
+            // the strip, a yarn/bun-locked `is-odd` would emit a
+            // transitive task for is-number with range
+            // `"is-number@6.0.0"`, which doesn't parse as semver. The
+            // lockfile already omitted bundled dep edges on write, so
+            // iterating `locked_pkg.dependencies` naturally skips them.
+            let mut child_ancestors = task.ancestors.clone();
+            child_ancestors.push((task.name.clone(), version.clone()));
+            for (dep_name, dep_version) in &locked_pkg.dependencies {
+                let prefix = format!("{dep_name}@");
+                let stripped = dep_version.strip_prefix(&prefix).unwrap_or(dep_version);
+                let canonical_version = stripped.split('(').next().unwrap_or(stripped).to_string();
+                let dep_type = if locked_pkg.optional_dependencies.contains_key(dep_name) {
+                    DepType::Optional
+                } else {
+                    DepType::Production
+                };
+                self.queue.push_back(ResolveTask::transitive(
+                    dep_name.clone(),
+                    canonical_version,
+                    dep_type,
+                    dep_path.clone(),
+                    task.importer.clone(),
+                    child_ancestors.clone(),
+                ));
+            }
+        }
+        self.lockfile_reuse_count += 1;
+        if task.is_root {
+            self.note_root_done();
+        }
+        true
+    }
+
+    /// Try to resolve `task` against a version another task already
+    /// settled on this run.
+    ///
+    /// In the wave-based code this was a post-fetch check; in the
+    /// pipelined loop it runs up-front so dedupable tasks never block
+    /// on a fetch or a lockfile scan. Returns true when a satisfying,
+    /// non-vulnerable sibling version was found and wired in.
+    fn try_sibling_dedupe(&mut self, task: &ResolveTask) -> bool {
+        let Some(matched_ver) = self.resolved_versions.get(&task.name).and_then(|versions| {
+            versions
+                .iter()
+                .find(|v| {
+                    version_satisfies(v, &task.range)
+                        && !is_vulnerable(task.registry_name(), v, &self.resolver.vulnerable_ranges)
+                })
+                .cloned()
+        }) else {
+            return false;
+        };
+        self.link_to_existing_version(task, &matched_ver);
+        true
     }
 }
