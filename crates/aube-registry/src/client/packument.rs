@@ -622,7 +622,9 @@ impl RegistryClient {
                         "packument_body_parse",
                     )
                     .with_meta_fn(|| format!(r#"{{"name":{}}}"#, aube_util::diag::jstr(name)));
-                    match parse_full_response::<Packument>(resp.error_for_status()?).await {
+                    let resp = resp.error_for_status()?;
+                    check_body_cap(&resp, self.fetch_policy.packument_max_bytes, &label)?;
+                    match parse_full_response::<Packument>(resp).await {
                         Ok(packument) => {
                             drop(_diag_parse);
                             self.maybe_record_slow_metadata(&label, started);

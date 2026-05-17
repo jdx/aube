@@ -129,6 +129,55 @@ async fn non_retriable_4xx_does_not_retry() {
 }
 
 #[tokio::test]
+async fn fetch_packument_rejects_declared_body_over_cap() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let Ok((mut sock, _)) = listener.accept().await else {
+            return;
+        };
+        let mut buf = [0u8; 1024];
+        let _ = sock.read(&mut buf).await;
+        let _ = sock
+            .write_all(
+                b"HTTP/1.1 200 OK\r\n\
+                  Content-Length: 1048576\r\n\
+                  Content-Type: application/json\r\n\r\n\
+                  {\"name\":\"demo\",\"versions\":{},\"dist-tags\":{}}",
+            )
+            .await;
+    });
+
+    let policy = FetchPolicy {
+        timeout_ms: 5_000,
+        packument_max_bytes: 10,
+        ..FetchPolicy::default()
+    };
+    let config = NpmConfig {
+        registry: format!("http://{addr}/"),
+        ..Default::default()
+    };
+    let client = RegistryClient::from_config_with_policy(config, policy);
+    let err = client
+        .fetch_packument("demo")
+        .await
+        .expect_err("declared oversized packument should be rejected");
+
+    match err {
+        Error::Io(inner) => assert!(
+            inner
+                .to_string()
+                .contains("Content-Length 1048576 exceeds cap 10"),
+            "unexpected error: {inner}"
+        ),
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[tokio::test]
 async fn retry_after_header_on_429_overrides_computed_backoff() {
     // Server asks for a 0-second wait explicitly; our default
     // backoff would be >= mintimeout (1ms here, but production
