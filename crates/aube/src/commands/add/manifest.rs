@@ -303,7 +303,14 @@ pub(super) async fn update_manifest_for_add(
             continue;
         }
 
-        let packument = packuments.get(&spec.name).unwrap();
+        // Every spec reaching here had a packument queued above —
+        // workspace / git / local / linked-workspace specs all
+        // `continue` before the fetch loop, and a failed fetch
+        // short-circuits the function. A panic here means a future
+        // edit added an early-continue without a matching skip.
+        let packument = packuments
+            .get(&spec.name)
+            .expect("packument missing for non-skipped registry spec");
 
         eprintln!("Resolving {}@{}...", spec.name, spec.range);
 

@@ -105,7 +105,7 @@ pub(super) fn parse_pkg_spec(spec: &str) -> miette::Result<ParsedPkgSpec> {
     // Handle full alias form: alias@jsr:@scope/name[@range]
     if let Some(jsr_idx) = spec.find("@jsr:") {
         let before = &spec[..jsr_idx];
-        let after_jsr = &spec[jsr_idx + 5..]; // after "jsr:"
+        let after_jsr = &spec[jsr_idx + 5..]; // skip the 5-byte "@jsr:"
         let alias = if before.is_empty() {
             None
         } else {
@@ -121,7 +121,7 @@ pub(super) fn parse_pkg_spec(spec: &str) -> miette::Result<ParsedPkgSpec> {
     if let Some(npm_idx) = spec.find("@npm:") {
         // Everything before @npm: could be empty (bare npm:pkg@range) or an alias name
         let before = &spec[..npm_idx];
-        let after_npm = &spec[npm_idx + 5..]; // after "npm:"
+        let after_npm = &spec[npm_idx + 5..]; // skip the 5-byte "@npm:"
 
         let alias = if before.is_empty() {
             None
