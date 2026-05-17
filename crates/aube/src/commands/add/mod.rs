@@ -1,16 +1,21 @@
+mod build_flags;
+mod filtered;
 mod global;
 mod manifest;
+mod no_save;
 mod spec;
+mod supply_chain;
 
 use super::install;
+use build_flags::{
+    apply_allow_build_flags, apply_deny_build_flags, parse_allow_build_value,
+    parse_deny_build_value, reject_conflicting_build_flags,
+};
 use clap::Args;
 use manifest::{
-    AddManifestOptions, collect_workspace_versions, update_manifest_for_add,
-    workspace_protocol_override_from_flags,
+    AddManifestOptions, update_manifest_for_add, workspace_protocol_override_from_flags,
 };
 use miette::{Context, IntoDiagnostic, miette};
-use spec::parse_pkg_spec;
-use std::path::Path;
 
 #[derive(Debug, Clone, Args)]
 pub struct AddArgs {
@@ -190,7 +195,7 @@ pub async fn run(
     args.lockfile.install_overrides();
     args.virtual_store.install_overrides();
     if !filter.is_empty() && !args.global && !args.workspace {
-        return run_filtered(args, &filter).await;
+        return filtered::run(args, &filter).await;
     }
 
     let AddArgs {
@@ -328,24 +333,12 @@ pub async fn run(
     // When no lockfile exists yet the resolver falls back to aube's
     // own format, so we target that path and the restore step deletes
     // it (since `lockfile_bytes` is `None`).
-    let lockfile_path = lockfile_path_for_project(&cwd);
+    let lockfile_path = no_save::lockfile_path_for_project(&cwd);
     let no_save_snapshot = if no_save {
-        let manifest_bytes = std::fs::read(&manifest_path)
-            .into_diagnostic()
-            .wrap_err("failed to snapshot package.json for --no-save")?;
-        let lockfile_bytes = match std::fs::read(&lockfile_path) {
-            Ok(bytes) => Some(bytes),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => {
-                return Err(e)
-                    .into_diagnostic()
-                    .wrap_err("failed to snapshot lockfile for --no-save");
-            }
-        };
-        Some(NoSaveSnapshot {
-            manifest_bytes,
-            lockfile_bytes,
-        })
+        Some(no_save::snapshot_manifest_and_lockfile(
+            &manifest_path,
+            &lockfile_path,
+        )?)
     } else {
         None
     };
@@ -368,28 +361,7 @@ pub async fn run(
     // full resolved graph (matching Bun's contract), with
     // concrete versions + transitives the OSV/downloads probes
     // wouldn't see at this stage.
-    let registry_names = registry_bound_names_for_supply_chain(&cwd, packages);
-    let (advisory_check, low_download_threshold, allowed_unpopular) =
-        super::with_settings_ctx(&cwd, |ctx| {
-            let policy = if aube_settings::resolved::paranoid(ctx) {
-                aube_settings::resolved::AdvisoryCheck::Required
-            } else {
-                aube_settings::resolved::advisory_check(ctx)
-            };
-            (
-                policy,
-                aube_settings::resolved::low_download_threshold(ctx),
-                aube_settings::resolved::allowed_unpopular_packages(ctx).unwrap_or_default(),
-            )
-        });
-    super::add_supply_chain::run_gates(
-        &registry_names,
-        advisory_check,
-        low_download_threshold,
-        allow_low_downloads,
-        &allowed_unpopular,
-    )
-    .await?;
+    supply_chain::run_cli_name_gates(&cwd, packages, allow_low_downloads).await?;
 
     update_manifest_for_add(
         &cwd,
@@ -445,32 +417,8 @@ pub async fn run(
     // before returning, so the caller sees the *first* relevant
     // failure rather than silently dropping later ones.
     let restore_errors = if let Some(snapshot) = no_save_snapshot {
-        let mut errors: Vec<miette::Report> = Vec::new();
-        if let Err(e) = aube_util::fs_atomic::atomic_write(&manifest_path, &snapshot.manifest_bytes)
-        {
-            errors.push(
-                Result::<(), _>::Err(e)
-                    .into_diagnostic()
-                    .wrap_err("failed to restore original package.json after --no-save")
-                    .unwrap_err(),
-            );
-        }
-        let lockfile_restore = match &snapshot.lockfile_bytes {
-            Some(bytes) => aube_util::fs_atomic::atomic_write(&lockfile_path, bytes),
-            None => match std::fs::remove_file(&lockfile_path) {
-                Ok(()) => Ok(()),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                Err(e) => Err(e),
-            },
-        };
-        if let Err(e) = lockfile_restore {
-            errors.push(
-                Result::<(), _>::Err(e)
-                    .into_diagnostic()
-                    .wrap_err("failed to restore original lockfile after --no-save")
-                    .unwrap_err(),
-            );
-        }
+        let errors =
+            no_save::restore_manifest_and_lockfile(snapshot, &manifest_path, &lockfile_path);
         if errors.is_empty() {
             eprintln!("Restored package.json and lockfile (--no-save)");
         }
@@ -485,329 +433,6 @@ pub async fn run(
     // failure (subsequent ones are usually variants of the same
     // filesystem problem).
     pipeline_result?;
-    if let Some(first) = restore_errors.into_iter().next() {
-        return Err(first);
-    }
-    Ok(())
-}
-
-/// Bytes captured from disk before `aube add --no-save` mutated the
-/// manifest and lockfile, used to put both back exactly as the user had
-/// them once the install pipeline (which insists on reading from disk)
-/// has finished linking `node_modules`.
-struct NoSaveSnapshot {
-    manifest_bytes: Vec<u8>,
-    /// `None` means the lockfile didn't exist before the add — in that
-    /// case the restore step deletes whatever the resolver wrote.
-    lockfile_bytes: Option<Vec<u8>>,
-}
-
-/// Reject empty values for the allow-build flag with pnpm's
-/// verbatim error message.
-///
-/// Catches the explicit empty form `--allow-build=`. The bare form
-/// `--allow-build` is rejected upstream by clap (because the arg
-/// has no `default_missing_value` and `require_equals = true`), so
-/// it never reaches this validator.
-///
-/// Wording must stay byte-identical to pnpm's: scripts that grep
-/// pnpm's stderr for this exact line continue to work after a swap
-/// to aube.
-fn parse_allow_build_value(s: &str) -> Result<String, String> {
-    if s.is_empty() {
-        Err("The --allow-build flag is missing a package name. \
-             Please specify the package name(s) that are allowed to run installation scripts."
-            .to_string())
-    } else {
-        Ok(s.to_string())
-    }
-}
-
-fn parse_deny_build_value(s: &str) -> Result<String, String> {
-    if s.is_empty() {
-        Err("The --deny-build flag is missing a package name. \
-             Please specify the package name(s) that are denied from running installation scripts."
-            .to_string())
-    } else {
-        Ok(s.to_string())
-    }
-}
-
-fn reject_conflicting_build_flags(
-    allow_build: &[String],
-    deny_build: &[String],
-) -> miette::Result<()> {
-    if allow_build.is_empty() || deny_build.is_empty() {
-        return Ok(());
-    }
-
-    let mut overlap: Vec<&str> = allow_build
-        .iter()
-        .filter(|name| deny_build.contains(name))
-        .map(String::as_str)
-        .collect();
-    overlap.sort_unstable();
-    overlap.dedup();
-    if overlap.is_empty() {
-        return Ok(());
-    }
-
-    Err(miette!(
-        code = aube_codes::errors::ERR_AUBE_CONFLICTING_BUILD_FLAGS,
-        "--allow-build and --deny-build both name the same package(s): {}. \
-         Each package may only appear in one flag.",
-        overlap.join(", ")
-    ))
-}
-
-/// Apply `--allow-build=<pkg>` flags by writing each package as `true`
-/// to the project's `allowBuilds` map (workspace yaml or
-/// `package.json#aube.allowBuilds`), overwriting any prior value. An
-/// explicit `false` is treated as something the user is now flipping
-/// on purpose, not a conflict.
-fn apply_allow_build_flags(cwd: &std::path::Path, names: &[String]) -> miette::Result<()> {
-    aube_manifest::workspace::add_to_allow_builds(cwd, names)
-        .into_diagnostic()
-        .wrap_err("failed to write --allow-build entries")?;
-    Ok(())
-}
-
-/// Apply `--deny-build=<pkg>` flags by writing each package as `false`
-/// to the project's `allowBuilds` map, overwriting any prior value.
-fn apply_deny_build_flags(cwd: &std::path::Path, names: &[String]) -> miette::Result<()> {
-    aube_manifest::workspace::set_allow_builds(cwd, names, false)
-        .into_diagnostic()
-        .wrap_err("failed to write --deny-build entries")?;
-    Ok(())
-}
-
-fn registry_bound_names_for_supply_chain(cwd: &Path, packages: &[String]) -> Vec<String> {
-    let mut names = Vec::with_capacity(packages.len());
-    let workspace_versions = collect_workspace_versions(cwd);
-    // Scope→registry overrides + the default registry tell us which
-    // names route through public npmjs. Anything else (a swapped-out
-    // default registry, an `@myorg:registry=https://internal/`
-    // override) has no signal in the OSV `MAL-*` database or the
-    // npmjs weekly-downloads API — skip those names so private
-    // packages don't trip the gates on a public-registry collision.
-    let npm_config = aube_registry::config::NpmConfig::load(cwd);
-    for raw in packages {
-        let Ok(spec) = parse_pkg_spec(raw) else {
-            // Parse failures get a richer diagnostic from
-            // `update_manifest_for_add` later — we don't want to
-            // double-report or block the gate on something that
-            // would already fail.
-            continue;
-        };
-        if spec.git_spec.is_some()
-            || spec.local_spec.is_some()
-            || spec.jsr_name.is_some()
-            || aube_util::pkg::is_workspace_spec(&spec.range)
-            || aube_util::pkg::is_catalog_spec(&spec.range)
-        {
-            continue;
-        }
-        // A bare `aube add my-pkg` against a local workspace sibling
-        // resolves locally — no public registry round-trip happens,
-        // so the OSV / downloads probes have nothing to say.
-        if workspace_versions.contains_key(&spec.name) {
-            continue;
-        }
-        if !npm_config.is_public_npmjs(&spec.name) {
-            // `redact_url` strips any embedded userinfo (`https://tok@host/`
-            // — uncommon but a registry URL can legally carry it) so a
-            // token doesn't slip into observability pipelines that ingest
-            // debug-level structured logs.
-            tracing::debug!(
-                "skipping supply-chain gates for {}: routes through non-public registry {}",
-                spec.name,
-                aube_util::url::redact_url(npm_config.registry_for(&spec.name))
-            );
-            continue;
-        }
-        // Scoped names (`@scope/name`) stay in the list. OSV's batch
-        // API supports scoped queries — skipping them here would let
-        // a `MAL-*` advisory against `@scope/evil` slip past the
-        // hard block. The downloads probe already folds scoped
-        // packages into `DownloadCount::Unknown` (npm's downloads
-        // API doesn't index them), so the prompt naturally skips
-        // them — no per-name special case needed in the gate.
-        names.push(spec.name);
-    }
-    names.sort();
-    names.dedup();
-    names
-}
-
-/// Resolve the on-disk lockfile path that a normal `add` would write
-/// to in `project_dir`. Mirrors the `LockfileKind` -> filename mapping
-/// inside `aube_lockfile::write_lockfile_as` so the snapshot/restore
-/// path under `--no-save` lines up byte-for-byte with whatever
-/// `write_lockfile_preserving_existing` produces, including non-aube
-/// lockfiles (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`,
-/// `bun.lock`, `npm-shrinkwrap.json`). When no lockfile exists yet the
-/// resolver falls back to aube's own format.
-fn lockfile_path_for_project(project_dir: &std::path::Path) -> std::path::PathBuf {
-    use aube_lockfile::LockfileKind;
-    let kind =
-        aube_lockfile::detect_existing_lockfile_kind(project_dir).unwrap_or(LockfileKind::Aube);
-    let filename = match kind {
-        LockfileKind::Aube => aube_lockfile::aube_lock_filename(project_dir),
-        LockfileKind::Pnpm => aube_lockfile::pnpm_lock_filename(project_dir),
-        other => other.filename().to_string(),
-    };
-    project_dir.join(filename)
-}
-
-async fn run_filtered(
-    args: AddArgs,
-    filter: &aube_workspace::selector::EffectiveFilter,
-) -> miette::Result<()> {
-    if args.packages.is_empty() {
-        return Err(miette!("no packages specified"));
-    }
-    reject_conflicting_build_flags(&args.allow_build, &args.deny_build)?;
-    let cwd = crate::dirs::cwd()?;
-    // The workspace root — not the child `cwd` — is what owns the
-    // lockfile and the project lock in yarn / npm / bun monorepos.
-    // Taking the lock or snapshotting the lockfile against `cwd` would
-    // target a stale subpackage path, letting `install::run` (which
-    // walks up) mutate the real root lockfile and then silently skip
-    // the restore under `--no-save`.
-    let (root, matched) = super::select_workspace_packages(&cwd, filter, "add")?;
-    let _lock = super::take_project_lock(&root)?;
-
-    // CLI build review flags write against the workspace root (where
-    // `allowBuilds` lives) — same as the non-filtered path. Run before
-    // any per-package manifest mutation so a failure can't leave the
-    // child manifests half-mutated.
-    if !args.allow_build.is_empty() {
-        apply_allow_build_flags(&root, &args.allow_build)?;
-    }
-    if !args.deny_build.is_empty() {
-        apply_deny_build_flags(&root, &args.deny_build)?;
-    }
-
-    // OSV / downloads gates fire once against the workspace root
-    // — every filter-matched importer shares the same
-    // `args.packages` list. The Bun-style `securityScanner` is
-    // NOT called here: it runs post-resolve from `install::run`
-    // against the full resolved graph.
-    let registry_names = registry_bound_names_for_supply_chain(&root, &args.packages);
-    let (advisory_check, low_download_threshold, allowed_unpopular) =
-        super::with_settings_ctx(&root, |ctx| {
-            let policy = if aube_settings::resolved::paranoid(ctx) {
-                aube_settings::resolved::AdvisoryCheck::Required
-            } else {
-                aube_settings::resolved::advisory_check(ctx)
-            };
-            (
-                policy,
-                aube_settings::resolved::low_download_threshold(ctx),
-                aube_settings::resolved::allowed_unpopular_packages(ctx).unwrap_or_default(),
-            )
-        });
-    super::add_supply_chain::run_gates(
-        &registry_names,
-        advisory_check,
-        low_download_threshold,
-        args.allow_low_downloads,
-        &allowed_unpopular,
-    )
-    .await?;
-
-    let mut snapshots = Vec::new();
-    let lockfile_path = lockfile_path_for_project(&root);
-    let root_lockfile_snapshot = if args.no_save {
-        match std::fs::read(&lockfile_path) {
-            Ok(bytes) => Some(bytes),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => {
-                return Err(e)
-                    .into_diagnostic()
-                    .wrap_err("failed to snapshot lockfile for --no-save");
-            }
-        }
-    } else {
-        None
-    };
-
-    let result: miette::Result<()> = async {
-        for pkg in &matched {
-            let manifest_path = pkg.dir.join("package.json");
-            if args.no_save {
-                let manifest_bytes = std::fs::read(&manifest_path)
-                    .into_diagnostic()
-                    .wrap_err("failed to snapshot package.json for --no-save")?;
-                snapshots.push((manifest_path.clone(), manifest_bytes));
-            }
-            update_manifest_for_add(
-                &pkg.dir,
-                &args.packages,
-                AddManifestOptions::from_args(&args),
-                !args.no_save,
-            )
-            .await?;
-        }
-
-        let mut install_opts = install::InstallOptions::with_mode(super::chained_frozen_mode(
-            install::FrozenMode::Fix,
-        ));
-        install_opts.workspace_filter = filter.clone();
-        // See the sibling `aube add` codepath above for why this
-        // flag is set — live OSV API on the resolved transitives.
-        install_opts.osv_transitive_check = true;
-        install::run(install_opts).await?;
-        Ok(())
-    }
-    .await;
-
-    let restore_errors = if args.no_save {
-        let mut errors: Vec<miette::Report> = Vec::new();
-        let restored = snapshots.len();
-        for (manifest_path, manifest_bytes) in snapshots {
-            if let Err(e) = aube_util::fs_atomic::atomic_write(&manifest_path, &manifest_bytes) {
-                errors.push(
-                    Result::<(), _>::Err(e)
-                        .into_diagnostic()
-                        .wrap_err_with(|| {
-                            format!(
-                                "failed to restore original package.json after --no-save at {}",
-                                manifest_path.display()
-                            )
-                        })
-                        .unwrap_err(),
-                );
-            }
-        }
-        let lockfile_restore = match &root_lockfile_snapshot {
-            Some(bytes) => aube_util::fs_atomic::atomic_write(&lockfile_path, bytes),
-            None => match std::fs::remove_file(&lockfile_path) {
-                Ok(()) => Ok(()),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                Err(e) => Err(e),
-            },
-        };
-        if let Err(e) = lockfile_restore {
-            errors.push(
-                Result::<(), _>::Err(e)
-                    .into_diagnostic()
-                    .wrap_err("failed to restore original lockfile after --no-save")
-                    .unwrap_err(),
-            );
-        }
-        if errors.is_empty() {
-            eprintln!(
-                "Restored {} and lockfile (--no-save)",
-                pluralizer::pluralize("package.json file", restored as isize, true)
-            );
-        }
-        errors
-    } else {
-        Vec::new()
-    };
-
-    result?;
     if let Some(first) = restore_errors.into_iter().next() {
         return Err(first);
     }
