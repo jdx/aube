@@ -2,7 +2,18 @@ use std::ffi::OsString;
 
 /// Strip pnpm-style generic `--config.<key>[=<value>]` flags out of the
 /// argv before clap sees them. Returns the parsed `(key, value)` pairs
-/// in the order they appeared so the last one wins on duplicates.
+/// in the order they appeared so the last one wins on duplicates. The
+/// supported forms are:
+///
+///   --config.<key>            -> ("<key>", "true")
+///   --config.<key>=<value>    -> ("<key>", "<value>")
+///
+/// `--config.<key> <value>` (space-separated) is NOT consumed: a stray
+/// positional after a bool-form switch could shadow a real argument
+/// (e.g. `aube add --config.foo lodash`), and the `=` form is what
+/// pnpm's docs use anyway. Anything after a bare `--` separator is
+/// left untouched so user-supplied positional args containing the
+/// literal `--config.` prefix still pass through.
 pub(crate) fn extract_config_overrides(args: &mut Vec<OsString>) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let mut i = 1;
@@ -90,6 +101,7 @@ fn normalize_npm_interpreter_shim_argv(args: &mut Vec<OsString>) {
 /// `aube --registry=URL install`, etc. keep parsing after those flags
 /// moved into per-command Args groups.
 pub(crate) fn lift_per_subcommand_flags(mut args: Vec<OsString>) -> Vec<OsString> {
+    // (long_name_without_dashes, takes_value)
     const LIFTED_LONGS: &[(&str, bool)] = &[
         ("frozen-lockfile", false),
         ("no-frozen-lockfile", false),
@@ -105,6 +117,9 @@ pub(crate) fn lift_per_subcommand_flags(mut args: Vec<OsString>) -> Vec<OsString
         ("enable-global-virtual-store", false),
         ("enable-gvs", false),
     ];
+    // Long-form Cli flags that still live on `Cli` *and* take a value.
+    // We must skip past `flag value` pairs so the value isn't mistaken
+    // for the subcommand. Bool flags need no entry here.
     const KEPT_LONGS_WITH_VALUE: &[&str] = &[
         "dir",
         "cd",
@@ -116,6 +131,12 @@ pub(crate) fn lift_per_subcommand_flags(mut args: Vec<OsString>) -> Vec<OsString
     ];
     const KEPT_SHORTS_WITH_VALUE: &[&str] = &["-C", "-F"];
 
+    // True when the token at `args[idx]` looks like another flag rather
+    // than a free-form value. Used to avoid eating the next flag as the
+    // current flag's value when the user wrote `--dir --frozen-lockfile
+    // install` (omitting the `--dir` value); without this guard we'd
+    // silently consume `--frozen-lockfile` as a directory name and
+    // `--frozen-lockfile` would never get lifted past the subcommand.
     let token_looks_like_flag = |args: &[OsString], idx: usize| -> bool {
         args.get(idx)
             .and_then(|t| t.to_str())
@@ -195,6 +216,9 @@ pub(crate) fn lift_per_subcommand_flags(mut args: Vec<OsString>) -> Vec<OsString
             args.insert(insert_at + j, tok);
         }
     } else {
+        // No subcommand found — restore the lifted tokens at their
+        // original front position so clap's error message still
+        // mentions them in argv order.
         for tok in lifted.into_iter().rev() {
             args.insert(1, tok);
         }
