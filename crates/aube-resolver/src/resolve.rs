@@ -1,3 +1,7 @@
+mod fetch;
+mod seed;
+mod vulnerable;
+
 use crate::local_source::{
     dep_path_for, is_non_registry_specifier, read_local_manifest, rebase_local,
     resolve_exec_manifest, resolve_git_source, resolve_remote_tarball, should_block_exotic_subdep,
@@ -13,8 +17,11 @@ use crate::{FxHashMap, FxHashSet};
 use aube_lockfile::{DepType, DirectDep, LocalSource, LockedPackage, LockfileGraph};
 use aube_manifest::PackageJson;
 use aube_registry::Packument;
+use fetch::{FetchInputs, fetch_one_packument};
+use seed::seed_direct_deps;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::sync::Arc;
+use vulnerable::{is_vulnerable, prefer_non_vulnerable_pick};
 
 impl Resolver {
     /// Resolve all dependencies from a package.json.
@@ -246,157 +253,25 @@ impl Resolver {
             ($name:expr) => {{
                 let name: &str = $name;
                 if !in_flight_names.contains(name) && !self.cache.contains_key(name) {
-                    let name_owned = name.to_string();
-                    in_flight_names.insert(name_owned.clone());
-                    let client = self.client.clone();
-                    let cache_dir = self.packument_cache_dir.clone();
-                    let full_cache_dir = self.packument_full_cache_dir.clone();
-                    let minimum_release_age_excludes_name = self
+                    in_flight_names.insert(name.to_string());
+                    let mra_excludes_name = self
                         .minimum_release_age
                         .as_ref()
                         .is_some_and(|mra| mra.exclude.contains(name));
-                    let primer_covers_cutoff = minimum_release_age_excludes_name
+                    let primer_covers_cutoff = mra_excludes_name
                         || published_by
                             .as_deref()
                             .is_none_or(crate::primer::covers_cutoff);
-                    let use_metadata_primer = (self.force_metadata_primer
-                        || client.uses_default_npm_registry_for(&name_owned))
-                        && primer_covers_cutoff;
-                    let force_metadata_primer = self.force_metadata_primer;
-                    let sem = shared_semaphore.clone();
-                    in_flight.spawn(async move {
-                        let _diag_span = aube_util::diag::Span::new(
-                            aube_util::diag::Category::Resolver,
-                            "packument_fetch",
-                        )
-                        .with_meta_fn(|| {
-                            format!(r#"{{"name":{}}}"#, aube_util::diag::jstr(&name_owned))
-                        });
-                        let _diag_inflight = aube_util::diag::inflight(aube_util::diag::Slot::Pack);
-                        let permit_wait = std::time::Instant::now();
-                        let permit = sem.acquire().await;
-                        let permit_wait_ms = permit_wait.elapsed();
-                        if permit_wait_ms.as_millis() > 1 {
-                            aube_util::diag::event_lazy(
-                                aube_util::diag::Category::Resolver,
-                                "packument_permit_wait",
-                                permit_wait_ms,
-                                || format!(r#"{{"name":{}}}"#, aube_util::diag::jstr(&name_owned)),
-                            );
-                        }
-                        aube_util::diag::attribute_wait(
-                            aube_util::diag::Slot::Pack,
-                            &name_owned,
-                            permit_wait_ms,
-                        );
-                        let _holder_guard = aube_util::diag::register_holder(
-                            aube_util::diag::Slot::Pack,
-                            &name_owned,
-                        );
-                        let mut cached = if needs_time {
-                            match full_cache_dir.as_ref() {
-                                Some(dir) => client.cached_full_packument_lookup(&name_owned, dir),
-                                None => Default::default(),
-                            }
-                        } else if let Some(ref dir) = cache_dir {
-                            client.cached_packument_lookup(&name_owned, dir)
-                        } else {
-                            Default::default()
-                        };
-                        if let Some(packument) = cached.packument.take() {
-                            aube_util::diag::instant_lazy(
-                                aube_util::diag::Category::Resolver,
-                                "packument_disk_hit",
-                                || format!(r#"{{"name":{}}}"#, aube_util::diag::jstr(&name_owned)),
-                            );
-                            permit.record_cancelled();
-                            return Ok::<_, Error>((name_owned, packument, false));
-                        }
-                        if use_metadata_primer
-                            && !cached.stale
-                            && let Some(seed) = crate::primer::get(&name_owned)
-                        {
-                            let mut packument = seed.packument();
-                            if force_metadata_primer {
-                                for version in packument.versions.values_mut() {
-                                    let tarball =
-                                        client.tarball_url(&version.name, &version.version);
-                                    version.dist = version.dist.take().map(|mut dist| {
-                                        dist.tarball = tarball;
-                                        dist
-                                    });
-                                }
-                            }
-                            if needs_time {
-                                if let Some(dir) = full_cache_dir.as_ref() {
-                                    client.seed_full_packument_cache(
-                                        &name_owned,
-                                        dir,
-                                        &packument,
-                                        seed.etag.as_deref(),
-                                        seed.last_modified.as_deref(),
-                                        false,
-                                    );
-                                }
-                            } else if let Some(dir) = cache_dir.as_ref() {
-                                client.seed_packument_cache(
-                                    &name_owned,
-                                    dir,
-                                    &packument,
-                                    seed.etag.as_deref(),
-                                    seed.last_modified.as_deref(),
-                                    false,
-                                );
-                            }
-                            aube_util::diag::instant_lazy(
-                                aube_util::diag::Category::Resolver,
-                                "packument_primer_hit",
-                                || format!(r#"{{"name":{}}}"#, aube_util::diag::jstr(&name_owned)),
-                            );
-                            permit.record_cancelled();
-                            return Ok::<_, Error>((name_owned, packument, true));
-                        }
-                        let fetch_outcome = if needs_time {
-                            match full_cache_dir.as_ref() {
-                                Some(dir) => {
-                                    client
-                                        .fetch_packument_with_time_cached_after_lookup(
-                                            &name_owned,
-                                            dir,
-                                            cached,
-                                        )
-                                        .await
-                                }
-                                None => client.fetch_packument(&name_owned).await,
-                            }
-                        } else if let Some(ref dir) = cache_dir {
-                            client
-                                .fetch_packument_cached_after_lookup(&name_owned, dir, cached)
-                                .await
-                        } else {
-                            client.fetch_packument(&name_owned).await
-                        };
-                        let packument = match fetch_outcome {
-                            Ok(p) => {
-                                permit.record_success();
-                                p
-                            }
-                            Err(e) => {
-                                if e.is_throttle() {
-                                    permit.record_throttle();
-                                } else {
-                                    permit.record_cancelled();
-                                }
-                                return Err(Error::Registry(name_owned.clone(), e.to_string()));
-                            }
-                        };
-                        aube_util::diag::instant_lazy(
-                            aube_util::diag::Category::Resolver,
-                            "packument_network_hit",
-                            || format!(r#"{{"name":{}}}"#, aube_util::diag::jstr(&name_owned)),
-                        );
-                        Ok::<_, Error>((name_owned, packument, false))
-                    });
+                    in_flight.spawn(fetch_one_packument(FetchInputs {
+                        name: name.to_string(),
+                        client: self.client.clone(),
+                        cache_dir: self.packument_cache_dir.clone(),
+                        full_cache_dir: self.packument_full_cache_dir.clone(),
+                        primer_covers_cutoff,
+                        force_metadata_primer: self.force_metadata_primer,
+                        sem: shared_semaphore.clone(),
+                        needs_time,
+                    }));
                 }
             }};
         }
@@ -435,35 +310,13 @@ impl Resolver {
         // `dependencies` / `optionalDependencies` / `peerDependencies`
         // maps (real-world case: a package whose dependency entry
         // is an npm alias).
-        macro_rules! prefetchable {
-            ($name:expr, $range:expr) => {{
-                let r: &str = $range;
-                let n: &str = $name;
-                // A bare semver range that matches a workspace package
-                // will resolve to the workspace without ever reading
-                // the packument, so prefetching would just be a
-                // speculative 404 on e.g. an unpublished monorepo
-                // package.
-                let workspace_hit = workspace_packages
-                    .get(n)
-                    .is_some_and(|ws_v| version_satisfies(ws_v, r));
-                !aube_util::pkg::is_workspace_spec(r)
-                    && !aube_util::pkg::is_catalog_spec(r)
-                    && !aube_util::pkg::is_npm_spec(r)
-                    && !aube_util::pkg::is_jsr_spec(r)
-                    && !is_non_registry_specifier(r)
-                    && !self.overrides.contains_key(n)
-                    && !workspace_hit
-            }};
-        }
-
         // Fire prefetches for every seeded root dep up front, so
         // their packuments are already in flight by the time the
         // first task is popped. Skip lockfile-covered names —
         // they'll hit the lockfile-reuse path and never need their
-        // packuments — and anything `prefetchable!` rejects.
+        // packuments — and anything `is_prefetchable` rejects.
         for task in queue.iter() {
-            if !prefetchable!(task.name.as_str(), task.range.as_str()) {
+            if !self.is_prefetchable(task.name.as_str(), task.range.as_str(), workspace_packages) {
                 continue;
             }
             if existing_names.contains(task.name.as_str()) {
@@ -1985,7 +1838,11 @@ impl Resolver {
                         ));
                     }
                     if !existing_names.contains(dep_name.as_str())
-                        && prefetchable!(dep_name.as_str(), dep_range.as_str())
+                        && self.is_prefetchable(
+                            dep_name.as_str(),
+                            dep_range.as_str(),
+                            workspace_packages,
+                        )
                     {
                         ensure_fetch!(dep_name);
                     }
@@ -2018,7 +1875,11 @@ impl Resolver {
                         continue;
                     }
                     if !existing_names.contains(dep_name.as_str())
-                        && prefetchable!(dep_name.as_str(), dep_range.as_str())
+                        && self.is_prefetchable(
+                            dep_name.as_str(),
+                            dep_range.as_str(),
+                            workspace_packages,
+                        )
                     {
                         ensure_fetch!(dep_name);
                     }
@@ -2104,7 +1965,11 @@ impl Resolver {
                             continue;
                         }
                         if !existing_names.contains(dep_name.as_str())
-                            && prefetchable!(dep_name.as_str(), dep_range.as_str())
+                            && self.is_prefetchable(
+                                dep_name.as_str(),
+                                dep_range.as_str(),
+                                workspace_packages,
+                            )
                         {
                             ensure_fetch!(dep_name);
                         }
@@ -2158,8 +2023,64 @@ impl Resolver {
             )
         });
 
+        let contextualized = self.finalize_resolved_graph(
+            importers,
+            resolved,
+            &resolved_versions,
+            resolved_times,
+            skipped_optional_dependencies,
+            catalog_picks,
+        )?;
+        if let Some((state, sem)) = packument_persist_handle {
+            sem.persist(&state, "packument:default");
+        }
+        Ok(contextualized)
+    }
+
+    /// Is `(name, range)` safe to speculatively prefetch against the
+    /// registry?
+    ///
+    /// Returns false for any spec that won't go through the registry
+    /// resolver at all — workspace/catalog/npm-alias/jsr ranges, local
+    /// (`file:`/`link:`/`git:`) specifiers, and bare ranges that match
+    /// a workspace package. Also false for any name listed in
+    /// `pnpm.overrides`, since the override may rewrite the spec into
+    /// one of the above and we can't cheaply tell ahead of time.
+    fn is_prefetchable(
+        &self,
+        name: &str,
+        range: &str,
+        workspace_packages: &HashMap<String, String>,
+    ) -> bool {
+        let workspace_hit = workspace_packages
+            .get(name)
+            .is_some_and(|ws_v| version_satisfies(ws_v, range));
+        !aube_util::pkg::is_workspace_spec(range)
+            && !aube_util::pkg::is_catalog_spec(range)
+            && !aube_util::pkg::is_npm_spec(range)
+            && !aube_util::pkg::is_jsr_spec(range)
+            && !is_non_registry_specifier(range)
+            && !self.overrides.contains_key(name)
+            && !workspace_hit
+    }
+
+    /// Build the final `LockfileGraph` from accumulated resolver state.
+    ///
+    /// Runs the catalog-pick materialization, hoists auto-installed
+    /// peers when `auto_install_peers` is on, and applies peer-context
+    /// suffixes. Returns the post-peer-context graph ready for lockfile
+    /// emission.
+    fn finalize_resolved_graph(
+        &self,
+        importers: BTreeMap<String, Vec<DirectDep>>,
+        resolved: BTreeMap<String, LockedPackage>,
+        resolved_versions: &FxHashMap<String, Vec<String>>,
+        resolved_times: BTreeMap<String, String>,
+        skipped_optional_dependencies: BTreeMap<String, BTreeMap<String, String>>,
+        catalog_picks: BTreeMap<String, BTreeMap<String, String>>,
+    ) -> Result<LockfileGraph, Error> {
         let resolved_catalogs =
-            catalog::materialize_catalog_picks(catalog_picks, &resolved_versions);
+            catalog::materialize_catalog_picks(catalog_picks, resolved_versions);
 
         let canonical = LockfileGraph {
             importers,
@@ -2221,135 +2142,6 @@ impl Resolver {
             "peer-context pass produced {} contextualized packages",
             contextualized.packages.len()
         );
-        if let Some((state, sem)) = packument_persist_handle {
-            sem.persist(&state, "packument:default");
-        }
         Ok(contextualized)
-    }
-}
-
-fn is_vulnerable(
-    package_name: &str,
-    version: &str,
-    vulnerable_ranges: &BTreeMap<String, Vec<String>>,
-) -> bool {
-    let Some(ranges) = vulnerable_ranges.get(package_name) else {
-        return false;
-    };
-    let Ok(version) = node_semver::Version::parse(version) else {
-        return false;
-    };
-    ranges
-        .iter()
-        .filter_map(|range| node_semver::Range::parse(range).ok())
-        .any(|range| version.satisfies(&range))
-}
-
-fn prefer_non_vulnerable_pick<'a>(
-    package_name: &str,
-    packument: &'a Packument,
-    range_str: &str,
-    fallback: &'a aube_registry::VersionMetadata,
-    pick_lowest: bool,
-    cutoff: Option<&str>,
-    vulnerable_ranges: &BTreeMap<String, Vec<String>>,
-) -> &'a aube_registry::VersionMetadata {
-    if !is_vulnerable(package_name, &fallback.version, vulnerable_ranges) {
-        return fallback;
-    }
-    let Ok(range) = node_semver::Range::parse(crate::semver_util::normalize_range(range_str))
-    else {
-        return fallback;
-    };
-    let passes_cutoff = |ver: &str| -> bool {
-        let Some(c) = cutoff else { return true };
-        match packument.time.get(ver) {
-            Some(t) => t.as_str() <= c,
-            None => true,
-        }
-    };
-    let mut best: Option<(node_semver::Version, &'a aube_registry::VersionMetadata)> = None;
-    for (ver_str, meta) in &packument.versions {
-        let Ok(version) = node_semver::Version::parse(ver_str) else {
-            continue;
-        };
-        if !version.satisfies(&range)
-            || !passes_cutoff(ver_str)
-            || is_vulnerable(package_name, ver_str, vulnerable_ranges)
-        {
-            continue;
-        }
-        let replace = best.as_ref().is_none_or(|(cur, _)| {
-            if pick_lowest {
-                version < *cur
-            } else {
-                version > *cur
-            }
-        });
-        if replace {
-            best = Some((version, meta));
-        }
-    }
-    best.map(|(_, meta)| meta).unwrap_or(fallback)
-}
-
-/// Seed the BFS queue with direct deps from every importer manifest.
-///
-/// When a package is declared in more than one section
-/// (`dependencies` + `devDependencies`, etc.) we keep only the
-/// highest-priority entry — `dependencies` > `devDependencies` >
-/// `optionalDependencies` — matching pnpm, which silently drops
-/// the lower-priority duplicates on resolve. Without this the
-/// same name gets pushed into the importer's `DirectDep` list
-/// twice (once per section), and the linker's parallel step 2
-/// races to create the same `node_modules/<name>` symlink from
-/// two tasks, producing an `EEXIST` on the loser.
-fn seed_direct_deps(
-    manifests: &[(String, PackageJson)],
-    ignored_optional_dependencies: &BTreeSet<String>,
-    queue: &mut VecDeque<ResolveTask>,
-    importers: &mut BTreeMap<String, Vec<DirectDep>>,
-) {
-    for (importer_path, manifest) in manifests {
-        importers.insert(importer_path.clone(), Vec::new());
-
-        for (name, range) in &manifest.dependencies {
-            queue.push_back(ResolveTask::root(
-                name.clone(),
-                range.clone(),
-                DepType::Production,
-                importer_path.clone(),
-            ));
-        }
-        for (name, range) in &manifest.dev_dependencies {
-            if manifest.dependencies.contains_key(name) {
-                continue;
-            }
-            queue.push_back(ResolveTask::root(
-                name.clone(),
-                range.clone(),
-                DepType::Dev,
-                importer_path.clone(),
-            ));
-        }
-        for (name, range) in &manifest.optional_dependencies {
-            if ignored_optional_dependencies.contains(name) {
-                tracing::debug!(
-                    "ignoring optional dependency {name} (pnpm.ignoredOptionalDependencies)"
-                );
-                continue;
-            }
-            if manifest.dependencies.contains_key(name)
-                || manifest.dev_dependencies.contains_key(name)
-            {
-                continue;
-            }
-            queue.push_back(ResolveTask::root(
-                name.clone(),
-                range.clone(),
-                DepType::Optional,
-                importer_path.clone(),
-            ));
-        }
     }
 }
