@@ -876,8 +876,8 @@ impl RegistryClient {
                         backoff_ms = wait.as_millis() as u64,
                         error = %err,
                         label,
-                        code = aube_codes::warnings::WARN_AUBE_HTTP_RETRY_BODY_DECODE,
-                        "retrying HTTP request after response body decode error",
+                        code = aube_codes::warnings::WARN_AUBE_HTTP_RETRY_TRANSPORT,
+                        "retrying HTTP request after transport error",
                     );
                     drop(sf_guard.take());
                     tokio::time::sleep(wait).await;
