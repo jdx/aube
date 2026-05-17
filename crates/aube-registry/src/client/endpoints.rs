@@ -56,11 +56,11 @@ impl RegistryClient {
         name: &str,
         version: &str,
     ) -> Result<crate::VersionMetadata, Error> {
-        let (registry_url, _) = self.packument_url(name);
-        let url = format!("{registry_url}/{version}");
+        let (packument_url, registry_url) = self.packument_url(name);
+        let url = format!("{packument_url}/{version}");
         let resp = self
             .send_metadata_with_retry(&format!("version {name}@{version}"), || {
-                self.authed_get(&url, &self.config.registry)
+                self.authed_get(&url, registry_url)
                     .header("Accept", "application/json")
             })
             .await?;
