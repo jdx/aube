@@ -124,7 +124,6 @@ url_api = "https://api.github.com/repos/bnjbvr/cargo-machete/releases/assets/397
 checksum = "sha256:48200087f54c55aabcd4db4af1e25742b49846c02a1b1bfa134711945b35b2e9"
 url = "https://github.com/bnjbvr/cargo-machete/releases/download/v0.9.2/cargo-machete-v0.9.2-x86_64-unknown-linux-musl.tar.gz"
 url_api = "https://api.github.com/repos/bnjbvr/cargo-machete/releases/assets/397131172"
-github_attestations = "unavailable"
 
 [tools."github:bnjbvr/cargo-machete"."platforms.linux-x64-musl"]
 checksum = "sha256:48200087f54c55aabcd4db4af1e25742b49846c02a1b1bfa134711945b35b2e9"
@@ -154,7 +153,6 @@ backend = "github:foresterre/cargo-msrv"
 checksum = "sha256:6f9a0011ca8ad959d304185b9090390fd1ad87e2d764007fbb0abe043afa9ff5"
 url = "https://github.com/foresterre/cargo-msrv/releases/download/v0.19.3/cargo-msrv-x86_64-unknown-linux-gnu-v0.19.3.tgz"
 url_api = "https://api.github.com/repos/foresterre/cargo-msrv/releases/assets/380850047"
-github_attestations = "unavailable"
 
 [tools."github:foresterre/cargo-msrv"."platforms.linux-x64-musl"]
 checksum = "sha256:441ddbf85c589062029ac33fcfcfc33ddd4e87f04984d91b16ea4ae02e4d779d"

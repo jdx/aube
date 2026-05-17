@@ -2,7 +2,7 @@ use std::path::Path;
 
 use miette::{Context, IntoDiagnostic};
 
-use super::settings_context::FileSources;
+use super::FileSources;
 
 pub(crate) fn configure_script_settings(ctx: &aube_settings::ResolveCtx<'_>) {
     let node_options = aube_settings::resolved::node_options(ctx).and_then(non_empty_string);

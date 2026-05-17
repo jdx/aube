@@ -609,3 +609,13 @@ mod resolve_virtual_store_dir_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod package_manager_mismatch_tests {
+    use super::skip_auto_install_on_package_manager_mismatch;
+
+    #[test]
+    fn skip_auto_install_defaults_off() {
+        assert!(!skip_auto_install_on_package_manager_mismatch());
+    }
+}
