@@ -184,33 +184,6 @@ testing:
     rule: new parser code in aube-lockfile or aube-manifest ships with at least one property test alongside unit tests
   snapshot: insta for golden lockfile output tests if byte-identity vs native pnpm keeps breaking, cheaper than hand-maintained fixtures
 
-code_quality:
-  critical[6]:
-    - smallest possible change, no refactoring unless asked
-    - less code = smarter code, same functionality fewer lines wins
-    - validate only at system boundaries (CLI args, HTTP input, env vars)
-    - never trust snapshots across .await or HTTP boundary, re-query state
-    - DELETE dead code, never comment it out
-    - no backwards-compat shims, feature flags, or dead-code fallbacks for one-time ops
-  style[10]:
-    - KISS, flat over nested, early returns, guard clauses on top, max 3 nesting levels
-    - inline single-use vars, hoist statics out of loops
-    - DRY: if a pattern repeats 2+ times, extract it
-    - deduplicate ruthlessly, prefer importing over reimplementing
-    - every code path returns a value, no empty catch/match arms
-    - no magic numbers, no unused imports, no dead functions, no unused types
-    - no single-use wrapper functions called once, inline it
-    - no speculative abstractions, no anticipate imaginary requirements
-    - never .clone() where &/Arc/move suffices, clippy::redundant_clone catches most
-    - derive Clone/Debug/PartialEq/Eq/Hash only when actually needed, not reflexively
-  comments:
-    allowed: non-obvious invariants, cross-crate contracts, format/registry quirks, WHY not WHAT
-    forbidden[3]:
-      - narrate-the-obvious ("increments counter")
-      - TODO without a tracking link or issue
-      - commented-out code (delete it)
-    doc_comments: pub API worth documenting, keep terse and example-rich when needed
-
 rust:
   critical[5]:
     - edition 2024, latest stable toolchain, msrv 1.93 (rust 1.90 default-LLD-on-Linux + workspace cargo publish available)
