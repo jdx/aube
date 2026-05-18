@@ -1,4 +1,6 @@
-use crate::{DepType, DirectDep, LocalSource, LockfileGraph, dep_type_label, override_match};
+use crate::{
+    DepType, DirectDep, LocalSource, LockfileGraph, LockfileKind, dep_type_label, override_match,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 impl LockfileGraph {
@@ -46,22 +48,30 @@ impl LockfileGraph {
         workspace_ignored_optional: &[String],
         workspace_catalogs: &BTreeMap<String, BTreeMap<String, String>>,
     ) -> DriftStatus {
-        let effective = resolve_catalog_refs_in_overrides(
-            &merge_manifest_and_workspace_overrides(manifest, workspace_overrides),
+        self.check_drift_with_options(
+            manifest,
+            workspace_overrides,
+            workspace_ignored_optional,
             workspace_catalogs,
-        );
-        let locked = resolve_catalog_refs_in_overrides(&self.overrides, workspace_catalogs);
-        if let Some(reason) = overrides_drift_reason(&locked, &effective) {
-            return DriftStatus::Stale { reason };
-        }
-        let mut effective_ignored = manifest.pnpm_ignored_optional_dependencies();
-        effective_ignored.extend(workspace_ignored_optional.iter().cloned());
-        if let Some(reason) =
-            ignored_optional_drift_reason(&self.ignored_optional_dependencies, &effective_ignored)
-        {
-            return DriftStatus::Stale { reason };
-        }
-        self.check_drift_for_importer(".", manifest, &effective)
+            true,
+        )
+    }
+
+    pub fn check_drift_for_kind(
+        &self,
+        manifest: &aube_manifest::PackageJson,
+        workspace_overrides: &BTreeMap<String, String>,
+        workspace_ignored_optional: &[String],
+        workspace_catalogs: &BTreeMap<String, BTreeMap<String, String>>,
+        kind: LockfileKind,
+    ) -> DriftStatus {
+        self.check_drift_with_options(
+            manifest,
+            workspace_overrides,
+            workspace_ignored_optional,
+            workspace_catalogs,
+            kind_records_resolution_metadata(kind),
+        )
     }
 
     /// Workspace-aware drift check.
@@ -82,6 +92,69 @@ impl LockfileGraph {
         workspace_catalogs: &BTreeMap<String, BTreeMap<String, String>>,
         is_workspace_install: bool,
     ) -> DriftStatus {
+        self.check_drift_workspace_with_options(
+            manifests,
+            workspace_overrides,
+            workspace_ignored_optional,
+            workspace_catalogs,
+            is_workspace_install,
+            true,
+        )
+    }
+
+    pub fn check_drift_workspace_for_kind(
+        &self,
+        manifests: &[(String, aube_manifest::PackageJson)],
+        workspace_overrides: &BTreeMap<String, String>,
+        workspace_ignored_optional: &[String],
+        workspace_catalogs: &BTreeMap<String, BTreeMap<String, String>>,
+        is_workspace_install: bool,
+        kind: LockfileKind,
+    ) -> DriftStatus {
+        self.check_drift_workspace_with_options(
+            manifests,
+            workspace_overrides,
+            workspace_ignored_optional,
+            workspace_catalogs,
+            is_workspace_install,
+            kind_records_resolution_metadata(kind),
+        )
+    }
+
+    fn check_drift_with_options(
+        &self,
+        manifest: &aube_manifest::PackageJson,
+        workspace_overrides: &BTreeMap<String, String>,
+        workspace_ignored_optional: &[String],
+        workspace_catalogs: &BTreeMap<String, BTreeMap<String, String>>,
+        check_resolution_metadata: bool,
+    ) -> DriftStatus {
+        let effective = resolve_catalog_refs_in_overrides(
+            &merge_manifest_and_workspace_overrides(manifest, workspace_overrides),
+            workspace_catalogs,
+        );
+        if check_resolution_metadata
+            && let Some(reason) = self.resolution_metadata_drift_reason(
+                manifest,
+                workspace_overrides,
+                workspace_ignored_optional,
+                workspace_catalogs,
+            )
+        {
+            return DriftStatus::Stale { reason };
+        }
+        self.check_drift_for_importer(".", manifest, &effective)
+    }
+
+    fn check_drift_workspace_with_options(
+        &self,
+        manifests: &[(String, aube_manifest::PackageJson)],
+        workspace_overrides: &BTreeMap<String, String>,
+        workspace_ignored_optional: &[String],
+        workspace_catalogs: &BTreeMap<String, BTreeMap<String, String>>,
+        is_workspace_install: bool,
+        check_resolution_metadata: bool,
+    ) -> DriftStatus {
         // Override drift is checked once at the workspace level, against
         // the root manifest. Workspace-package manifests may declare
         // their own `overrides` blocks but pnpm only honors the root's,
@@ -92,16 +165,14 @@ impl LockfileGraph {
                     &merge_manifest_and_workspace_overrides(root_manifest, workspace_overrides),
                     workspace_catalogs,
                 );
-                let locked = resolve_catalog_refs_in_overrides(&self.overrides, workspace_catalogs);
-                if let Some(reason) = overrides_drift_reason(&locked, &effective) {
-                    return DriftStatus::Stale { reason };
-                }
-                let mut effective_ignored = root_manifest.pnpm_ignored_optional_dependencies();
-                effective_ignored.extend(workspace_ignored_optional.iter().cloned());
-                if let Some(reason) = ignored_optional_drift_reason(
-                    &self.ignored_optional_dependencies,
-                    &effective_ignored,
-                ) {
+                if check_resolution_metadata
+                    && let Some(reason) = self.resolution_metadata_drift_reason(
+                        root_manifest,
+                        workspace_overrides,
+                        workspace_ignored_optional,
+                        workspace_catalogs,
+                    )
+                {
                     return DriftStatus::Stale { reason };
                 }
                 effective
@@ -156,6 +227,25 @@ impl LockfileGraph {
             }
         }
         DriftStatus::Fresh
+    }
+
+    fn resolution_metadata_drift_reason(
+        &self,
+        manifest: &aube_manifest::PackageJson,
+        workspace_overrides: &BTreeMap<String, String>,
+        workspace_ignored_optional: &[String],
+        workspace_catalogs: &BTreeMap<String, BTreeMap<String, String>>,
+    ) -> Option<String> {
+        let effective = resolve_catalog_refs_in_overrides(
+            &merge_manifest_and_workspace_overrides(manifest, workspace_overrides),
+            workspace_catalogs,
+        );
+        let locked = resolve_catalog_refs_in_overrides(&self.overrides, workspace_catalogs);
+        overrides_drift_reason(&locked, &effective).or_else(|| {
+            let mut effective_ignored = manifest.pnpm_ignored_optional_dependencies();
+            effective_ignored.extend(workspace_ignored_optional.iter().cloned());
+            ignored_optional_drift_reason(&self.ignored_optional_dependencies, &effective_ignored)
+        })
     }
 
     /// Compare this lockfile's catalog snapshot against the current
@@ -580,6 +670,13 @@ pub enum DriftStatus {
     Stale { reason: String },
 }
 
+fn kind_records_resolution_metadata(kind: LockfileKind) -> bool {
+    matches!(
+        kind,
+        LockfileKind::Aube | LockfileKind::Pnpm | LockfileKind::Bun
+    )
+}
+
 #[cfg(test)]
 mod drift_tests {
     use super::*;
@@ -872,6 +969,80 @@ mod drift_tests {
             .insert("overrides".into(), serde_json::json!({"lodash": "4.17.21"}));
         let graph = make_graph(&[("lodash", "^4.17.0", "lodash@4.17.21")]);
         match graph.check_drift(&manifest, &BTreeMap::new(), &[], &BTreeMap::new()) {
+            DriftStatus::Stale { reason } => assert!(reason.contains("overrides")),
+            DriftStatus::Fresh => panic!("expected Stale"),
+        }
+    }
+
+    #[test]
+    fn fresh_when_npm_lockfile_cannot_record_overrides() {
+        // package-lock.json has no top-level override snapshot. Treating
+        // that absence as drift makes aube re-resolve and rewrite npm's
+        // lockfile graph even when the override is unrelated to the
+        // existing packages.
+        let mut manifest = make_manifest(&[("lodash", "^4.17.0")]);
+        manifest
+            .extra
+            .insert("overrides".into(), serde_json::json!({"left-pad": "1.3.0"}));
+        let graph = LockfileGraph {
+            importers: {
+                let mut m = BTreeMap::new();
+                m.insert(
+                    ".".to_string(),
+                    vec![DirectDep {
+                        name: "lodash".into(),
+                        dep_path: "lodash@4.17.21".into(),
+                        dep_type: DepType::Production,
+                        specifier: None,
+                    }],
+                );
+                m
+            },
+            packages: BTreeMap::new(),
+            ..Default::default()
+        };
+        assert_eq!(
+            graph.check_drift_for_kind(
+                &manifest,
+                &BTreeMap::new(),
+                &[],
+                &BTreeMap::new(),
+                LockfileKind::Npm,
+            ),
+            DriftStatus::Fresh
+        );
+    }
+
+    #[test]
+    fn stale_when_bun_lockfile_can_record_overrides() {
+        let mut manifest = make_manifest(&[("lodash", "^4.17.0")]);
+        manifest
+            .extra
+            .insert("overrides".into(), serde_json::json!({"left-pad": "1.3.0"}));
+        let graph = LockfileGraph {
+            importers: {
+                let mut m = BTreeMap::new();
+                m.insert(
+                    ".".to_string(),
+                    vec![DirectDep {
+                        name: "lodash".into(),
+                        dep_path: "lodash@4.17.21".into(),
+                        dep_type: DepType::Production,
+                        specifier: None,
+                    }],
+                );
+                m
+            },
+            packages: BTreeMap::new(),
+            ..Default::default()
+        };
+        match graph.check_drift_for_kind(
+            &manifest,
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+            LockfileKind::Bun,
+        ) {
             DriftStatus::Stale { reason } => assert!(reason.contains("overrides")),
             DriftStatus::Fresh => panic!("expected Stale"),
         }

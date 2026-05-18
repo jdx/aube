@@ -135,14 +135,15 @@ pub(super) async fn run_lockfile_only(input: LockfileOnlyInput<'_>) -> miette::R
     let fresh = !force_resolve
         && matches!(
             parsed,
-            Ok((g, _))
+            Ok((g, k))
                 if matches!(
-                    g.check_drift_workspace(
+                    g.check_drift_workspace_for_kind(
                         manifests,
                         &ws_config.overrides,
                         &ws_config.ignored_optional_dependencies,
                         workspace_catalogs,
-                        is_workspace_project
+                        is_workspace_project,
+                        k,
                     ),
                     DriftStatus::Fresh,
                 )
@@ -326,7 +327,7 @@ pub(super) fn select_lockfile_result(
                 lockfile_importer_key,
                 manifest,
             );
-            if let Ok((ref graph, _)) = parsed {
+            if let Ok((ref graph, kind)) = parsed {
                 if let DriftStatus::Stale { reason } =
                     graph.check_catalogs_drift(workspace_catalogs)
                 {
@@ -335,12 +336,13 @@ pub(super) fn select_lockfile_result(
                          help: run without --frozen-lockfile to update the lockfile"
                     ));
                 }
-                if let DriftStatus::Stale { reason } = graph.check_drift_workspace(
+                if let DriftStatus::Stale { reason } = graph.check_drift_workspace_for_kind(
                     manifests,
                     &ws_config.overrides,
                     &ws_config.ignored_optional_dependencies,
                     workspace_catalogs,
                     is_workspace_project,
+                    kind,
                 ) {
                     return Err(miette!(
                         "lockfile is out of date with package.json: {reason}\n\
@@ -368,12 +370,13 @@ pub(super) fn select_lockfile_result(
                         );
                         Ok(Err(aube_lockfile::Error::NotFound(cwd.to_path_buf())))
                     } else {
-                        match graph.check_drift_workspace(
+                        match graph.check_drift_workspace_for_kind(
                             manifests,
                             &ws_config.overrides,
                             &ws_config.ignored_optional_dependencies,
                             workspace_catalogs,
                             is_workspace_project,
+                            *kind,
                         ) {
                             DriftStatus::Fresh => Ok(Ok((graph.clone(), *kind))),
                             DriftStatus::Stale { reason } => {
