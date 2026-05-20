@@ -267,6 +267,11 @@ impl<'a> ResolveDriver<'a> {
     /// popped.
     fn seed_initial_prefetches(&mut self) {
         for task in self.queue.iter() {
+            // Don't prefetch optional deps and prefetch failures
+            // bubble up through join_next() incorrectly.
+            if task.dep_type == DepType::Optional {
+                continue;
+            }
             if !self.resolver.is_prefetchable(
                 task.name.as_str(),
                 task.range.as_str(),
@@ -1083,6 +1088,7 @@ impl<'a> ResolveDriver<'a> {
                 );
                 continue;
             }
+
             self.queue.push_back(ResolveTask::transitive(
                 dep_name.clone(),
                 dep_range.clone(),
