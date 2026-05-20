@@ -432,7 +432,40 @@ impl<'a> ResolveDriver<'a> {
                     self.resolver.cache.insert(name, packument);
                     self.packument_fetch_count += 1;
                 }
-                Some(Ok(Err(e))) => return Err(e),
+                Some(Ok(Err(e))) => {
+                    // Optional deps that can't be fetched from the
+                    // registry are silently skipped — they may not
+                    // exist for all platforms (e.g., napi-rs
+                    // platform-specific variants that were never
+                    // published but for some reason, it's included
+                    // in `optionalDependencies`). pnpm parity.
+                    // Only skip when the error is for *this* task's
+                    // packument — errors for unrelated packages
+                    // surfaced while we're waiting must still
+                    // propagate.
+                    if task.dep_type == DepType::Optional
+                        && matches!(&e, crate::Error::Registry(name, _) if name == &fetch_name)
+                    {
+                        tracing::debug!(
+                            "skipping optional dep {}@{}: registry fetch failed",
+                            task.name,
+                            task.range,
+                        );
+                        if task.is_root
+                            && let Some(spec) = task.original_specifier.as_ref()
+                        {
+                            self.skipped_optional_dependencies
+                                .entry(task.importer.clone())
+                                .or_default()
+                                .insert(task.name.clone(), spec.clone());
+                        }
+                        if task.is_root {
+                            self.note_root_done();
+                        }
+                        return Ok(());
+                    }
+                    return Err(e);
+                }
                 Some(Err(join_err)) => {
                     return Err(Error::Registry("(join)".to_string(), join_err.to_string()));
                 }
@@ -1049,15 +1082,6 @@ impl<'a> ResolveDriver<'a> {
                     task.name
                 );
                 continue;
-            }
-            if !self.existing_names.contains(dep_name.as_str())
-                && self.resolver.is_prefetchable(
-                    dep_name.as_str(),
-                    dep_range.as_str(),
-                    self.workspace_packages,
-                )
-            {
-                self.ensure_fetch(dep_name);
             }
             self.queue.push_back(ResolveTask::transitive(
                 dep_name.clone(),
