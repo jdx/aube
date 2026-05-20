@@ -777,6 +777,14 @@ fn workspace_package_versions(cwd: &std::path::Path) -> miette::Result<HashMap<S
         .into_diagnostic()
         .wrap_err("failed to discover workspace packages")?;
     let mut versions = HashMap::new();
+    // Include the root package itself as a workspace target so
+    // sub-packages can use `workspace:*` to depend on it.
+    if let Ok(root) = aube_manifest::PackageJson::from_path(&workspace_root.join("package.json"))
+        && let Some(name) = root.name
+    {
+        let version = root.version.unwrap_or_else(|| "0.0.0".to_string());
+        versions.insert(name, version);
+    }
     for pkg_dir in workspace_packages {
         let pkg_manifest = aube_manifest::PackageJson::from_path(&pkg_dir.join("package.json"))
             .map_err(miette::Report::new)

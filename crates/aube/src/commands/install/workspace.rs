@@ -40,6 +40,13 @@ pub(super) fn discover_workspace_plan(
     let mut ws_package_versions = HashMap::new();
     let mut ws_dirs = BTreeMap::new();
 
+    // Include the root package itself as a workspace target so
+    // sub-packages can use `workspace:*` to depend on it.
+    if let Some(ref name) = root_manifest.name {
+        let version = root_manifest.version.as_deref().unwrap_or("0.0.0");
+        ws_package_versions.insert(name.clone(), version.to_string());
+    }
+
     if has_workspace {
         let project_name = root_manifest.name.as_deref().unwrap_or("(unnamed)");
         tracing::debug!(
