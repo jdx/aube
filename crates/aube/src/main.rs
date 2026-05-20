@@ -421,7 +421,12 @@ enum Commands {
     /// Manage package.json entries (not implemented — use `npm pkg`)
     #[command(hide = true)]
     Pkg(commands::npm_fallback::FallbackArgs),
-    /// Remove extraneous packages from node_modules
+    /// Remove extraneous packages from project `node_modules`.
+    ///
+    /// Reads the lockfile, computes the packages still reachable from each
+    /// importer, and removes stale top-level links, stale virtual-store entries,
+    /// and dangling .bin links. Does not modify package.json or the lockfile.
+    #[command(after_long_help = commands::prune::AFTER_LONG_HELP)]
     Prune(commands::prune::PruneArgs),
     /// Publish the current package to the registry
     Publish(commands::publish::PublishArgs),

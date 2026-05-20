@@ -7559,10 +7559,12 @@
         ],
         "mounts": [],
         "hide": false,
-        "help": "Remove extraneous packages from node_modules",
+        "help": "Remove extraneous packages from project `node_modules`",
+        "help_long": "Remove extraneous packages from project `node_modules`.\n\nReads the lockfile, computes the packages still reachable from each importer, and removes stale top-level links, stale virtual-store entries, and dangling .bin links. Does not modify package.json or the lockfile.",
         "name": "prune",
         "aliases": [],
         "hidden_aliases": [],
+        "after_help_long": "Global store cleanup: use `aube store prune` to clean unreferenced files from the global\ncontent-addressable store.",
         "examples": []
       },
       "publish": {
@@ -9931,6 +9933,7 @@
             "mounts": [],
             "hide": false,
             "help": "Remove unreferenced packages from the global store",
+            "help_long": "Remove unreferenced packages from the global store.\n\nOperates on the store printed by `aube store path`; it does not touch project node_modules directories, manifests, or lockfiles.\n\nIt keeps files referenced by cached package indexes and, on hardlink filesystems, files that still have project hardlink references.\n\nOn reflink filesystems such as APFS or btrfs, link counts cannot prove project reachability, so pruning relies on cached package indexes.",
             "name": "prune",
             "aliases": [],
             "hidden_aliases": [],

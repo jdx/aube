@@ -1330,7 +1330,9 @@ cmd pkg hide=#true help="Manage package.json entries (not implemented — use `n
     }
     arg "[ARGS]…" help="Unused; captured so `aube <cmd> foo bar` parses instead of erroring on unexpected args before the fallback message prints" required=#false double_dash=automatic var=#true hide=#true
 }
-cmd prune help="Remove extraneous packages from node_modules" {
+cmd prune help="Remove extraneous packages from project `node_modules`" {
+    long_help "Remove extraneous packages from project `node_modules`.\n\nReads the lockfile, computes the packages still reachable from each importer, and removes stale top-level links, stale virtual-store entries, and dangling .bin links. Does not modify package.json or the lockfile."
+    after_long_help "Global store cleanup: use `aube store prune` to clean unreferenced files from the global\ncontent-addressable store."
     flag "-P --prod --production" help="Remove devDependencies from node_modules"
     flag --no-optional help="Also remove optionalDependencies"
 }
@@ -1726,7 +1728,9 @@ cmd store subcommand_required=#true help="Manage the global store" {
         arg <PACKAGES>… help="Package specs to fetch into the store" var=#true
     }
     cmd path help="Show the store path"
-    cmd prune help="Remove unreferenced packages from the global store"
+    cmd prune help="Remove unreferenced packages from the global store" {
+        long_help "Remove unreferenced packages from the global store.\n\nOperates on the store printed by `aube store path`; it does not touch project node_modules directories, manifests, or lockfiles.\n\nIt keeps files referenced by cached package indexes and, on hardlink filesystems, files that still have project hardlink references.\n\nOn reflink filesystems such as APFS or btrfs, link counts cannot prove project reachability, so pruning relies on cached package indexes."
+    }
     cmd status help="Verify the store against cached package indexes" {
         long_help "Verify the store against cached package indexes.\n\nConfirms every file referenced by a cached package index is still present in the store and that its BLAKE3 hash matches. Exits non-zero when any corruption is detected."
     }

@@ -22,6 +22,10 @@ use miette::{Context, IntoDiagnostic};
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
+pub const AFTER_LONG_HELP: &str = "\
+Global store cleanup: use `aube store prune` to clean unreferenced files from the global
+content-addressable store.";
+
 #[derive(Debug, Args)]
 pub struct PruneArgs {
     /// Remove devDependencies from node_modules
