@@ -271,7 +271,7 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                 } else {
                     Some(t.integrity.clone())
                 },
-                git_hosted: tarball_url_is_hosted_git(&t.url),
+                git_hosted: t.git_hosted || tarball_url_is_hosted_git(&t.url),
                 directory: None,
                 tarball: Some(t.url.clone()),
                 commit: None,

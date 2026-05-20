@@ -210,6 +210,8 @@ struct PackedFile {
     /// Forward-slash path relative to the project root. Becomes the
     /// tarball entry name (prefixed with `package/` at write time).
     rel: String,
+    /// File size captured while collecting the packlist.
+    size: u64,
 }
 
 /// In-memory result of packing a project. Reused by `aube publish`,
@@ -248,10 +250,7 @@ pub(crate) fn build_archive(project_dir: &Path) -> miette::Result<BuiltArchive> 
 
     let files = collect_files(project_dir, &manifest)?;
     let filename = tarball_filename(&name, &version);
-    let unpacked_size = files
-        .iter()
-        .map(|f| std::fs::metadata(&f.abs).map(|m| m.len()).unwrap_or(0))
-        .sum();
+    let unpacked_size = files.iter().map(|f| f.size).sum();
 
     let mut buf: Vec<u8> = Vec::new();
     write_tarball(&files, &mut buf)?;
@@ -308,13 +307,15 @@ fn collect_files(project_dir: &Path, manifest: &PackageJson) -> miette::Result<V
         keep.insert("package.json".to_string());
     }
 
-    let mut out: Vec<PackedFile> = keep
-        .into_iter()
-        .map(|rel| PackedFile {
-            abs: project_dir.join(&rel),
-            rel,
-        })
-        .collect();
+    let mut out: Vec<PackedFile> = Vec::with_capacity(keep.len());
+    for rel in keep {
+        let abs = project_dir.join(&rel);
+        let size = std::fs::metadata(&abs)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("pack: stat {}", abs.display()))?
+            .len();
+        out.push(PackedFile { abs, rel, size });
+    }
     out.sort_by(|a, b| a.rel.cmp(&b.rel));
     Ok(out)
 }

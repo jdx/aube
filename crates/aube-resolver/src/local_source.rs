@@ -391,6 +391,7 @@ pub(crate) async fn resolve_git_source(
             git.integrity.as_deref(),
         )
     {
+        let integrity = aube_store::codeload_cache_integrity(&original_url, &resolved_sha);
         let pkg_root = match &subpath {
             Some(sub) => clone_dir.join(sub),
             None => clone_dir.clone(),
@@ -418,7 +419,7 @@ pub(crate) async fn resolve_git_source(
             }),
             version,
             pj.dependencies,
-            None,
+            integrity,
         ));
     }
 
@@ -622,6 +623,7 @@ pub(crate) async fn resolve_remote_tarball(
         LocalSource::RemoteTarball(aube_lockfile::RemoteTarballSource {
             url: tarball.url.clone(),
             integrity,
+            git_hosted: tarball.git_hosted,
         }),
         version,
         deps,

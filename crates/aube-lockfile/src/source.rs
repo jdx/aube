@@ -49,6 +49,7 @@ pub enum LocalSource {
 pub struct RemoteTarballSource {
     pub url: String,
     pub integrity: String,
+    pub git_hosted: bool,
 }
 
 /// A git dependency spec. See [`LocalSource::Git`].
@@ -196,6 +197,7 @@ impl LocalSource {
             return Some(LocalSource::RemoteTarball(RemoteTarballSource {
                 url: spec.to_string(),
                 integrity: String::new(),
+                git_hosted: false,
             }));
         }
         let (kind, rest) = if let Some(r) = spec.strip_prefix("file:") {

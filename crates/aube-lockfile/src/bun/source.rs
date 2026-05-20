@@ -115,6 +115,7 @@ pub(super) fn classify_bun_ident(
             Some(LocalSource::RemoteTarball(RemoteTarballSource {
                 url: raw_version.to_string(),
                 integrity: integrity.map(str::to_string).unwrap_or_default(),
+                git_hosted: false,
             })),
             alias_of,
         ));

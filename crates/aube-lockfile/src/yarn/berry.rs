@@ -516,6 +516,7 @@ fn classify_remote(url: &str, _block: &yaml_serde::Mapping) -> Option<LocalSourc
         Some(LocalSource::RemoteTarball(RemoteTarballSource {
             url: strip_commit_hash(url),
             integrity: String::new(),
+            git_hosted: false,
         }))
     }
 }

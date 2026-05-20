@@ -271,7 +271,6 @@ where
 /// resolution shapes are added.
 pub(super) fn local_source_from_resolution(res: &Resolution) -> Option<LocalSource> {
     if let Some(ref tb) = res.tarball {
-        let _git_hosted = res.git_hosted;
         if let Some(rel) = tb.strip_prefix("file:") {
             return Some(LocalSource::Tarball(std::path::PathBuf::from(rel)));
         }
@@ -279,6 +278,7 @@ pub(super) fn local_source_from_resolution(res: &Resolution) -> Option<LocalSour
             return Some(LocalSource::RemoteTarball(RemoteTarballSource {
                 url: tb.clone(),
                 integrity: res.integrity.clone().unwrap_or_default(),
+                git_hosted: res.git_hosted,
             }));
         }
         return None;

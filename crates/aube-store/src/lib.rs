@@ -10,8 +10,8 @@ mod integrity;
 mod tarball;
 
 pub use git::{
-    codeload_cache_lookup, extract_codeload_tarball, git_host_in_list, git_resolve_ref,
-    git_shallow_clone, git_url_host,
+    codeload_cache_integrity, codeload_cache_lookup, extract_codeload_tarball, git_host_in_list,
+    git_resolve_ref, git_shallow_clone, git_url_host,
 };
 
 #[cfg(test)]
@@ -1407,6 +1407,12 @@ mod tests {
         // directory rather than re-extracting.
         let (target2, _) = extract_codeload_tarball_at(tmp.path(), &bytes, url, sha, None).unwrap();
         assert_eq!(target, target2);
+        assert!(super::git::codeload_integrity_path(&target).is_file());
+        assert!(
+            super::git::read_codeload_integrity(&target)
+                .as_deref()
+                .is_some_and(|s| s.starts_with("sha512-"))
+        );
     }
 
     #[test]

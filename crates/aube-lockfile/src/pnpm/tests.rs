@@ -2502,3 +2502,49 @@ fn writer_preserves_non_derivable_registry_tarball_url_by_default() {
     );
     assert!(!yaml.contains("lockfileIncludeTarballUrl: true"), "{yaml}");
 }
+
+#[test]
+fn parser_round_trips_git_hosted_remote_tarball_flag() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pnpm-lock.yaml");
+    std::fs::write(
+        &path,
+        r#"lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+  .:
+    dependencies:
+      forge-dep:
+        specifier: https://forge.example.test/acme/dep/archive/abcdef.tgz
+        version: https://forge.example.test/acme/dep/archive/abcdef.tgz
+
+packages:
+  forge-dep@https://forge.example.test/acme/dep/archive/abcdef.tgz:
+    resolution: {integrity: sha512-forge, tarball: https://forge.example.test/acme/dep/archive/abcdef.tgz, gitHosted: true}
+    version: 1.0.0
+
+snapshots:
+  forge-dep@https://forge.example.test/acme/dep/archive/abcdef.tgz: {}
+"#,
+    )
+    .unwrap();
+
+    let graph = parse(&path).unwrap();
+    let pkg = graph
+        .packages
+        .values()
+        .find(|pkg| pkg.name == "forge-dep")
+        .expect("forge-dep package");
+    let Some(LocalSource::RemoteTarball(source)) = &pkg.local_source else {
+        panic!("expected remote tarball source, got {:?}", pkg.local_source);
+    };
+    assert!(source.git_hosted);
+
+    write(&path, &graph, &PackageJson::default()).unwrap();
+    let yaml = std::fs::read_to_string(&path).unwrap();
+    assert!(yaml.contains("gitHosted: true"), "{yaml}");
+}
