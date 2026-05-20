@@ -7,6 +7,8 @@ cargo build
 cargo test                                 # Unit tests
 cargo clippy --all-targets -- -D warnings  # Lint
 cargo fmt --check                          # Formatting
+cargo audit --deny warnings                # RustSec advisories
+cargo deny check bans licenses sources     # License/source policy
 
 # BATS integration tests (needs Node.js 22, GNU `parallel`, and
 # `verdaccio` on PATH; the first run will `npm i -g verdaccio@6` if it

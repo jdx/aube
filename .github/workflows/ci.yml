@@ -86,6 +86,8 @@ jobs:
       - run: mise run test
       - run: mise run lint
       - run: cargo-machete
+      - run: cargo audit --deny warnings
+      - run: cargo deny check bans licenses sources
       - run: cargo msrv --manifest-path crates/aube/Cargo.toml verify --output-format minimal
       - run: mise run render
       - name: assert render produces no diff
