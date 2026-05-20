@@ -464,6 +464,7 @@ impl<'a> ResolveDriver<'a> {
                                 .or_default()
                                 .insert(task.name.clone(), spec.clone());
                         }
+                        self.fetcher.release_in_flight(&fetch_name);
                         if task.is_root {
                             self.note_root_done();
                         }
