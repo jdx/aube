@@ -475,26 +475,31 @@ impl<'a> ResolveDriver<'a> {
 
         // Post-loop: if this task's packument fetch failed, decide
         // whether to skip (optional) or propagate (required).
-        if let Some(e) = self.failed_fetches.remove(&fetch_name) {
-            if task.dep_type == DepType::Optional {
-                tracing::debug!(
-                    "skipping optional dep {}@{}: registry fetch failed",
-                    task.name,
-                    task.range,
-                );
-                if task.is_root
-                    && let Some(spec) = task.original_specifier.as_ref()
-                {
-                    self.skipped_optional_dependencies
-                        .entry(task.importer.clone())
-                        .or_default()
-                        .insert(task.name.clone(), spec.clone());
-                }
-                if task.is_root {
-                    self.note_root_done();
-                }
-                return Ok(());
+        // For optional deps the error stays in `failed_fetches` so
+        // sibling tasks that share the same transitive optional dep
+        // don't re-fetch and re-fail for each importer.
+        if task.dep_type == DepType::Optional
+            && self.failed_fetches.contains_key(&fetch_name)
+        {
+            tracing::debug!(
+                "skipping optional dep {}@{}: registry fetch failed",
+                task.name,
+                task.range,
+            );
+            if task.is_root
+                && let Some(spec) = task.original_specifier.as_ref()
+            {
+                self.skipped_optional_dependencies
+                    .entry(task.importer.clone())
+                    .or_default()
+                    .insert(task.name.clone(), spec.clone());
             }
+            if task.is_root {
+                self.note_root_done();
+            }
+            return Ok(());
+        }
+        if let Some(e) = self.failed_fetches.remove(&fetch_name) {
             return Err(e);
         }
 
