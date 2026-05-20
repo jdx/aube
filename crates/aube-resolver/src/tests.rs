@@ -3742,3 +3742,62 @@ async fn required_dep_propagates_registry_error() {
 
     server.abort();
 }
+
+#[tokio::test]
+async fn optional_dep_with_both_fetches_in_flight() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // Server returns 200 for p-map and 404 for missing-optional,
+    // so BOTH deps trigger real concurrent fetches.
+    let pkg_body = serde_json::to_vec(&make_packument("p-map", &["7.0.4"], "7.0.4")).unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let registry = format!("http://{}/", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                break;
+            };
+            let body = pkg_body.clone();
+            tokio::spawn(async move {
+                let mut buf = [0_u8; 2048];
+                let _ = socket.read(&mut buf).await;
+                let path = std::str::from_utf8(&buf)
+                    .ok()
+                    .and_then(|s| s.split_whitespace().nth(1))
+                    .unwrap_or("/");
+                if path.contains("missing-optional") {
+                    let response =
+                        "HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+                    socket.write_all(response.as_bytes()).await.unwrap();
+                } else {
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    socket.write_all(response.as_bytes()).await.unwrap();
+                    socket.write_all(&body).await.unwrap();
+                }
+            });
+        }
+    });
+
+    let client = Arc::new(aube_registry::client::RegistryClient::new(&registry));
+    let mut resolver = Resolver::new(client);
+
+    let mut manifest = PackageJson::default();
+    manifest
+        .dependencies
+        .insert("p-map".to_string(), "7.0.4".to_string());
+    manifest
+        .optional_dependencies
+        .insert("missing-optional".to_string(), "1.0.0".to_string());
+
+    let graph = resolver
+        .resolve(&manifest, None)
+        .await
+        .expect("optional dep 404 must not fail even with concurrent fetches");
+    assert!(graph_has_package(&graph, "p-map", "7.0.4"));
+    assert!(!graph_has_package(&graph, "missing-optional", "1.0.0"));
+
+    server.abort();
+}
