@@ -79,6 +79,11 @@ jobs:
       - uses: namespacelabs/nscloud-cache-action@15799a6b54e5765f85b2aac25b3f0df43ed571c0 # v1
         with:
           cache: rust
+      - name: Restore RustSec advisory DB cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cargo/advisory-db
+          key: rustsec-advisory-db-${{ runner.os }}-v1
       - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
         with:
           cache: false
