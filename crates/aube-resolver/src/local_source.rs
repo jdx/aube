@@ -2,6 +2,8 @@ use crate::{Error, ResolveTask};
 use aube_lockfile::{LocalSource, LockedPackage};
 use aube_registry::client::RegistryClient;
 use aube_util::path::normalize_lexical;
+use base64::Engine;
+use sha2::Digest;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -328,7 +330,15 @@ pub(crate) async fn resolve_git_source(
     git: &aube_lockfile::GitSource,
     shallow: bool,
     client: Option<&RegistryClient>,
-) -> Result<(LocalSource, String, BTreeMap<String, String>), Error> {
+) -> Result<
+    (
+        LocalSource,
+        String,
+        BTreeMap<String, String>,
+        Option<String>,
+    ),
+    Error,
+> {
     let original_url = git.url.clone();
     let committish = git.committish.clone();
     let subpath = git.subpath.clone();
@@ -408,6 +418,7 @@ pub(crate) async fn resolve_git_source(
             }),
             version,
             pj.dependencies,
+            None,
         ));
     }
 
@@ -467,6 +478,7 @@ pub(crate) async fn resolve_git_source(
                 .map_err(|e| {
                     Error::Registry(name.to_string(), format!("codeload extract panicked: {e}"))
                 })?;
+                let integrity = sha512_integrity(&bytes);
                 match extracted {
                     Ok((resolved, version, deps)) => {
                         return Ok((
@@ -479,6 +491,7 @@ pub(crate) async fn resolve_git_source(
                             }),
                             version,
                             deps,
+                            Some(integrity),
                         ));
                     }
                     Err(e) => {
@@ -552,7 +565,15 @@ pub(crate) async fn resolve_git_source(
     })
     .await
     .map_err(|e| Error::Registry(name.to_string(), format!("git task panicked: {e}")))??;
-    Ok((local, version, deps))
+    Ok((local, version, deps, None))
+}
+
+fn sha512_integrity(bytes: &[u8]) -> String {
+    let digest = sha2::Sha512::digest(bytes);
+    format!(
+        "sha512-{}",
+        base64::engine::general_purpose::STANDARD.encode(digest)
+    )
 }
 
 /// Fetch a remote tarball URL, compute its sha512 integrity, and read

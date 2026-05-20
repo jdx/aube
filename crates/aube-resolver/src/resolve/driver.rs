@@ -1313,9 +1313,11 @@ impl<'a> ResolveDriver<'a> {
                 ),
             ));
         }
-        let (local, real_version, target_deps) = if let LocalSource::Git(ref g) = raw_local {
+        let (local, real_version, target_deps, integrity) = if let LocalSource::Git(ref g) =
+            raw_local
+        {
             let shallow = aube_store::git_host_in_list(&g.url, &self.resolver.git_shallow_hosts);
-            let (resolved_local, version, deps) =
+            let (resolved_local, version, deps, integrity) =
                 resolve_git_source(&task.name, g, shallow, Some(self.resolver.client.as_ref()))
                     .await
                     .map_err(|e| {
@@ -1324,7 +1326,7 @@ impl<'a> ResolveDriver<'a> {
                             format!("git resolve {}: {e}", task.range),
                         )
                     })?;
-            (resolved_local, version, deps)
+            (resolved_local, version, deps, integrity)
         } else if let LocalSource::RemoteTarball(ref t) = raw_local {
             let (resolved_local, version, deps) =
                 resolve_remote_tarball(&task.name, t, self.resolver.client.as_ref())
@@ -1335,7 +1337,7 @@ impl<'a> ResolveDriver<'a> {
                             format!("remote tarball {}: {e}", task.range),
                         )
                     })?;
-            (resolved_local, version, deps)
+            (resolved_local, version, deps, None)
         } else {
             // Rewrite the path to be relative to the project root so
             // every downstream consumer can resolve it with a single
@@ -1357,7 +1359,7 @@ impl<'a> ResolveDriver<'a> {
                     .unwrap_or_else(|_| (task.name.clone(), "0.0.0".to_string(), BTreeMap::new()));
                 (version, deps)
             };
-            (local, version, deps)
+            (local, version, deps, None)
         };
         let dep_path = local.dep_path(&task.name);
         let linked_name = task.name.clone();
@@ -1413,6 +1415,7 @@ impl<'a> ResolveDriver<'a> {
                 LockedPackage {
                     name: linked_name.clone(),
                     version: real_version.clone(),
+                    integrity: integrity.clone(),
                     dep_path: dep_path.clone(),
                     local_source: Some(local.clone()),
                     ..Default::default()
@@ -1427,7 +1430,7 @@ impl<'a> ResolveDriver<'a> {
                         dep_path: dep_path.clone(),
                         name: linked_name.clone(),
                         version: real_version.clone(),
-                        integrity: None,
+                        integrity: integrity.clone(),
                         tarball_url: None,
                         // local_source deps aren't aliased —
                         // `file:`/`link:` specifiers go through the

@@ -77,9 +77,7 @@ pub struct PublishArgs {
     pub ignore_scripts: bool,
     /// Emit the publish result as JSON.
     ///
-    /// Output is an array with one
-    /// `{name, version, filename, files: [{path}]}` entry, matching
-    /// `pnpm publish --json` / `aube pack --json`.
+    /// Output matches `npm publish --json` / `pnpm publish --json`.
     #[arg(long)]
     pub json: bool,
     /// Skip the "working tree must be clean" check.
@@ -870,7 +868,7 @@ async fn version_on_registry(
 
 fn emit_outcome(outcome: &PublishOutcome, as_json: bool) -> miette::Result<()> {
     if as_json {
-        emit_json_many(std::slice::from_ref(outcome))
+        emit_json_single(outcome)
     } else {
         emit_outcome_line(outcome);
         Ok(())
@@ -905,49 +903,52 @@ fn emit_outcome_line(outcome: &PublishOutcome) {
 }
 
 fn emit_json_many(outcomes: &[PublishOutcome]) -> miette::Result<()> {
-    // The base `{name, version, filename, files}` shape matches
-    // `aube pack --json` for compatibility with existing pnpm-style
-    // consumers. We extend it with a `status` field so CI tooling
-    // driving recursive publish can tell which packages actually went
-    // out this run vs which were no-ops — the plain-text path
-    // distinguishes them with `+` / `=` / dry-run markers, and losing
-    // that distinction in JSON mode defeats the idempotency promise.
-    let arr: Vec<serde_json::Value> = outcomes
-        .iter()
-        .map(|o| {
-            let status = match o.status {
-                PublishStatus::Published => "published",
-                PublishStatus::AlreadyPublished => "skipped",
-                PublishStatus::DryRun => "dry-run",
-            };
-            // `filename` / `files` are only present when we actually
-            // built a tarball. Skipped (already-published) entries
-            // leave them off — consumers should branch on `status`.
-            let mut obj = serde_json::json!({
-                "name": o.name,
-                "version": o.version,
-                "status": status,
-            });
-            if let Some(archive) = &o.archive {
-                let m = obj.as_object_mut().unwrap();
-                m.insert("filename".into(), archive.filename.clone().into());
-                m.insert(
-                    "files".into(),
-                    serde_json::Value::Array(
-                        archive
-                            .files
-                            .iter()
-                            .map(|p| serde_json::json!({"path": p}))
-                            .collect(),
-                    ),
-                );
-            }
-            obj
-        })
-        .collect();
+    let arr: Vec<serde_json::Value> = outcomes.iter().map(publish_outcome_json).collect();
     let out = serde_json::to_string_pretty(&arr).into_diagnostic()?;
     println!("{out}");
     Ok(())
+}
+
+fn emit_json_single(outcome: &PublishOutcome) -> miette::Result<()> {
+    let out = serde_json::to_string_pretty(&publish_outcome_json(outcome)).into_diagnostic()?;
+    println!("{out}");
+    Ok(())
+}
+
+fn publish_outcome_json(outcome: &PublishOutcome) -> serde_json::Value {
+    let status = match outcome.status {
+        PublishStatus::Published => "published",
+        PublishStatus::AlreadyPublished => "skipped",
+        PublishStatus::DryRun => "dry-run",
+    };
+    let mut obj = serde_json::json!({
+        "id": format!("{}@{}", outcome.name, outcome.version),
+        "name": outcome.name,
+        "version": outcome.version,
+        "status": status,
+    });
+    if let Some(archive) = &outcome.archive {
+        let (shasum, integrity) = archive_hashes(archive);
+        let m = obj.as_object_mut().expect("json object");
+        m.insert("size".into(), archive.tarball.len().into());
+        m.insert("unpackedSize".into(), archive.unpacked_size.into());
+        m.insert("shasum".into(), shasum.into());
+        m.insert("integrity".into(), integrity.into());
+        m.insert("filename".into(), archive.filename.clone().into());
+        m.insert(
+            "files".into(),
+            serde_json::Value::Array(
+                archive
+                    .files
+                    .iter()
+                    .map(|p| serde_json::json!({"path": p}))
+                    .collect(),
+            ),
+        );
+        m.insert("entryCount".into(), archive.files.len().into());
+        m.insert("bundled".into(), serde_json::Value::Array(Vec::new()));
+    }
+    obj
 }
 
 /// `{registry}/{name}`. Uses the shared `encode_package_name` helper
@@ -970,14 +971,7 @@ fn build_publish_body(
     access: Option<&str>,
     provenance_bundle_json: Option<&str>,
 ) -> miette::Result<serde_json::Value> {
-    let shasum = hex::encode(sha1::Sha1::digest(&archive.tarball));
-    let integrity = {
-        let digest = Sha512::digest(&archive.tarball);
-        format!(
-            "sha512-{}",
-            base64::engine::general_purpose::STANDARD.encode(digest)
-        )
-    };
+    let (shasum, integrity) = archive_hashes(archive);
     let b64_tarball = base64::engine::general_purpose::STANDARD.encode(&archive.tarball);
 
     let tarball_url = format!(
@@ -1056,6 +1050,16 @@ fn build_publish_body(
     }
 
     Ok(body)
+}
+
+fn archive_hashes(archive: &BuiltArchive) -> (String, String) {
+    let shasum = hex::encode(sha1::Sha1::digest(&archive.tarball));
+    let digest = Sha512::digest(&archive.tarball);
+    let integrity = format!(
+        "sha512-{}",
+        base64::engine::general_purpose::STANDARD.encode(digest)
+    );
+    (shasum, integrity)
 }
 
 #[cfg(test)]
@@ -1220,6 +1224,41 @@ mod tests {
             )
             .unwrap()
             .is_empty()
+        );
+    }
+
+    #[test]
+    fn publish_json_single_uses_npm_compatible_object_shape() {
+        let archive = BuiltArchive {
+            name: "demo".to_string(),
+            version: "1.2.3".to_string(),
+            filename: "demo-1.2.3.tgz".to_string(),
+            files: vec!["package.json".to_string(), "index.js".to_string()],
+            unpacked_size: 42,
+            tarball: b"archive bytes".to_vec(),
+        };
+        let outcome = PublishOutcome {
+            name: "demo".to_string(),
+            version: "1.2.3".to_string(),
+            registry_url: "https://registry.npmjs.org/".to_string(),
+            archive: Some(archive),
+            status: PublishStatus::Published,
+        };
+        let json = publish_outcome_json(&outcome);
+        assert_eq!(json.get("id").and_then(|v| v.as_str()), Some("demo@1.2.3"));
+        assert_eq!(json.get("name").and_then(|v| v.as_str()), Some("demo"));
+        assert_eq!(json.get("version").and_then(|v| v.as_str()), Some("1.2.3"));
+        assert_eq!(
+            json.get("filename").and_then(|v| v.as_str()),
+            Some("demo-1.2.3.tgz")
+        );
+        assert_eq!(json.get("entryCount").and_then(|v| v.as_u64()), Some(2));
+        assert_eq!(json.get("unpackedSize").and_then(|v| v.as_u64()), Some(42));
+        assert!(json.get("shasum").and_then(|v| v.as_str()).is_some());
+        assert!(
+            json.get("integrity")
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| s.starts_with("sha512-"))
         );
     }
 

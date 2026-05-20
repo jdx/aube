@@ -208,6 +208,13 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
         // Unix and vice versa. `Path::display()` honors the host
         // separator, so it would leak `\` into the YAML.
         let is_jsr_registry_pkg = pkg.registry_name().starts_with("@jsr/");
+        let preserve_tarball_url = graph.settings.lockfile_include_tarball_url
+            || is_jsr_registry_pkg
+            || registry_tarball_url_is_not_derivable(
+                pkg.registry_name(),
+                &pkg.version,
+                pkg.tarball_url.as_deref(),
+            );
         debug_assert!(
             !is_jsr_registry_pkg || pkg.tarball_url.is_some(),
             "JSR packages must preserve dist.tarball for cold lockfile installs"
@@ -215,6 +222,7 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
         let resolution = match pkg.local_source.as_ref() {
             Some(local @ LocalSource::Directory(_)) => Some(WritableResolution {
                 integrity: None,
+                git_hosted: false,
                 directory: Some(local.path_posix()),
                 tarball: None,
                 commit: None,
@@ -224,6 +232,7 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
             }),
             Some(local @ LocalSource::Tarball(_)) => Some(WritableResolution {
                 integrity: None,
+                git_hosted: false,
                 directory: None,
                 tarball: Some(format!("file:{}", local.path_posix())),
                 commit: None,
@@ -234,6 +243,7 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
             Some(LocalSource::Link(_)) | Some(LocalSource::Exec(_)) => None,
             Some(local @ LocalSource::Portal(_)) => Some(WritableResolution {
                 integrity: None,
+                git_hosted: false,
                 directory: Some(local.path_posix()),
                 tarball: None,
                 commit: None,
@@ -242,7 +252,8 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                 path: None,
             }),
             Some(LocalSource::Git(g)) => Some(WritableResolution {
-                integrity: g.integrity.clone(),
+                integrity: g.integrity.clone().or_else(|| pkg.integrity.clone()),
+                git_hosted: crate::parse_hosted_git(&g.url).is_some(),
                 directory: None,
                 tarball: None,
                 commit: Some(g.resolved.clone()),
@@ -260,6 +271,7 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                 } else {
                     Some(t.integrity.clone())
                 },
+                git_hosted: tarball_url_is_hosted_git(&t.url),
                 directory: None,
                 tarball: Some(t.url.clone()),
                 commit: None,
@@ -275,6 +287,10 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                 // re-parse would then have no way to fetch the package.
                 Some(WritableResolution {
                     integrity: pkg.integrity.clone(),
+                    git_hosted: pkg
+                        .tarball_url
+                        .as_deref()
+                        .is_some_and(tarball_url_is_hosted_git),
                     directory: None,
                     tarball: pkg.tarball_url.clone(),
                     commit: None,
@@ -285,6 +301,7 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
             }
             None => pkg.integrity.as_ref().map(|i| WritableResolution {
                 integrity: Some(i.clone()),
+                git_hosted: false,
                 directory: None,
                 // Emit the full registry tarball URL when the setting
                 // opts in. JSR packages are the exception: npm.jsr.io
@@ -292,7 +309,7 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                 // reconstructed from package name + version, so the
                 // URL must be preserved for cold installs from the
                 // lockfile.
-                tarball: if graph.settings.lockfile_include_tarball_url || is_jsr_registry_pkg {
+                tarball: if preserve_tarball_url {
                     pkg.tarball_url.clone()
                 } else {
                     None
@@ -493,6 +510,25 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
     Ok(())
 }
 
+fn registry_tarball_url_is_not_derivable(
+    name: &str,
+    version: &str,
+    tarball_url: Option<&str>,
+) -> bool {
+    let Some(url) = tarball_url else {
+        return false;
+    };
+    let basename = name.rsplit('/').next().unwrap_or(name);
+    let expected_suffix = format!("/-/{basename}-{version}.tgz");
+    !url.ends_with(&expected_suffix)
+}
+
+fn tarball_url_is_hosted_git(url: &str) -> bool {
+    url.contains("://codeload.github.com/")
+        || (url.contains("://gitlab.com/") && url.contains("/-/archive/"))
+        || (url.contains("://bitbucket.org/") && url.contains("/get/"))
+}
+
 fn pruned_time_entries(
     graph: &LockfileGraph,
     native_pnpm_aliases: bool,
@@ -636,6 +672,8 @@ struct WritableCatalogEntry {
 struct WritableResolution {
     #[serde(skip_serializing_if = "Option::is_none")]
     integrity: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not", rename = "gitHosted")]
+    git_hosted: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     directory: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

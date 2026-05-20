@@ -2413,3 +2413,92 @@ fn git_resolution_integrity_roundtrips() {
     };
     assert_eq!(git.integrity.as_deref(), Some(integrity));
 }
+
+#[test]
+fn writer_emits_git_hosted_for_hosted_git_resolution() {
+    let dir = tempfile::tempdir().unwrap();
+    let lockfile_path = dir.path().join("pnpm-lock.yaml");
+    let dep_path =
+        "demo@git+ssh://git@github.com/acme/demo.git#abcdef0123456789abcdef0123456789abcdef01";
+    let graph = LockfileGraph {
+        packages: BTreeMap::from([(
+            dep_path.to_string(),
+            LockedPackage {
+                name: "demo".to_string(),
+                version: "1.0.0".to_string(),
+                integrity: Some("sha512-hosted".to_string()),
+                dep_path: dep_path.to_string(),
+                local_source: Some(LocalSource::Git(GitSource {
+                    url: "git+ssh://git@github.com/acme/demo.git".to_string(),
+                    committish: Some("main".to_string()),
+                    resolved: "abcdef0123456789abcdef0123456789abcdef01".to_string(),
+                    integrity: None,
+                    subpath: None,
+                })),
+                ..Default::default()
+            },
+        )]),
+        importers: BTreeMap::from([(
+            ".".to_string(),
+            vec![DirectDep {
+                name: "demo".to_string(),
+                dep_path: dep_path.to_string(),
+                dep_type: DepType::Production,
+                specifier: Some("github:acme/demo".to_string()),
+            }],
+        )]),
+        ..Default::default()
+    };
+    let mut manifest = PackageJson::default();
+    manifest
+        .dependencies
+        .insert("demo".to_string(), "github:acme/demo".to_string());
+
+    write(&lockfile_path, &graph, &manifest).unwrap();
+    let yaml = std::fs::read_to_string(&lockfile_path).unwrap();
+    assert!(yaml.contains("gitHosted: true"), "{yaml}");
+    assert!(yaml.contains("integrity: sha512-hosted"), "{yaml}");
+}
+
+#[test]
+fn writer_preserves_non_derivable_registry_tarball_url_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let lockfile_path = dir.path().join("pnpm-lock.yaml");
+    let graph = LockfileGraph {
+        packages: BTreeMap::from([(
+            "@scope/pkg@1.0.0".to_string(),
+            LockedPackage {
+                name: "@scope/pkg".to_string(),
+                version: "1.0.0".to_string(),
+                integrity: Some("sha512-private".to_string()),
+                dep_path: "@scope/pkg@1.0.0".to_string(),
+                tarball_url: Some(
+                    "https://npm.pkg.github.com/download/@scope/pkg/1.0.0/deadbeef".to_string(),
+                ),
+                ..Default::default()
+            },
+        )]),
+        importers: BTreeMap::from([(
+            ".".to_string(),
+            vec![DirectDep {
+                name: "@scope/pkg".to_string(),
+                dep_path: "@scope/pkg@1.0.0".to_string(),
+                dep_type: DepType::Production,
+                specifier: Some("1.0.0".to_string()),
+            }],
+        )]),
+        ..Default::default()
+    };
+    let mut manifest = PackageJson::default();
+    manifest
+        .dependencies
+        .insert("@scope/pkg".to_string(), "1.0.0".to_string());
+
+    write(&lockfile_path, &graph, &manifest).unwrap();
+    let yaml = std::fs::read_to_string(&lockfile_path).unwrap();
+    assert!(
+        yaml.contains("tarball: https://npm.pkg.github.com/download/@scope/pkg/1.0.0/deadbeef"),
+        "{yaml}"
+    );
+    assert!(!yaml.contains("lockfileIncludeTarballUrl: true"), "{yaml}");
+}

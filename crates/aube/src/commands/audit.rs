@@ -211,13 +211,15 @@ pub async fn run(args: AuditArgs) -> miette::Result<()> {
         }
     };
 
-    // `--ignore` is a cheap JSON filter. Run it first so we don't
-    // bother fetching packuments for advisories the user already said
-    // to drop.
-    let raw = if args.ignore.is_empty() {
+    let ignored_ids = configured_audit_ignores(&manifest, &args.ignore);
+
+    // `--ignore` / auditConfig ignores are cheap JSON filters. Run
+    // them first so we don't bother fetching packuments for advisories
+    // the user already said to drop.
+    let raw = if ignored_ids.is_empty() {
         raw
     } else {
-        filter_ignored_ids(&raw, &args.ignore)
+        filter_ignored_ids(&raw, &ignored_ids)
     };
 
     // `--ignore-unfixable` is expensive (one packument fetch per
@@ -364,6 +366,23 @@ fn build_client(cwd: &std::path::Path, registry_override: Option<&str>) -> Regis
 /// so users can pass either `GHSA-abcd-...` or the same in uppercase
 /// / lowercase, or the CVE form. Packages whose advisories all get
 /// filtered out drop from the response entirely.
+fn configured_audit_ignores(manifest: &aube_manifest::PackageJson, cli: &[String]) -> Vec<String> {
+    let mut out = cli.to_vec();
+    let Some(config) = manifest
+        .extra
+        .get("auditConfig")
+        .and_then(|v| v.as_object())
+    else {
+        return out;
+    };
+    for key in ["ignoreGhsas", "ignoreCves"] {
+        if let Some(values) = config.get(key).and_then(|v| v.as_array()) {
+            out.extend(values.iter().filter_map(|v| v.as_str().map(str::to_string)));
+        }
+    }
+    out
+}
+
 fn filter_ignored_ids(v: &serde_json::Value, ignore: &[String]) -> serde_json::Value {
     use serde_json::{Map, Value};
     let Some(obj) = v.as_object() else {
@@ -1198,6 +1217,32 @@ mod tests {
         );
         assert!(out.get("pkg-a").is_none());
         assert!(out.get("pkg-b").is_some());
+    }
+
+    #[test]
+    fn configured_audit_ignores_reads_ghsa_and_legacy_cve_keys() {
+        let manifest = aube_manifest::PackageJson::parse(
+            std::path::Path::new("package.json"),
+            r#"{
+              "name": "demo",
+              "version": "1.0.0",
+              "auditConfig": {
+                "ignoreGhsas": ["GHSA-aaaa-bbbb-cccc"],
+                "ignoreCves": ["CVE-2099-0001"]
+              }
+            }"#
+            .to_string(),
+        )
+        .unwrap();
+        let ignores = configured_audit_ignores(&manifest, &["1404".to_string()]);
+        assert_eq!(
+            ignores,
+            vec![
+                "1404".to_string(),
+                "GHSA-aaaa-bbbb-cccc".to_string(),
+                "CVE-2099-0001".to_string()
+            ]
+        );
     }
 
     #[test]

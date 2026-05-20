@@ -113,6 +113,14 @@ fn npm_purl(name: &str, version: &str) -> String {
 /// requested, so silently falling back to an unsigned publish would defeat
 /// the whole point of the flag.
 async fn detect_oidc_token() -> miette::Result<IdentityToken> {
+    if let Ok(token) = std::env::var("NPM_ID_TOKEN")
+        && !token.trim().is_empty()
+    {
+        return IdentityToken::from_jwt(&token)
+            .into_diagnostic()
+            .map_err(|e| e.wrap_err("failed to parse NPM_ID_TOKEN as JWT"));
+    }
+
     let detector = ambient_id::Detector::new();
     let token = detector
         .detect("sigstore")

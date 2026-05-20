@@ -222,6 +222,8 @@ pub(crate) struct BuiltArchive {
     pub filename: String,
     /// Forward-slash project-relative paths included in the tarball.
     pub files: Vec<String>,
+    /// Sum of unpacked file sizes.
+    pub unpacked_size: u64,
     /// Gzipped tar bytes, ready to write to disk or POST to a registry.
     pub tarball: Vec<u8>,
 }
@@ -246,6 +248,10 @@ pub(crate) fn build_archive(project_dir: &Path) -> miette::Result<BuiltArchive> 
 
     let files = collect_files(project_dir, &manifest)?;
     let filename = tarball_filename(&name, &version);
+    let unpacked_size = files
+        .iter()
+        .map(|f| std::fs::metadata(&f.abs).map(|m| m.len()).unwrap_or(0))
+        .sum();
 
     let mut buf: Vec<u8> = Vec::new();
     write_tarball(&files, &mut buf)?;
@@ -255,6 +261,7 @@ pub(crate) fn build_archive(project_dir: &Path) -> miette::Result<BuiltArchive> 
         version,
         filename,
         files: files.into_iter().map(|f| f.rel).collect(),
+        unpacked_size,
         tarball: buf,
     })
 }
