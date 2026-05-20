@@ -79,6 +79,12 @@ pub(crate) struct ResolveDriver<'a> {
     /// Per-importer record of optionals dropped on this run (platform
     /// mismatch or `pnpm.ignoredOptionalDependencies`).
     skipped_optional_dependencies: BTreeMap<String, BTreeMap<String, String>>,
+    /// Packument fetches that failed (registry 404, network error, etc.),
+    /// keyed by package name. Errors are stored here instead of
+    /// propagated from `join_next` so a failed fetch for one package
+    /// doesn't crash the wrong task. Checked after the fetch-wait loop
+    /// to decide skip (optional) vs propagate (required).
+    failed_fetches: FxHashMap<String, Error>,
     /// Catalog picks gathered as the BFS rewrites `catalog:` task
     /// ranges. Outer key: catalog name. Inner: package name → spec.
     catalog_picks: BTreeMap<String, BTreeMap<String, String>>,
@@ -209,6 +215,7 @@ impl<'a> ResolveDriver<'a> {
             visited: FxHashSet::with_capacity_and_hasher(2048, Default::default()),
             resolved_times: BTreeMap::new(),
             skipped_optional_dependencies: BTreeMap::new(),
+            failed_fetches: FxHashMap::default(),
             catalog_picks: BTreeMap::new(),
             deferred_transitives: Vec::new(),
             published_by,
@@ -267,11 +274,6 @@ impl<'a> ResolveDriver<'a> {
     /// popped.
     fn seed_initial_prefetches(&mut self) {
         for task in self.queue.iter() {
-            // Don't prefetch optional deps and prefetch failures
-            // bubble up through join_next() incorrectly.
-            if task.dep_type == DepType::Optional {
-                continue;
-            }
             if !self.resolver.is_prefetchable(
                 task.name.as_str(),
                 task.range.as_str(),
@@ -426,7 +428,9 @@ impl<'a> ResolveDriver<'a> {
         let _diag_task_wait =
             aube_util::diag::Span::new(aube_util::diag::Category::Resolver, "task_wait_packument")
                 .with_meta_fn(|| format!(r#"{{"name":{}}}"#, aube_util::diag::jstr(&fetch_name)));
-        while !self.resolver.cache.contains_key(&fetch_name) {
+        while !self.resolver.cache.contains_key(&fetch_name)
+            && !self.failed_fetches.contains_key(&fetch_name)
+        {
             self.ensure_fetch(&fetch_name);
             match self.fetcher.join_next().await {
                 Some(Ok(Ok((name, packument, from_primer)))) => {
@@ -438,56 +442,61 @@ impl<'a> ResolveDriver<'a> {
                     self.packument_fetch_count += 1;
                 }
                 Some(Ok(Err(e))) => {
-                    // Optional deps that can't be fetched from the
-                    // registry are silently skipped — they may not
-                    // exist for all platforms (e.g., napi-rs
-                    // platform-specific variants that were never
-                    // published but for some reason, it's included
-                    // in `optionalDependencies`). pnpm parity.
-                    // Only skip when the error is for *this* task's
-                    // packument — errors for unrelated packages
-                    // surfaced while we're waiting must still
-                    // propagate.
-                    if task.dep_type == DepType::Optional
-                        && matches!(&e, crate::Error::Registry(name, _) if name == &fetch_name)
-                    {
-                        tracing::debug!(
-                            "skipping optional dep {}@{}: registry fetch failed",
-                            task.name,
-                            task.range,
-                        );
-                        if task.is_root
-                            && let Some(spec) = task.original_specifier.as_ref()
-                        {
-                            self.skipped_optional_dependencies
-                                .entry(task.importer.clone())
-                                .or_default()
-                                .insert(task.name.clone(), spec.clone());
-                        }
-                        self.fetcher.release_in_flight(&fetch_name);
-                        if task.is_root {
-                            self.note_root_done();
-                        }
-                        return Ok(());
-                    }
-                    return Err(e);
+                    // Store failed fetches in the side table instead
+                    // of propagating immediately. pnpm parity.
+                    let name = match &e {
+                        crate::Error::Registry(n, _) => n.clone(),
+                        _ => return Err(e),
+                    };
+                    self.fetcher.release_in_flight(&name);
+                    self.failed_fetches.insert(name, e);
                 }
                 Some(Err(join_err)) => {
                     return Err(Error::Registry("(join)".to_string(), join_err.to_string()));
                 }
                 None => {
-                    // ensure_fetch! guarantees something is
-                    // in flight if the cache still doesn't
-                    // hold this name, so a None here means
-                    // the spawn failed silently. Surface it.
-                    return Err(Error::Registry(
-                        fetch_name.clone(),
-                        "packument fetch disappeared before completing".to_string(),
-                    ));
+                    // All in-flight tasks completed. If this task's
+                    // failure was already recorded in the side table,
+                    // break to the post-loop check.
+                    if !self.failed_fetches.contains_key(&fetch_name) {
+                        // ensure_fetch! guarantees something is
+                        // in flight if the cache still doesn't
+                        // hold this name, so a None here means
+                        // the spawn failed silently. Surface it.
+                        return Err(Error::Registry(
+                            fetch_name.clone(),
+                            "packument fetch disappeared before completing".to_string(),
+                        ));
+                    }
                 }
             }
         }
         self.packument_fetch_time += wait_start.elapsed();
+
+        // Post-loop: if this task's packument fetch failed, decide
+        // whether to skip (optional) or propagate (required).
+        if let Some(e) = self.failed_fetches.remove(&fetch_name) {
+            if task.dep_type == DepType::Optional {
+                tracing::debug!(
+                    "skipping optional dep {}@{}: registry fetch failed",
+                    task.name,
+                    task.range,
+                );
+                if task.is_root
+                    && let Some(spec) = task.original_specifier.as_ref()
+                {
+                    self.skipped_optional_dependencies
+                        .entry(task.importer.clone())
+                        .or_default()
+                        .insert(task.name.clone(), spec.clone());
+                }
+                if task.is_root {
+                    self.note_root_done();
+                }
+                return Ok(());
+            }
+            return Err(e);
+        }
 
         // TimeBased wave-0 gate. Transitives that reach
         // the version-pick step while the cutoff is still
@@ -1089,7 +1098,15 @@ impl<'a> ResolveDriver<'a> {
                 );
                 continue;
             }
-
+            if !self.existing_names.contains(dep_name.as_str())
+                && self.resolver.is_prefetchable(
+                    dep_name.as_str(),
+                    dep_range.as_str(),
+                    self.workspace_packages,
+                )
+            {
+                self.ensure_fetch(dep_name);
+            }
             self.queue.push_back(ResolveTask::transitive(
                 dep_name.clone(),
                 dep_range.clone(),
