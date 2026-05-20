@@ -779,11 +779,19 @@ fn workspace_package_versions(cwd: &std::path::Path) -> miette::Result<HashMap<S
     let mut versions = HashMap::new();
     // Include the root package itself as a workspace target so
     // sub-packages can use `workspace:*` to depend on it.
-    if let Ok(root) = aube_manifest::PackageJson::from_path(&workspace_root.join("package.json"))
-        && let Some(name) = root.name
-    {
-        let version = root.version.unwrap_or_else(|| "0.0.0".to_string());
-        versions.insert(name, version);
+    match aube_manifest::PackageJson::from_path(&workspace_root.join("package.json")) {
+        Ok(root) => {
+            if let Some(name) = root.name {
+                let version = root.version.unwrap_or_else(|| "0.0.0".to_string());
+                versions.insert(name, version);
+            }
+        }
+        // Yaml-only workspaces may not have a root package.json;
+        // Io errors are expected and silently skipped.
+        Err(aube_manifest::Error::Io(..)) => {}
+        Err(e) => tracing::warn!(
+            "root package.json parse error: {e}; workspace name/version registration skipped"
+        ),
     }
     for pkg_dir in workspace_packages {
         let pkg_manifest = aube_manifest::PackageJson::from_path(&pkg_dir.join("package.json"))
@@ -1657,5 +1665,100 @@ mod tests {
 
         // project-2 isn't in importers yet — the helper must say so.
         assert!(lookup_pkg(&graph, &[".", "project-2"], "foo", "foo").is_none());
+    }
+
+    #[test]
+    fn workspace_package_versions_includes_root_and_members() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            br#"{"name": "@my/root", "version": "2.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("pnpm-workspace.yaml"),
+            b"packages:\n  - packages/*\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("packages/lib")).unwrap();
+        std::fs::write(
+            root.join("packages/lib/package.json"),
+            br#"{"name": "@my/lib", "version": "1.0.0"}"#,
+        )
+        .unwrap();
+
+        let versions = workspace_package_versions(root).unwrap();
+        assert_eq!(versions.get("@my/root").unwrap(), "2.0.0");
+        assert_eq!(versions.get("@my/lib").unwrap(), "1.0.0");
+        assert_eq!(versions.len(), 2);
+    }
+
+    #[test]
+    fn workspace_package_versions_defaults_version_for_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("package.json"), br#"{"name": "@my/root"}"#).unwrap();
+        std::fs::write(
+            root.join("pnpm-workspace.yaml"),
+            b"packages:\n  - packages/*\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("packages/lib")).unwrap();
+        std::fs::write(
+            root.join("packages/lib/package.json"),
+            br#"{"name": "@my/lib", "version": "1.0.0"}"#,
+        )
+        .unwrap();
+
+        let versions = workspace_package_versions(root).unwrap();
+        assert_eq!(versions.get("@my/root").unwrap(), "0.0.0");
+        assert_eq!(versions.get("@my/lib").unwrap(), "1.0.0");
+    }
+
+    #[test]
+    fn workspace_package_versions_skips_root_when_yaml_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // No root package.json — yaml-only workspace.
+        std::fs::write(
+            root.join("pnpm-workspace.yaml"),
+            b"packages:\n  - packages/*\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("packages/lib")).unwrap();
+        std::fs::write(
+            root.join("packages/lib/package.json"),
+            br#"{"name": "@my/lib", "version": "1.0.0"}"#,
+        )
+        .unwrap();
+
+        let versions = workspace_package_versions(root).unwrap();
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions.get("@my/lib").unwrap(), "1.0.0");
+        assert!(versions.get("@my/root").is_none());
+    }
+
+    #[test]
+    fn workspace_package_versions_includes_root_when_subpackage_depends_on_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            br#"{"name": "@my/root", "version": "3.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("pnpm-workspace.yaml"), b"packages:\n  - docs\n").unwrap();
+        // Sub-package docs/ depends on root via workspace:*
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(
+            root.join("docs/package.json"),
+            br#"{"name": "@my/docs", "version": "1.0.0", "dependencies": {"@my/root": "workspace:*"}}"#,
+        )
+        .unwrap();
+
+        let versions = workspace_package_versions(root).unwrap();
+        assert_eq!(versions.get("@my/root").unwrap(), "3.0.0");
+        assert_eq!(versions.get("@my/docs").unwrap(), "1.0.0");
     }
 }
