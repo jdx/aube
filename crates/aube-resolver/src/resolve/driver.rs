@@ -478,9 +478,7 @@ impl<'a> ResolveDriver<'a> {
         // For optional deps the error stays in `failed_fetches` so
         // sibling tasks that share the same transitive optional dep
         // don't re-fetch and re-fail for each importer.
-        if task.dep_type == DepType::Optional
-            && self.failed_fetches.contains_key(&fetch_name)
-        {
+        if task.dep_type == DepType::Optional && self.failed_fetches.contains_key(&fetch_name) {
             tracing::debug!(
                 "skipping optional dep {}@{}: registry fetch failed",
                 task.name,
