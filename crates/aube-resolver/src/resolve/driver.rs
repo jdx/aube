@@ -307,7 +307,7 @@ impl<'a> ResolveDriver<'a> {
     /// prefetching names already covered by the lockfile check
     /// `existing_names` explicitly before invoking this.
     fn ensure_fetch(&mut self, name: &str) {
-        if !self.resolver.cache.contains_key(name) {
+        if !self.resolver.cache.contains_key(name) && !self.failed_fetches.contains_key(name) {
             self.fetcher
                 .ensure_fetch(name, self.published_by.as_deref());
         }
