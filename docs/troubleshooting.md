@@ -37,6 +37,44 @@ In the isolated linker, only direct dependencies are symlinked at the top level.
 Transitive dependencies live under the packages that declared them. If your app
 imports a package directly, add it to your own `package.json`.
 
+## A package config file cannot resolve its own dependency
+
+Some tools discover dependency-owned config files by walking
+`node_modules/<pkg>/...` and then evaluating the config file at that symlink
+path. In an isolated linker, the package's own dependencies are linked next to
+the package's real virtual-store path under `node_modules/.aube/`, not next to
+the top-level symlink.
+
+That means a package config file can fail to `require()` a dependency that the
+same package declares, even though the package was installed correctly. Some
+native or framework toolchains swallow the config-load error and fail later
+with generated code or build output that looks unrelated.
+
+This usually means the loader is not symlink-aware; it does not mean aube
+linked the package incorrectly.
+
+If you maintain the loader, resolve the config file's real path before
+evaluating it:
+
+```js
+const configPath = fs.realpathSync(discoveredConfigPath);
+```
+
+When reporting this upstream, ask the tool maintainer to load
+dependency-owned config files from their real path, or to create the `require`
+function from the real config path, before evaluating the file. Include a small
+repro that shows the config succeeds after `fs.realpathSync(...)`.
+
+If the toolchain cannot be changed, use hoisted mode for that project:
+
+```sh
+aube install --node-linker=hoisted
+```
+
+Hoisted mode gives legacy tooling an npm-style tree where more packages are
+visible from top-level `node_modules` paths. Treat it as a compatibility
+workaround for loaders that are not symlink-aware.
+
 ## A dependency build script did not run
 
 Dependency lifecycle scripts follow the pnpm v11 build approval model. Inspect the
