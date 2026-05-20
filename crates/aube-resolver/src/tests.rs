@@ -3654,3 +3654,91 @@ fn direct_dep_info_empty_when_no_packument_cached() {
     let info = resolver.direct_dep_info(&graph);
     assert!(info.is_empty(), "no packument cached → empty map");
 }
+
+#[tokio::test]
+async fn optional_dep_is_skipped_while_required_dep_resolves() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let registry = format!("http://{}/", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                break;
+            };
+            tokio::spawn(async move {
+                let mut buf = [0_u8; 2048];
+                let _ = socket.read(&mut buf).await;
+                let response =
+                    "HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+                socket.write_all(response.as_bytes()).await.unwrap();
+            });
+        }
+    });
+
+    // Pre-seed cache for the required dep so it never hits the network.
+    let pmap = make_packument("p-map", &["7.0.4"], "7.0.4");
+    let client = Arc::new(aube_registry::client::RegistryClient::new(&registry));
+    let mut resolver = Resolver::new(client);
+    resolver.cache.insert("p-map".to_string(), pmap);
+
+    let mut manifest = PackageJson::default();
+    manifest
+        .dependencies
+        .insert("p-map".to_string(), "7.0.4".to_string());
+    manifest
+        .optional_dependencies
+        .insert("missing-optional".to_string(), "1.0.0".to_string());
+
+    let graph = resolver
+        .resolve(&manifest, None)
+        .await
+        .expect("optional dep 404 must not fail the resolve");
+    assert!(graph_has_package(&graph, "p-map", "7.0.4"));
+    assert!(!graph_has_package(&graph, "missing-optional", "1.0.0"));
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn required_dep_propagates_registry_error() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let registry = format!("http://{}/", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                break;
+            };
+            tokio::spawn(async move {
+                let mut buf = [0_u8; 2048];
+                let _ = socket.read(&mut buf).await;
+                let response =
+                    "HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+                socket.write_all(response.as_bytes()).await.unwrap();
+            });
+        }
+    });
+
+    let client = Arc::new(aube_registry::client::RegistryClient::new(&registry));
+    let mut resolver = Resolver::new(client);
+
+    let mut manifest = PackageJson::default();
+    manifest
+        .dependencies
+        .insert("missing-required".to_string(), "1.0.0".to_string());
+
+    let err = resolver
+        .resolve(&manifest, None)
+        .await
+        .expect_err("required dep 404 must propagate");
+    match err {
+        Error::Registry(name, _) => {
+            assert_eq!(name, "missing-required");
+        }
+        other => panic!("expected Error::Registry, got {other:?}"),
+    }
+
+    server.abort();
+}
