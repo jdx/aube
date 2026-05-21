@@ -465,6 +465,8 @@ enum Commands {
     /// Set a `package.json` script (not implemented — use `npm set-script`)
     #[command(hide = true, name = "set-script")]
     SetScript(commands::npm_fallback::FallbackArgs),
+    /// Stage packages for publishing (not implemented — use `npm stage`)
+    Stage(commands::npm_fallback::FallbackArgs),
     /// Start a package (shortcut for `run start`)
     Start(commands::run::ScriptArgs),
     /// Stop a package (shortcut for `run stop`)
@@ -914,6 +916,9 @@ async fn async_main(cli: Cli) -> miette::Result<Option<i32>> {
         Some(Commands::Set(args)) => commands::config::set(args)?,
         Some(Commands::SetScript(args)) => {
             return Ok(Some(commands::npm_fallback::run("set-script", &args)?));
+        }
+        Some(Commands::Stage(args)) => {
+            return Ok(Some(commands::npm_fallback::run("stage", &args)?));
         }
         Some(Commands::Start(args)) => {
             run_script_lifecycle("start", args, &effective_filter).await?;

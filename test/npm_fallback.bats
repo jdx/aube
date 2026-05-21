@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 #
 # Regression tests for the npm-fallback stub commands (`whoami`, `token`,
-# `owner`, `search`, `pkg`, `set-script`). pnpm claims these names at the
+# `owner`, `search`, `pkg`, `set-script`, `stage`). pnpm claims these names at the
 # CLI surface so they don't fall through to the implicit-script runner;
 # aube matches that behavior by bailing with a "not implemented — use
 # `npm <cmd>`" error and exiting non-zero. These tests nail down both
@@ -64,4 +64,12 @@ teardown() {
 	assert_failure
 	assert_output --partial "aube set-script"
 	assert_output --partial "npm set-script"
+}
+
+@test "aube stage prints npm fallback and exits non-zero" {
+	run aube stage list @scope/pkg --json
+	assert_failure
+	assert_output --partial "aube stage"
+	assert_output --partial "is not implemented"
+	assert_output --partial "npm stage"
 }

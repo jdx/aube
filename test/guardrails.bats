@@ -318,6 +318,10 @@ _setup_workspace_fixture() {
 	run aube whoami --registry=https://registry.example.test/
 	assert_success
 	[[ "$output" == *"fake-npm whoami --registry=https://registry.example.test/"* ]]
+
+	run aube stage list @scope/pkg --json --registry=https://registry.example.test/
+	assert_success
+	[[ "$output" == *"fake-npm stage list @scope/pkg --json --registry=https://registry.example.test/"* ]]
 }
 
 @test "npmPath fallback keeps child stderr visible under --silent" {

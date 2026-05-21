@@ -1648,6 +1648,33 @@ cmd set-script hide=#true help="Set a `package.json` script (not implemented —
     }
     arg "[ARGS]…" help="Unused; captured so `aube <cmd> foo bar` parses instead of erroring on unexpected args before the fallback message prints" required=#false double_dash=automatic var=#true hide=#true
 }
+cmd stage help="Stage packages for publishing (not implemented — use `npm stage`)" {
+    flag --fetch-retries help="Number of retry attempts for failed registry fetches" {
+        long_help "Number of retry attempts for failed registry fetches.\n\nOverrides `fetchRetries` / `fetch-retries` from `.npmrc` / `aube-workspace.yaml` when set. Pair with `--fetch-timeout` to fail fast in scripted test runs."
+        arg <N>
+    }
+    flag --fetch-retry-factor help="Exponential backoff factor between retry attempts" {
+        long_help "Exponential backoff factor between retry attempts.\n\nOverrides `fetchRetryFactor` / `fetch-retry-factor` from `.npmrc` / `aube-workspace.yaml` when set. Integer-only — the underlying `FetchPolicy.retry_factor` is `u32`. Fractional values like `1.5` are rejected by clap."
+        arg <N>
+    }
+    flag --fetch-retry-maxtimeout help="Upper bound (ms) on the computed retry backoff" {
+        long_help "Upper bound (ms) on the computed retry backoff.\n\nOverrides `fetchRetryMaxtimeout` / `fetch-retry-maxtimeout` from `.npmrc` / `aube-workspace.yaml` when set."
+        arg <MS>
+    }
+    flag --fetch-retry-mintimeout help="Lower bound (ms) on the computed retry backoff" {
+        long_help "Lower bound (ms) on the computed retry backoff.\n\nOverrides `fetchRetryMintimeout` / `fetch-retry-mintimeout` from `.npmrc` / `aube-workspace.yaml` when set."
+        arg <MS>
+    }
+    flag --fetch-timeout help="Per-request HTTP timeout in milliseconds" {
+        long_help "Per-request HTTP timeout in milliseconds.\n\nOverrides `fetchTimeout` / `fetch-timeout` from `.npmrc` / `aube-workspace.yaml` when set. Applied via `reqwest`'s `.timeout()` so it covers headers + body together."
+        arg <MS>
+    }
+    flag --registry help="Override the default registry URL for this invocation" {
+        long_help "Override the default registry URL for this invocation.\n\nUse this npm registry URL for package metadata, tarballs, audit requests, dist-tags, and registry writes."
+        arg <URL>
+    }
+    arg "[ARGS]…" help="Unused; captured so `aube <cmd> foo bar` parses instead of erroring on unexpected args before the fallback message prints" required=#false double_dash=automatic var=#true hide=#true
+}
 cmd start help="Start a package (shortcut for `run start`)" {
     flag --no-install help="Skip auto-install check"
     flag --frozen-lockfile help="Error if the lockfile drifts from package.json"

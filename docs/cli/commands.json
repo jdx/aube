@@ -9421,6 +9421,154 @@
         "hidden_aliases": [],
         "examples": []
       },
+      "stage": {
+        "full_cmd": [
+          "stage"
+        ],
+        "usage": "stage [FLAGS]",
+        "subcommands": {},
+        "args": [
+          {
+            "name": "ARGS",
+            "usage": "[ARGS]…",
+            "help": "Unused; captured so `aube <cmd> foo bar` parses instead of erroring on unexpected args before the fallback message prints",
+            "help_first_line": "Unused; captured so `aube <cmd> foo bar` parses instead of erroring on unexpected args before the fallback message prints",
+            "required": false,
+            "double_dash": "Automatic",
+            "var": true,
+            "hide": true
+          }
+        ],
+        "flags": [
+          {
+            "name": "fetch-retries",
+            "usage": "--fetch-retries <N>",
+            "help": "Number of retry attempts for failed registry fetches",
+            "help_long": "Number of retry attempts for failed registry fetches.\n\nOverrides `fetchRetries` / `fetch-retries` from `.npmrc` / `aube-workspace.yaml` when set. Pair with `--fetch-timeout` to fail fast in scripted test runs.",
+            "help_first_line": "Number of retry attempts for failed registry fetches",
+            "short": [],
+            "long": [
+              "fetch-retries"
+            ],
+            "hide": false,
+            "global": false,
+            "arg": {
+              "name": "N",
+              "usage": "<N>",
+              "required": true,
+              "double_dash": "Optional",
+              "hide": false
+            }
+          },
+          {
+            "name": "fetch-retry-factor",
+            "usage": "--fetch-retry-factor <N>",
+            "help": "Exponential backoff factor between retry attempts",
+            "help_long": "Exponential backoff factor between retry attempts.\n\nOverrides `fetchRetryFactor` / `fetch-retry-factor` from `.npmrc` / `aube-workspace.yaml` when set. Integer-only — the underlying `FetchPolicy.retry_factor` is `u32`. Fractional values like `1.5` are rejected by clap.",
+            "help_first_line": "Exponential backoff factor between retry attempts",
+            "short": [],
+            "long": [
+              "fetch-retry-factor"
+            ],
+            "hide": false,
+            "global": false,
+            "arg": {
+              "name": "N",
+              "usage": "<N>",
+              "required": true,
+              "double_dash": "Optional",
+              "hide": false
+            }
+          },
+          {
+            "name": "fetch-retry-maxtimeout",
+            "usage": "--fetch-retry-maxtimeout <MS>",
+            "help": "Upper bound (ms) on the computed retry backoff",
+            "help_long": "Upper bound (ms) on the computed retry backoff.\n\nOverrides `fetchRetryMaxtimeout` / `fetch-retry-maxtimeout` from `.npmrc` / `aube-workspace.yaml` when set.",
+            "help_first_line": "Upper bound (ms) on the computed retry backoff",
+            "short": [],
+            "long": [
+              "fetch-retry-maxtimeout"
+            ],
+            "hide": false,
+            "global": false,
+            "arg": {
+              "name": "MS",
+              "usage": "<MS>",
+              "required": true,
+              "double_dash": "Optional",
+              "hide": false
+            }
+          },
+          {
+            "name": "fetch-retry-mintimeout",
+            "usage": "--fetch-retry-mintimeout <MS>",
+            "help": "Lower bound (ms) on the computed retry backoff",
+            "help_long": "Lower bound (ms) on the computed retry backoff.\n\nOverrides `fetchRetryMintimeout` / `fetch-retry-mintimeout` from `.npmrc` / `aube-workspace.yaml` when set.",
+            "help_first_line": "Lower bound (ms) on the computed retry backoff",
+            "short": [],
+            "long": [
+              "fetch-retry-mintimeout"
+            ],
+            "hide": false,
+            "global": false,
+            "arg": {
+              "name": "MS",
+              "usage": "<MS>",
+              "required": true,
+              "double_dash": "Optional",
+              "hide": false
+            }
+          },
+          {
+            "name": "fetch-timeout",
+            "usage": "--fetch-timeout <MS>",
+            "help": "Per-request HTTP timeout in milliseconds",
+            "help_long": "Per-request HTTP timeout in milliseconds.\n\nOverrides `fetchTimeout` / `fetch-timeout` from `.npmrc` / `aube-workspace.yaml` when set. Applied via `reqwest`'s `.timeout()` so it covers headers + body together.",
+            "help_first_line": "Per-request HTTP timeout in milliseconds",
+            "short": [],
+            "long": [
+              "fetch-timeout"
+            ],
+            "hide": false,
+            "global": false,
+            "arg": {
+              "name": "MS",
+              "usage": "<MS>",
+              "required": true,
+              "double_dash": "Optional",
+              "hide": false
+            }
+          },
+          {
+            "name": "registry",
+            "usage": "--registry <URL>",
+            "help": "Override the default registry URL for this invocation",
+            "help_long": "Override the default registry URL for this invocation.\n\nUse this npm registry URL for package metadata, tarballs, audit requests, dist-tags, and registry writes.",
+            "help_first_line": "Override the default registry URL for this invocation",
+            "short": [],
+            "long": [
+              "registry"
+            ],
+            "hide": false,
+            "global": false,
+            "arg": {
+              "name": "URL",
+              "usage": "<URL>",
+              "required": true,
+              "double_dash": "Optional",
+              "hide": false
+            }
+          }
+        ],
+        "mounts": [],
+        "hide": false,
+        "help": "Stage packages for publishing (not implemented — use `npm stage`)",
+        "name": "stage",
+        "aliases": [],
+        "hidden_aliases": [],
+        "examples": []
+      },
       "start": {
         "full_cmd": [
           "start"
