@@ -33,7 +33,7 @@ Suppresses `prepublishOnly`, `prepublish`, `prepack`, `prepare`, `postpack`, `pu
 
 Emit the publish result as JSON.
 
-Output is an array with one `{name, version, filename, files: [{path}]}` entry, matching `pnpm publish --json` / `aube pack --json`.
+Output matches `npm publish --json` / `pnpm publish --json`.
 
 ### `--no-git-checks`
 

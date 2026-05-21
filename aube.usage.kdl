@@ -1349,7 +1349,7 @@ cmd publish help="Publish the current package to the registry" {
         long_help "Skip publish lifecycle scripts.\n\nSuppresses `prepublishOnly`, `prepublish`, `prepack`, `prepare`, `postpack`, `publish`, and `postpublish` scripts for this publish."
     }
     flag --json help="Emit the publish result as JSON" {
-        long_help "Emit the publish result as JSON.\n\nOutput is an array with one `{name, version, filename, files: [{path}]}` entry, matching `pnpm publish --json` / `aube pack --json`."
+        long_help "Emit the publish result as JSON.\n\nOutput matches `npm publish --json` / `pnpm publish --json`."
     }
     flag --no-git-checks help="Skip the \"working tree must be clean\" check" {
         long_help "Skip the \"working tree must be clean\" check.\n\nWhen unset, aube refuses to publish from a dirty git checkout (uncommitted tracked changes) or from a detached / non-release branch."

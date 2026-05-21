@@ -7637,7 +7637,7 @@
             "name": "json",
             "usage": "--json",
             "help": "Emit the publish result as JSON",
-            "help_long": "Emit the publish result as JSON.\n\nOutput is an array with one `{name, version, filename, files: [{path}]}` entry, matching `pnpm publish --json` / `aube pack --json`.",
+            "help_long": "Emit the publish result as JSON.\n\nOutput matches `npm publish --json` / `pnpm publish --json`.",
             "help_first_line": "Emit the publish result as JSON",
             "short": [],
             "long": [
