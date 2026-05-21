@@ -3,7 +3,9 @@
 
 - **Usage**: `aube prune [-P --prod] [--no-optional]`
 
-Remove extraneous packages from node_modules
+Remove extraneous packages from project `node_modules`.
+
+Reads the lockfile, computes the packages still reachable from each importer, and removes stale top-level links, stale virtual-store entries, and dangling .bin links. Does not modify package.json or the lockfile.
 
 ## Flags
 
@@ -14,3 +16,6 @@ Remove devDependencies from node_modules
 ### `--no-optional`
 
 Also remove optionalDependencies
+
+Global store cleanup: use `aube store prune` to clean unreferenced files from the global
+content-addressable store.

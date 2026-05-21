@@ -78,3 +78,7 @@ aube prune --no-optional
 `prune` removes extraneous packages from `node_modules`, including stale
 virtual-store entries and dangling `.bin` links.
 
+It reads the lockfile to decide what should remain installed, but it does not
+modify `package.json` or the lockfile. Use `aube store prune` instead when you
+want to clean unreferenced files from the global store printed by
+`aube store path`.
