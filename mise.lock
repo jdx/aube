@@ -71,14 +71,6 @@ url = "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.18.1/ca
 checksum = "sha256:89706aa5215c164d8d091597a470fee72308ac87e8553af395ea77db844a888c"
 url = "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.18.1/cargo-binstall-x86_64-pc-windows-msvc.zip"
 
-[[tools."cargo:cargo-audit"]]
-version = "0.22.1"
-backend = "cargo:cargo-audit"
-
-[[tools."cargo:cargo-deny"]]
-version = "0.19.6"
-backend = "cargo:cargo-deny"
-
 [[tools.communique]]
 version = "1.1.2"
 backend = "github:jdx/communique"
