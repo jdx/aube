@@ -455,19 +455,15 @@ impl<'a> ResolveDriver<'a> {
                     return Err(Error::Registry("(join)".to_string(), join_err.to_string()));
                 }
                 None => {
-                    // All in-flight tasks completed. If this task's
-                    // failure was already recorded in the side table,
-                    // break to the post-loop check.
-                    if !self.failed_fetches.contains_key(&fetch_name) {
-                        // ensure_fetch! guarantees something is
-                        // in flight if the cache still doesn't
-                        // hold this name, so a None here means
-                        // the spawn failed silently. Surface it.
-                        return Err(Error::Registry(
-                            fetch_name.clone(),
-                            "packument fetch disappeared before completing".to_string(),
-                        ));
-                    }
+                    // join_next returns None only when the JoinSet is
+                    // empty. ensure_fetch above guarantees at least one
+                    // task is in flight if the cache still doesn't
+                    // hold this name, so None means the spawn failed
+                    // silently. Surface it.
+                    return Err(Error::Registry(
+                        fetch_name.clone(),
+                        "packument fetch disappeared before completing".to_string(),
+                    ));
                 }
             }
         }
