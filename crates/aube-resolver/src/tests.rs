@@ -3654,3 +3654,166 @@ fn direct_dep_info_empty_when_no_packument_cached() {
     let info = resolver.direct_dep_info(&graph);
     assert!(info.is_empty(), "no packument cached → empty map");
 }
+
+#[tokio::test]
+async fn optional_dep_is_skipped_while_required_dep_resolves() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let registry = format!("http://{}/", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                break;
+            };
+            tokio::spawn(async move {
+                let mut buf = [0_u8; 2048];
+                let _ = socket.read(&mut buf).await;
+                let response =
+                    "HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+                socket.write_all(response.as_bytes()).await.unwrap();
+            });
+        }
+    });
+
+    // Pre-seed cache for the required dep so it never hits the network.
+    let pmap = make_packument("p-map", &["7.0.4"], "7.0.4");
+    let client = Arc::new(aube_registry::client::RegistryClient::new(&registry));
+    let mut resolver = Resolver::new(client);
+    resolver.cache.insert("p-map".to_string(), pmap);
+
+    let mut manifest = PackageJson::default();
+    manifest
+        .dependencies
+        .insert("p-map".to_string(), "7.0.4".to_string());
+    manifest
+        .optional_dependencies
+        .insert("missing-optional".to_string(), "1.0.0".to_string());
+
+    let graph = resolver
+        .resolve(&manifest, None)
+        .await
+        .expect("optional dep 404 must not fail the resolve");
+    assert!(graph_has_package(&graph, "p-map", "7.0.4"));
+    assert!(!graph_has_package(&graph, "missing-optional", "1.0.0"));
+    // pnpm parity: fetch-failed optional deps leave no trace in the
+    // lockfile — no skippedOptionalDependencies entry.
+    assert!(
+        graph
+            .skipped_optional_dependencies
+            .get(".")
+            .map_or(true, |skipped| !skipped.contains_key("missing-optional"))
+    );
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn required_dep_propagates_registry_error() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let registry = format!("http://{}/", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                break;
+            };
+            tokio::spawn(async move {
+                let mut buf = [0_u8; 2048];
+                let _ = socket.read(&mut buf).await;
+                let response =
+                    "HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+                socket.write_all(response.as_bytes()).await.unwrap();
+            });
+        }
+    });
+
+    let client = Arc::new(aube_registry::client::RegistryClient::new(&registry));
+    let mut resolver = Resolver::new(client);
+
+    let mut manifest = PackageJson::default();
+    manifest
+        .dependencies
+        .insert("missing-required".to_string(), "1.0.0".to_string());
+
+    let err = resolver
+        .resolve(&manifest, None)
+        .await
+        .expect_err("required dep 404 must propagate");
+    match err {
+        Error::Registry(name, _) => {
+            assert_eq!(name, "missing-required");
+        }
+        other => panic!("expected Error::Registry, got {other:?}"),
+    }
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn optional_dep_with_both_fetches_in_flight() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // Server returns 200 for p-map and 404 for missing-optional,
+    // so BOTH deps trigger real concurrent fetches.
+    let pkg_body = serde_json::to_vec(&make_packument("p-map", &["7.0.4"], "7.0.4")).unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let registry = format!("http://{}/", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                break;
+            };
+            let body = pkg_body.clone();
+            tokio::spawn(async move {
+                let mut buf = [0_u8; 2048];
+                let _ = socket.read(&mut buf).await;
+                let path = std::str::from_utf8(&buf)
+                    .ok()
+                    .and_then(|s| s.split_whitespace().nth(1))
+                    .unwrap_or("/");
+                if path.contains("missing-optional") {
+                    let response =
+                        "HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+                    socket.write_all(response.as_bytes()).await.unwrap();
+                } else {
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    socket.write_all(response.as_bytes()).await.unwrap();
+                    socket.write_all(&body).await.unwrap();
+                }
+            });
+        }
+    });
+
+    let client = Arc::new(aube_registry::client::RegistryClient::new(&registry));
+    let mut resolver = Resolver::new(client);
+
+    let mut manifest = PackageJson::default();
+    manifest
+        .dependencies
+        .insert("p-map".to_string(), "7.0.4".to_string());
+    manifest
+        .optional_dependencies
+        .insert("missing-optional".to_string(), "1.0.0".to_string());
+
+    let graph = resolver
+        .resolve(&manifest, None)
+        .await
+        .expect("optional dep 404 must not fail even with concurrent fetches");
+    assert!(graph_has_package(&graph, "p-map", "7.0.4"));
+    assert!(!graph_has_package(&graph, "missing-optional", "1.0.0"));
+    // pnpm parity: fetch-failed optional deps leave no trace in the
+    // lockfile — no skippedOptionalDependencies entry.
+    assert!(
+        graph
+            .skipped_optional_dependencies
+            .get(".")
+            .map_or(true, |skipped| !skipped.contains_key("missing-optional"))
+    );
+
+    server.abort();
+}
