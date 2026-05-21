@@ -485,8 +485,9 @@ snapshots:
     // URL-keyed transitives typically have no integrity, so gating
     // the block on `pkg.integrity` would silently drop the tarball
     // URL and a re-parse would have no way to fetch the package.
+    // Hosted git tarballs also carry pnpm's `gitHosted` marker.
     assert!(
-            written.contains("resolution: {tarball: https://codeload.github.com/PruvoNet/node-expat/tar.gz/0732e16b0b679da2d12e062f78b3a511f419bb65}"),
+            written.contains("resolution: {gitHosted: true, tarball: https://codeload.github.com/PruvoNet/node-expat/tar.gz/0732e16b0b679da2d12e062f78b3a511f419bb65}"),
             "`resolution: {{tarball: …}}` missing from output: {written}"
         );
     // Re-parse the written lockfile and assert the tarball URL

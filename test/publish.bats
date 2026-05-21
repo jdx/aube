@@ -669,25 +669,25 @@ m.version = '0.1.0-sha.abc123';
 fs.writeFileSync('package.json', JSON.stringify(m, null, 2));
 NODE
 
-	run bash -c "aube publish --dry-run --json --registry=https://r.example.com/ | jq -r '.[0].version'"
+	run bash -c "aube publish --dry-run --json --registry=https://r.example.com/ | jq -r '.version'"
 	assert_success
 	assert_output "0.1.0-sha.abc123"
 }
 
-@test "aube publish --dry-run --json emits a pnpm-compatible array" {
+@test "aube publish --dry-run --json emits a pnpm-compatible object" {
 	_write_publishable_pkg
 
 	run aube publish --dry-run --json --registry=https://r.example.com/
 	assert_success
-	# Shape matches `pnpm publish --json` / `aube pack --json`: a
-	# single-element array with name/version/filename/files.
-	run bash -c "aube publish --dry-run --json --registry=https://r.example.com/ | jq -r '.[0].name + \"@\" + .[0].version'"
+	# Shape matches `npm publish --json` / `pnpm publish --json`: a
+	# single object with name/version/filename/files.
+	run bash -c "aube publish --dry-run --json --registry=https://r.example.com/ | jq -r '.name + \"@\" + .version'"
 	assert_success
 	assert_output "publish-smoke@0.1.0"
-	run bash -c "aube publish --dry-run --json --registry=https://r.example.com/ | jq -r '.[0].filename'"
+	run bash -c "aube publish --dry-run --json --registry=https://r.example.com/ | jq -r '.filename'"
 	assert_success
 	assert_output "publish-smoke-0.1.0.tgz"
-	run bash -c "aube publish --dry-run --json --registry=https://r.example.com/ | jq -r '.[0].files[].path' | sort"
+	run bash -c "aube publish --dry-run --json --registry=https://r.example.com/ | jq -r '.files[].path' | sort"
 	assert_success
 	assert_line "index.js"
 	assert_line "package.json"
