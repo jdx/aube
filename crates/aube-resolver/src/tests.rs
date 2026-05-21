@@ -3696,6 +3696,14 @@ async fn optional_dep_is_skipped_while_required_dep_resolves() {
         .expect("optional dep 404 must not fail the resolve");
     assert!(graph_has_package(&graph, "p-map", "7.0.4"));
     assert!(!graph_has_package(&graph, "missing-optional", "1.0.0"));
+    // pnpm parity: fetch-failed optional deps leave no trace in the
+    // lockfile — no skippedOptionalDependencies entry.
+    assert!(
+        graph
+            .skipped_optional_dependencies
+            .get(".")
+            .map_or(true, |skipped| !skipped.contains_key("missing-optional"))
+    );
 
     server.abort();
 }
@@ -3798,6 +3806,14 @@ async fn optional_dep_with_both_fetches_in_flight() {
         .expect("optional dep 404 must not fail even with concurrent fetches");
     assert!(graph_has_package(&graph, "p-map", "7.0.4"));
     assert!(!graph_has_package(&graph, "missing-optional", "1.0.0"));
+    // pnpm parity: fetch-failed optional deps leave no trace in the
+    // lockfile — no skippedOptionalDependencies entry.
+    assert!(
+        graph
+            .skipped_optional_dependencies
+            .get(".")
+            .map_or(true, |skipped| !skipped.contains_key("missing-optional"))
+    );
 
     server.abort();
 }

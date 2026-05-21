@@ -484,14 +484,6 @@ impl<'a> ResolveDriver<'a> {
                 task.name,
                 task.range,
             );
-            if task.is_root
-                && let Some(spec) = task.original_specifier.as_ref()
-            {
-                self.skipped_optional_dependencies
-                    .entry(task.importer.clone())
-                    .or_default()
-                    .insert(task.name.clone(), spec.clone());
-            }
             if task.is_root {
                 self.note_root_done();
             }
