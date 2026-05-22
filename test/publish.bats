@@ -68,6 +68,85 @@ EOF
 	assert_output --partial "no auth token"
 }
 
+@test "aube publish uses npm trusted publishing OIDC when no auth token is configured" {
+	_write_publishable_pkg
+
+	cat >trusted-publish-server.mjs <<'NODE'
+import http from 'node:http';
+import fs from 'node:fs';
+
+const server = http.createServer((req, res) => {
+  if (req.method === 'GET' && req.url.startsWith('/gha-oidc')) {
+    const url = new URL(req.url, 'http://127.0.0.1');
+    fs.writeFileSync('oidc-audience', url.searchParams.get('audience') || '');
+    if (req.headers.authorization !== 'Bearer gha-request-token') {
+      res.statusCode = 401;
+      res.end('{}');
+      return;
+    }
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ value: 'gha-id-token' }));
+    return;
+  }
+  if (req.method === 'GET' && req.url === '/publish-smoke') {
+    res.statusCode = 404;
+    res.end('{}');
+    return;
+  }
+  if (req.method === 'POST' && req.url === '/-/npm/v1/oidc/token/exchange/package/publish-smoke') {
+    fs.writeFileSync('exchange-auth', req.headers.authorization || '');
+    res.statusCode = 201;
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ token_type: 'oidc', token: 'npm-exchange-token' }));
+    return;
+  }
+  if (req.method === 'PUT' && req.url === '/publish-smoke') {
+    fs.writeFileSync('put-auth', req.headers.authorization || '');
+    req.resume();
+    req.on('end', () => {
+      res.statusCode = req.headers.authorization === 'Bearer npm-exchange-token' ? 201 : 401;
+      res.end('{"ok":true}');
+    });
+    return;
+  }
+  res.statusCode = 404;
+  res.end('{}');
+});
+server.listen(0, '127.0.0.1', () => {
+  fs.writeFileSync('trusted-publish-server-port', String(server.address().port));
+});
+NODE
+	node trusted-publish-server.mjs &
+	PUBLISH_SERVER_PID=$!
+	for _ in 1 2 3 4 5 6 7 8 9 10; do
+		[ -f trusted-publish-server-port ] && break
+		sleep 0.1
+	done
+	port="$(cat trusted-publish-server-port)"
+
+	run env \
+		GITHUB_ACTIONS=true \
+		ACTIONS_ID_TOKEN_REQUEST_URL="http://127.0.0.1:${port}/gha-oidc" \
+		ACTIONS_ID_TOKEN_REQUEST_TOKEN=gha-request-token \
+		aube publish --no-git-checks --registry "http://127.0.0.1:${port}/"
+	rc=$status
+	_stop_publish_server
+	[ "$rc" -eq 0 ]
+	assert_output --partial "+ publish-smoke@0.1.0"
+
+	run cat oidc-audience
+	assert_success
+	assert_output "npm:127.0.0.1"
+
+	run cat exchange-auth
+	assert_success
+	assert_output "Bearer gha-id-token"
+
+	run cat put-auth
+	assert_success
+	assert_output "Bearer npm-exchange-token"
+}
+
 @test "aube publish --provenance errors outside an OIDC-capable CI" {
 	_write_publishable_pkg
 

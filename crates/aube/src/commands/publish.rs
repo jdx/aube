@@ -36,6 +36,8 @@ use aube_registry::config::{NpmConfig, normalize_registry_url_pub};
 use base64::Engine;
 use clap::Args;
 use miette::{Context, IntoDiagnostic, miette};
+use reqwest::Url;
+use serde::Deserialize;
 use sha1::Digest as _;
 use sha2::Sha512;
 use std::path::{Path, PathBuf};
@@ -449,7 +451,10 @@ async fn publish_one(
         });
     }
 
-    ensure_registry_auth(client, &registry_url)?;
+    let trusted_publish_token = trusted_publish_token(client, &registry_url, &name).await?;
+    if trusted_publish_token.is_none() {
+        ensure_registry_auth(client, &registry_url)?;
+    }
 
     // Pre-flight: ask the registry whether `name@version` is already
     // there. In fanout mode a hit is a silent skip (so `-r publish` is
@@ -536,10 +541,15 @@ async fn publish_one(
     )?;
 
     let url = put_url(&registry_url, &archive.name);
-    let mut req = client
-        .authed_request(reqwest::Method::PUT, &url, &registry_url)
-        .header("content-type", "application/json")
-        .body(serde_json::to_vec(&body).into_diagnostic()?);
+    let mut req = if let Some(token) = trusted_publish_token.as_deref() {
+        client
+            .request(reqwest::Method::PUT, &url, &registry_url)
+            .bearer_auth(token)
+    } else {
+        client.authed_request(reqwest::Method::PUT, &url, &registry_url)
+    }
+    .header("content-type", "application/json")
+    .body(serde_json::to_vec(&body).into_diagnostic()?);
     if let Some(otp) = &args.otp {
         req = req.header("npm-otp", otp);
     }
@@ -564,6 +574,121 @@ async fn publish_one(
         archive: Some(archive),
         status: PublishStatus::Published,
     })
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubOidcResponse {
+    value: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NpmOidcExchangeResponse {
+    token: Option<String>,
+}
+
+/// Try npm Trusted Publishing before falling back to traditional `.npmrc`
+/// auth. npm's OIDC exchange is publish-specific: the CI-issued ID token must
+/// have audience `npm:<registry-host>`, then the registry returns a short-lived
+/// package-scoped token used as the PUT bearer token.
+async fn trusted_publish_token(
+    client: &RegistryClient,
+    registry_url: &str,
+    package_name: &str,
+) -> miette::Result<Option<String>> {
+    let Some(id_token) = npm_oidc_id_token(registry_url).await? else {
+        return Ok(None);
+    };
+    exchange_npm_oidc_token(client, registry_url, package_name, &id_token).await
+}
+
+async fn npm_oidc_id_token(registry_url: &str) -> miette::Result<Option<String>> {
+    if let Ok(token) = std::env::var("NPM_ID_TOKEN")
+        && !token.trim().is_empty()
+    {
+        return Ok(Some(token));
+    }
+
+    if std::env::var("GITHUB_ACTIONS").is_err() {
+        return Ok(None);
+    }
+    let Ok(request_url) = std::env::var("ACTIONS_ID_TOKEN_REQUEST_URL") else {
+        return Ok(None);
+    };
+    let Ok(request_token) = std::env::var("ACTIONS_ID_TOKEN_REQUEST_TOKEN") else {
+        return Ok(None);
+    };
+    if request_url.trim().is_empty() || request_token.trim().is_empty() {
+        return Ok(None);
+    }
+
+    let registry = Url::parse(registry_url)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("invalid registry URL for npm OIDC: {registry_url}"))?;
+    let host = registry
+        .host_str()
+        .ok_or_else(|| miette!("invalid registry URL for npm OIDC: missing host"))?;
+    let audience = format!("npm:{host}");
+
+    let mut url = Url::parse(&request_url)
+        .into_diagnostic()
+        .wrap_err("invalid ACTIONS_ID_TOKEN_REQUEST_URL")?;
+    url.query_pairs_mut().append_pair("audience", &audience);
+
+    let resp = reqwest::Client::new()
+        .get(url)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .bearer_auth(request_token)
+        .send()
+        .await
+        .into_diagnostic()
+        .wrap_err("failed to request GitHub Actions OIDC token for npm")?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(miette!(
+            "failed to request GitHub Actions OIDC token for npm: {status}: {}",
+            body.trim()
+        ));
+    }
+    let body = resp
+        .json::<GitHubOidcResponse>()
+        .await
+        .into_diagnostic()
+        .wrap_err("failed to parse GitHub Actions OIDC token response")?;
+    Ok(body.value.filter(|token| !token.trim().is_empty()))
+}
+
+async fn exchange_npm_oidc_token(
+    client: &RegistryClient,
+    registry_url: &str,
+    package_name: &str,
+    id_token: &str,
+) -> miette::Result<Option<String>> {
+    let endpoint = format!(
+        "{}/-/npm/v1/oidc/token/exchange/package/{}",
+        registry_url.trim_end_matches('/'),
+        encode_package_name(package_name)
+    );
+    let resp = client
+        .request(reqwest::Method::POST, &endpoint, registry_url)
+        .bearer_auth(id_token)
+        .send()
+        .await
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to exchange npm OIDC token at {endpoint}"))?;
+    if !resp.status().is_success() {
+        tracing::debug!(
+            status = %resp.status(),
+            "npm OIDC token exchange failed; falling back to configured registry auth"
+        );
+        return Ok(None);
+    }
+    let body = resp
+        .json::<NpmOidcExchangeResponse>()
+        .await
+        .into_diagnostic()
+        .wrap_err("failed to parse npm OIDC token exchange response")?;
+    Ok(body.token.filter(|token| !token.trim().is_empty()))
 }
 
 /// Pre-pack chain for publish: `prepublishOnly` → `prepublish` →

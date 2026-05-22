@@ -60,6 +60,19 @@ impl RegistryClient {
         )
     }
 
+    /// Build an HTTP request using the TLS/proxy client selected for this
+    /// registry, but leave authentication to the caller. Publish uses this
+    /// for npm Trusted Publishing exchange tokens so an old `.npmrc` token
+    /// cannot be sent alongside the short-lived OIDC-derived bearer token.
+    pub fn request(
+        &self,
+        method: reqwest::Method,
+        url: &str,
+        registry_url: &str,
+    ) -> reqwest::RequestBuilder {
+        self.http_for(registry_url).request(method, url)
+    }
+
     pub fn has_resolved_auth_for(&self, registry_url: &str) -> bool {
         self.registry_auth_token_for(registry_url).is_some()
             || self.config.basic_auth_for(registry_url).is_some()
