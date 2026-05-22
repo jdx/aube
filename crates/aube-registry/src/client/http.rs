@@ -139,6 +139,11 @@ fn build_http_client_inner(
     }
     builder = builder
         .tcp_keepalive(std::time::Duration::from_secs(60))
+        // In-process DNS caching via hickory-dns. The system resolver
+        // does not cache and uses a thread pool for `getaddrinfo`,
+        // which serializes the first cold lookup per origin. hickory
+        // resolves async + caches for the process lifetime.
+        .hickory_dns(true)
         // `strict-ssl=false` disables cert validation entirely. This
         // is a security hole on purpose: corporate registries should
         // prefer per-registry `ca` / `cafile` so validation stays on.
