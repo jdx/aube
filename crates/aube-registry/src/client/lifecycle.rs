@@ -129,9 +129,12 @@ impl RegistryClient {
                 targets.push((client, url.clone()));
             }
         }
-        // The HEAD requests below warm reqwest's connection pool and
-        // the platform resolver path as a side effect of issuing the
-        // request, so no separate lookup is needed.
+        // The HEAD requests below populate hickory-dns's in-process
+        // cache as a side effect of issuing the request. A separate
+        // `tokio::net::lookup_host` preresolve would only warm the
+        // OS-level resolver (getaddrinfo), which reqwest's hickory
+        // path does not consult. So the prewarm itself is the DNS
+        // warm-up; no extra lookup needed.
         aube_util::http::prewarm::spawn_head(targets);
     }
 
