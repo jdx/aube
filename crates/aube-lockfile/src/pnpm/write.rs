@@ -287,10 +287,11 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                 // re-parse would then have no way to fetch the package.
                 Some(WritableResolution {
                     integrity: pkg.integrity.clone(),
-                    git_hosted: pkg
-                        .tarball_url
-                        .as_deref()
-                        .is_some_and(tarball_url_is_hosted_git),
+                    git_hosted: pkg.registry_git_hosted
+                        || pkg
+                            .tarball_url
+                            .as_deref()
+                            .is_some_and(tarball_url_is_hosted_git),
                     directory: None,
                     tarball: pkg.tarball_url.clone(),
                     commit: None,
@@ -301,7 +302,11 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
             }
             None if pkg.integrity.is_some() || preserve_tarball_url => Some(WritableResolution {
                 integrity: pkg.integrity.clone(),
-                git_hosted: false,
+                git_hosted: pkg.registry_git_hosted
+                    || pkg
+                        .tarball_url
+                        .as_deref()
+                        .is_some_and(tarball_url_is_hosted_git),
                 directory: None,
                 // Emit the full registry tarball URL when the setting
                 // opts in. JSR packages are the exception: npm.jsr.io
@@ -521,11 +526,16 @@ fn registry_tarball_url_is_not_derivable(
     };
     let basename = name.rsplit('/').next().unwrap_or(name);
     let expected_suffix = format!("/-/{basename}-{version}.tgz");
-    !url.ends_with(&expected_suffix)
+    let path_only = url.split_once('?').map_or(url, |(path, _)| path);
+    let path_only = path_only
+        .split_once('#')
+        .map_or(path_only, |(path, _)| path);
+    !path_only.ends_with(&expected_suffix)
 }
 
 fn tarball_url_is_hosted_git(url: &str) -> bool {
     url.contains("://codeload.github.com/")
+        || url.contains("://npm.pkg.github.com/")
         || (url.contains("://gitlab.com/") && url.contains("/-/archive/"))
         || (url.contains("://bitbucket.org/") && url.contains("/get/"))
 }

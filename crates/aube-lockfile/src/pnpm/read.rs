@@ -3,7 +3,8 @@ use super::dep_path::{
 };
 use super::raw::{RawDepSpec, local_source_from_resolution, parse_raw_lockfile};
 use crate::{
-    CatalogEntry, DepType, DirectDep, Error, LocalSource, LockedPackage, LockfileGraph, PeerDepMeta,
+    CatalogEntry, DepType, DirectDep, Error, LocalSource, LockedPackage, LockfileGraph,
+    PeerDepMeta, git_commits_match,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -258,17 +259,19 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
             // the subpath in the snapshot key and doesn't always
             // echo it on the resolution block.
             let pkg_info = raw.packages.get(&canonical).or_else(|| match local {
-                LocalSource::Git(git) => raw.packages.values().find(|pkg_info| {
-                    pkg_info
-                        .resolution
-                        .as_ref()
+                LocalSource::Git(git) => raw.packages.iter().find_map(|(key, pkg_info)| {
+                    parse_dep_path(key)
+                        .filter(|(name, _)| name == &local_pkg.name)
+                        .and(pkg_info.resolution.as_ref())
                         .and_then(local_source_from_resolution)
-                        .is_some_and(|candidate| match candidate {
-                            LocalSource::Git(candidate) => {
-                                candidate.resolved == git.resolved
-                                    && candidate.subpath == git.subpath
+                        .and_then(|candidate| match candidate {
+                            LocalSource::Git(candidate)
+                                if git_commits_match(&candidate.resolved, &git.resolved)
+                                    && candidate.subpath == git.subpath =>
+                            {
+                                Some(pkg_info)
                             }
-                            _ => false,
+                            _ => None,
                         })
                 }),
                 _ => None,
@@ -281,10 +284,14 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
                     local_pkg.integrity = res.integrity.clone();
                 }
                 if let LocalSource::Git(ref mut g) = ls
-                    && g.subpath.is_none()
                     && let Some(LocalSource::Git(prior)) = &local_pkg.local_source
                 {
-                    g.subpath = prior.subpath.clone();
+                    if git_commits_match(&g.resolved, &prior.resolved) {
+                        g.resolved = prior.resolved.clone();
+                    }
+                    if g.subpath.is_none() {
+                        g.subpath = prior.subpath.clone();
+                    }
                 }
                 local_pkg.local_source = Some(ls);
             }
@@ -297,22 +304,30 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
     // the importer's specifier, which does. Recompute both the map
     // key and the struct field from the final `local_source` so
     // `graph.packages.get(&dep.dep_path)` stays consistent with how
-    // DirectDeps were keyed up in the importer loop above. Note
-    // that any reclassification with a *new path* would leave the
-    // DirectDep still pointing at the old key; pnpm's lockfiles
-    // don't do that today, so we treat the re-keying as
-    // defensive-only and assert equality in debug builds.
+    // DirectDeps were keyed up in the importer loop above. Resolution
+    // metadata can refine the importer `version:` form (for example,
+    // preserving a `git+ssh://` repo URL), so update DirectDeps for
+    // any key that shifts during reclassification.
     let mut rekeyed: BTreeMap<String, LockedPackage> = BTreeMap::new();
+    let mut local_rekeys: BTreeMap<String, String> = BTreeMap::new();
     for (old_key, mut pkg) in local_packages {
         let new_key = pkg.local_source.as_ref().unwrap().dep_path(&pkg.name);
         pkg.dep_path = new_key.clone();
-        debug_assert_eq!(
-            old_key, new_key,
-            "local dep_path shifted during reclassification — DirectDeps still reference {old_key}"
-        );
+        if old_key != new_key {
+            local_rekeys.insert(old_key, new_key.clone());
+        }
         rekeyed.insert(new_key, pkg);
     }
     let local_packages = rekeyed;
+    if !local_rekeys.is_empty() {
+        for deps in importers.values_mut() {
+            for dep in deps {
+                if let Some(new_key) = local_rekeys.get(&dep.dep_path) {
+                    dep.dep_path.clone_from(new_key);
+                }
+            }
+        }
+    }
     // Canonical keys the main loop should ignore — those are the
     // snapshot keys we already absorbed above.
     let local_canonical_keys: std::collections::HashSet<String> = local_packages
@@ -372,6 +387,9 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
             .and_then(|r| r.tarball.as_ref())
             .filter(|t| t.starts_with("http://") || t.starts_with("https://"))
             .cloned();
+        let registry_git_hosted = pkg_info
+            .and_then(|p| p.resolution.as_ref())
+            .is_some_and(|r| r.git_hosted);
 
         // pnpm writes `version: <semver>` alongside non-registry entries
         // whose dep-path key is a URL. Prefer that over the URL itself
@@ -384,10 +402,10 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
         // the remote-tarball case (where the URL is recoverable from
         // `resolution.tarball` at write time). `git+`/`git://` /
         // `.git#sha` transitive entries resolve through
-        // `resolution: {type: git, commit, repo}` and need a separate
-        // round-trip path — they stay on the pre-existing URL-as-
-        // version behavior until that path lands.
+        // `resolution: {type: git, commit, repo}` and keep the URL as
+        // their version so install can fetch the git source.
         let version_is_http_url = version.starts_with("http://") || version.starts_with("https://");
+        let dep_path_git_commit = git_commit_from_dep_path_version(&version).map(str::to_string);
         let version = if version_is_http_url && tarball_url.is_some() {
             pkg_info.and_then(|p| p.version.clone()).unwrap_or(version)
         } else {
@@ -459,6 +477,15 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
         let local_source = pkg_info
             .and_then(|p| p.resolution.as_ref())
             .and_then(local_source_from_resolution);
+        let local_source = local_source.map(|mut source| {
+            if let LocalSource::Git(git) = &mut source
+                && let Some(commit) = dep_path_git_commit.as_deref()
+                && git_commits_match(&git.resolved, commit)
+            {
+                git.resolved = commit.to_string();
+            }
+            source
+        });
         // `lockfileIncludeTarballUrl` puts registry tarball URLs on
         // ordinary `name@version` entries; only URL-keyed entries are
         // true remote-tarball deps.
@@ -486,6 +513,7 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
                 optional,
                 transitive_peer_dependencies,
                 tarball_url,
+                registry_git_hosted,
                 alias_of,
                 yarn_checksum: None,
                 engines,
@@ -601,4 +629,14 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
         extra_fields: BTreeMap::new(),
         workspace_extra_fields: BTreeMap::new(),
     })
+}
+
+fn git_commit_from_dep_path_version(version: &str) -> Option<&str> {
+    let (_, fragment) = version.rsplit_once('#')?;
+    let commit = fragment.split('&').next().unwrap_or(fragment);
+    if commit.len() == 40 && commit.bytes().all(|b| b.is_ascii_hexdigit()) {
+        Some(commit)
+    } else {
+        None
+    }
 }

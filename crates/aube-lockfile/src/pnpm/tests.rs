@@ -2481,11 +2481,15 @@ importers:
         version: git+ssh://git@github.com/acme/demo.git#abcdef0123456789abcdef0123456789abcdef01
 
 packages:
+  other@git+ssh://git@github.com/acme/other.git#abcdef0123456789abcdef0123456789abcdef01:
+    resolution: {commit: abcdef0, repo: git+ssh://git@github.com/acme/other.git, type: git, integrity: sha512-other, gitHosted: true}
+    version: 1.0.0
   demo@git+ssh://git@github.com/acme/demo.git#abcdef0123456789abcdef0123456789abcdef01:
-    resolution: {commit: abcdef0123456789abcdef0123456789abcdef01, repo: git+ssh://git@github.com/acme/demo.git, type: git, integrity: sha512-hosted, gitHosted: true}
+    resolution: {commit: abcdef0, repo: git+ssh://git@github.com/acme/demo.git, type: git, integrity: sha512-hosted, gitHosted: true}
     version: 1.0.0
 
 snapshots:
+  other@git+ssh://git@github.com/acme/other.git#abcdef0123456789abcdef0123456789abcdef01: {}
   demo@git+ssh://git@github.com/acme/demo.git#abcdef0123456789abcdef0123456789abcdef01: {}
 "#,
     )
@@ -2498,10 +2502,71 @@ snapshots:
         .find(|pkg| pkg.name == "demo")
         .expect("demo package");
     assert_eq!(pkg.integrity.as_deref(), Some("sha512-hosted"));
+    let Some(LocalSource::Git(git)) = &pkg.local_source else {
+        panic!("expected git local source, got {:?}", pkg.local_source);
+    };
+    assert!(git.url.contains("/acme/demo.git"), "{git:?}");
+    assert_eq!(git.resolved, "abcdef0123456789abcdef0123456789abcdef01");
 
     write(&path, &graph, &PackageJson::default()).unwrap();
     let yaml = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        yaml.contains("repo: git+ssh://git@github.com/acme/demo.git"),
+        "{yaml}"
+    );
+    assert!(
+        !yaml.contains("repo: ssh://git@github.com/acme/demo.git"),
+        "{yaml}"
+    );
     assert!(yaml.contains("integrity: sha512-hosted"), "{yaml}");
+}
+
+#[test]
+fn parser_expands_transitive_git_resolution_commit_from_dep_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pnpm-lock.yaml");
+    let full_commit = "abcdef0123456789abcdef0123456789abcdef01";
+    std::fs::write(
+        &path,
+        format!(
+            r#"lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+  .:
+    dependencies:
+      root:
+        specifier: 1.0.0
+        version: 1.0.0
+
+packages:
+  root@1.0.0:
+    resolution: {{integrity: sha512-root}}
+  transitive@git+ssh://git@github.com/acme/transitive.git#{full_commit}:
+    resolution: {{commit: abcdef0, repo: git+ssh://git@github.com/acme/transitive.git, type: git, integrity: sha512-git, gitHosted: true}}
+    version: 1.0.0
+
+snapshots:
+  root@1.0.0: {{}}
+  transitive@git+ssh://git@github.com/acme/transitive.git#{full_commit}: {{}}
+"#
+        ),
+    )
+    .unwrap();
+
+    let graph = parse(&path).unwrap();
+    let pkg = graph
+        .packages
+        .values()
+        .find(|pkg| pkg.name == "transitive")
+        .expect("transitive package");
+    let Some(LocalSource::Git(git)) = &pkg.local_source else {
+        panic!("expected git local source, got {:?}", pkg.local_source);
+    };
+    assert_eq!(git.resolved, full_commit);
 }
 
 #[test]
@@ -2544,7 +2609,55 @@ fn writer_preserves_non_derivable_registry_tarball_url_by_default() {
         yaml.contains("tarball: https://npm.pkg.github.com/download/@scope/pkg/1.0.0/deadbeef"),
         "{yaml}"
     );
+    assert!(yaml.contains("gitHosted: true"), "{yaml}");
     assert!(!yaml.contains("lockfileIncludeTarballUrl: true"), "{yaml}");
+}
+
+#[test]
+fn parser_round_trips_registry_git_hosted_tarball_flag() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pnpm-lock.yaml");
+    std::fs::write(
+        &path,
+        r#"lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+  .:
+    dependencies:
+      demo:
+        specifier: 1.0.0
+        version: 1.0.0
+
+packages:
+  demo@1.0.0:
+    resolution: {integrity: sha512-demo, tarball: https://npm.pkg.github.com/download/demo/1.0.0/deadbeef, gitHosted: true}
+
+snapshots:
+  demo@1.0.0: {}
+"#,
+    )
+    .unwrap();
+
+    let graph = parse(&path).unwrap();
+    let pkg = graph.packages.get("demo@1.0.0").expect("demo package");
+    assert!(pkg.registry_git_hosted);
+    assert!(pkg.local_source.is_none());
+    assert_eq!(
+        pkg.tarball_url.as_deref(),
+        Some("https://npm.pkg.github.com/download/demo/1.0.0/deadbeef")
+    );
+
+    write(&path, &graph, &PackageJson::default()).unwrap();
+    let yaml = std::fs::read_to_string(&path).unwrap();
+    assert!(yaml.contains("gitHosted: true"), "{yaml}");
+    assert!(
+        yaml.contains("tarball: https://npm.pkg.github.com/download/demo/1.0.0/deadbeef"),
+        "{yaml}"
+    );
 }
 
 #[test]
@@ -2587,6 +2700,47 @@ fn writer_preserves_non_derivable_registry_tarball_url_without_integrity() {
         "{yaml}"
     );
     assert!(!yaml.contains("integrity:"), "{yaml}");
+}
+
+#[test]
+fn writer_omits_derivable_registry_tarball_url_with_query() {
+    let dir = tempfile::tempdir().unwrap();
+    let lockfile_path = dir.path().join("pnpm-lock.yaml");
+    let graph = LockfileGraph {
+        packages: BTreeMap::from([(
+            "@scope/pkg@1.0.0".to_string(),
+            LockedPackage {
+                name: "@scope/pkg".to_string(),
+                version: "1.0.0".to_string(),
+                integrity: Some("sha512-private".to_string()),
+                dep_path: "@scope/pkg@1.0.0".to_string(),
+                tarball_url: Some(
+                    "https://registry.example.test/@scope/pkg/-/pkg-1.0.0.tgz?signature=abc#sha"
+                        .to_string(),
+                ),
+                ..Default::default()
+            },
+        )]),
+        importers: BTreeMap::from([(
+            ".".to_string(),
+            vec![DirectDep {
+                name: "@scope/pkg".to_string(),
+                dep_path: "@scope/pkg@1.0.0".to_string(),
+                dep_type: DepType::Production,
+                specifier: Some("1.0.0".to_string()),
+            }],
+        )]),
+        ..Default::default()
+    };
+    let mut manifest = PackageJson::default();
+    manifest
+        .dependencies
+        .insert("@scope/pkg".to_string(), "1.0.0".to_string());
+
+    write(&lockfile_path, &graph, &manifest).unwrap();
+    let yaml = std::fs::read_to_string(&lockfile_path).unwrap();
+    assert!(!yaml.contains("tarball:"), "{yaml}");
+    assert!(yaml.contains("integrity: sha512-private"), "{yaml}");
 }
 
 #[test]

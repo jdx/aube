@@ -318,6 +318,7 @@ pub enum Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git::read_codeload_integrity;
 
     /// Construct a Store with explicit root + cache_dir, bypassing the
     /// XDG resolution path. Test-only so the migration test can drive
@@ -1452,6 +1453,31 @@ mod tests {
     }
 
     #[test]
+    fn codeload_integrity_sidecar_uses_integrity_keyed_cache_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sha = "1234567890abcdef1234567890abcdef12345678";
+        let wrapper = format!("owner-repo-{}", &sha[..7]);
+        let bytes = build_codeload_tarball(
+            &wrapper,
+            &[("package.json", br#"{"name":"x","version":"0.0.1"}"#)],
+        );
+        let url = "https://github.com/owner/repo.git";
+        let expected_integrity = "sha512-expected";
+
+        let (target, _) =
+            extract_codeload_tarball_at(tmp.path(), &bytes, url, sha, Some(expected_integrity))
+                .unwrap();
+        let (keyed_target, _) =
+            codeload_cache_paths(tmp.path(), url, sha, Some(expected_integrity)).unwrap();
+        let (unkeyed_target, _) = codeload_cache_paths(tmp.path(), url, sha, None).unwrap();
+
+        assert_eq!(target, keyed_target);
+        assert_ne!(target, unkeyed_target);
+        assert!(read_codeload_integrity(&target).is_some());
+        assert!(read_codeload_integrity(&unkeyed_target).is_none());
+    }
+
+    #[test]
     fn extract_codeload_tarball_backfills_missing_integrity_sidecar() {
         let tmp = tempfile::tempdir().unwrap();
         let sha = "0123456789abcdef0123456789abcdef01234567";
@@ -1461,11 +1487,11 @@ mod tests {
             &[("package.json", br#"{"name":"x","version":"0.0.1"}"#)],
         );
         let url = "https://github.com/owner/repo.git";
-        let (target, _) = extract_codeload_tarball_at(tmp.path(), &bytes, url, sha).unwrap();
+        let (target, _) = extract_codeload_tarball_at(tmp.path(), &bytes, url, sha, None).unwrap();
         let sidecar = super::git::codeload_integrity_path(&target);
         std::fs::remove_file(&sidecar).unwrap();
 
-        let (target2, _) = extract_codeload_tarball_at(tmp.path(), &bytes, url, sha).unwrap();
+        let (target2, _) = extract_codeload_tarball_at(tmp.path(), &bytes, url, sha, None).unwrap();
         assert_eq!(target, target2);
         assert!(
             super::git::read_codeload_integrity(&target2)

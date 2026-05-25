@@ -20,8 +20,8 @@ pub(crate) use io::{atomic_write_lockfile, current_git_branch};
 pub use merge::{MergeReport, merge_branch_lockfiles};
 pub(crate) use source::normalize_git_fragment;
 pub use source::{
-    GitSource, HostedGit, HostedGitHost, LocalSource, RemoteTarballSource, parse_git_spec,
-    parse_hosted_git,
+    GitSource, HostedGit, HostedGitHost, LocalSource, RemoteTarballSource, git_commits_match,
+    parse_git_spec, parse_hosted_git,
 };
 
 use smallvec::SmallVec;
@@ -263,6 +263,12 @@ pub struct LockedPackage {
     /// remote tarball) already carry their own URL via `LocalSource`
     /// and don't populate this field.
     pub tarball_url: Option<String>,
+    /// pnpm `resolution.gitHosted` for registry-keyed packages. Remote
+    /// tarball sources carry the same flag on `RemoteTarballSource`,
+    /// but registry entries keep `local_source: None`, so this field
+    /// preserves third-party pnpm lockfiles that mark registry-shaped
+    /// tarballs as hosted git.
+    pub registry_git_hosted: bool,
     /// For npm-alias deps (`"h3-v2": "npm:h3@2.0.1-rc.20"`): the real
     /// package name on the registry (`"h3"`). `None` means the entry
     /// is not aliased and `name` already holds the registry name.

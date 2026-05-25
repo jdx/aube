@@ -572,11 +572,15 @@ pub fn codeload_cache_lookup(
 ///
 /// Fresh extracts write this next to the cache directory so resolver
 /// re-runs from a warm cache keep emitting the same lockfile integrity.
-pub fn codeload_cache_integrity(url: &str, commit: &str) -> Option<String> {
+pub fn codeload_cache_integrity(
+    url: &str,
+    commit: &str,
+    integrity: Option<&str>,
+) -> Option<String> {
     let git_root = crate::dirs::cache_dir()
         .map(|d| d.join("git"))
         .unwrap_or_else(std::env::temp_dir);
-    let (target, _) = codeload_cache_paths(&git_root, url, commit)?;
+    let (target, _) = codeload_cache_paths(&git_root, url, commit, integrity)?;
     target
         .is_dir()
         .then(|| read_codeload_integrity(&target))

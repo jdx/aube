@@ -389,7 +389,11 @@ pub(crate) async fn resolve_git_source(
             git.integrity.as_deref(),
         )
     {
-        let integrity = aube_store::codeload_cache_integrity(&original_url, &resolved_sha);
+        let integrity = aube_store::codeload_cache_integrity(
+            &original_url,
+            &resolved_sha,
+            git.integrity.as_deref(),
+        );
         let pkg_root = match &subpath {
             Some(sub) => clone_dir.join(sub),
             None => clone_dir.clone(),
@@ -485,7 +489,7 @@ pub(crate) async fn resolve_git_source(
                                 url: original_url,
                                 committish,
                                 resolved,
-                                integrity: Some(integrity),
+                                integrity: Some(integrity.clone()),
                                 subpath,
                             }),
                             version,
