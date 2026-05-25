@@ -422,12 +422,14 @@ pub(crate) async fn resolve_git_source(
                 // clone path does. Return the original lockfile URL
                 // in `LocalSource::Git.url` for cross-tool round-trip.
                 let bytes_vec = bytes.to_vec();
+                if let Some(pinned) = &git.integrity {
+                    aube_store::verify_integrity(&bytes_vec, pinned)
+                        .map_err(|e| Error::Registry(name.to_string(), e.to_string()))?;
+                }
                 let integrity = git
                     .integrity
                     .clone()
                     .unwrap_or_else(|| aube_store::sha512_integrity(&bytes_vec));
-                aube_store::verify_integrity(&bytes_vec, &integrity)
-                    .map_err(|e| Error::Registry(name.to_string(), e.to_string()))?;
                 let url_for_extract = original_url.clone();
                 let sha_for_extract = resolved_sha.clone();
                 let integrity_for_extract = integrity.clone();

@@ -176,12 +176,14 @@ pub(super) async fn import_local_source(
                 match c.fetch_tarball_bytes(url_to_fetch).await {
                     Ok(bytes) => {
                         let bytes_vec = bytes.to_vec();
+                        if let Some(pinned) = &g.integrity {
+                            aube_store::verify_integrity(&bytes_vec, pinned)
+                                .map_err(|e| miette!("{spec}: {e}{chain}"))?;
+                        }
                         let integrity = g
                             .integrity
                             .clone()
                             .unwrap_or_else(|| aube_store::sha512_integrity(&bytes_vec));
-                        aube_store::verify_integrity(&bytes_vec, &integrity)
-                            .map_err(|e| miette!("{spec}: {e}{chain}"))?;
                         let url_for_extract = url.clone();
                         let resolved_for_extract = resolved.clone();
                         let integrity_for_extract = integrity.clone();
