@@ -2462,6 +2462,49 @@ fn writer_emits_git_hosted_for_hosted_git_resolution() {
 }
 
 #[test]
+fn parser_preserves_direct_git_resolution_integrity() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pnpm-lock.yaml");
+    std::fs::write(
+        &path,
+        r#"lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+  .:
+    dependencies:
+      demo:
+        specifier: github:acme/demo
+        version: git+ssh://git@github.com/acme/demo.git#abcdef0123456789abcdef0123456789abcdef01
+
+packages:
+  demo@git+ssh://git@github.com/acme/demo.git#abcdef0123456789abcdef0123456789abcdef01:
+    resolution: {commit: abcdef0123456789abcdef0123456789abcdef01, repo: git+ssh://git@github.com/acme/demo.git, type: git, integrity: sha512-hosted, gitHosted: true}
+    version: 1.0.0
+
+snapshots:
+  demo@git+ssh://git@github.com/acme/demo.git#abcdef0123456789abcdef0123456789abcdef01: {}
+"#,
+    )
+    .unwrap();
+
+    let graph = parse(&path).unwrap();
+    let pkg = graph
+        .packages
+        .values()
+        .find(|pkg| pkg.name == "demo")
+        .expect("demo package");
+    assert_eq!(pkg.integrity.as_deref(), Some("sha512-hosted"));
+
+    write(&path, &graph, &PackageJson::default()).unwrap();
+    let yaml = std::fs::read_to_string(&path).unwrap();
+    assert!(yaml.contains("integrity: sha512-hosted"), "{yaml}");
+}
+
+#[test]
 fn writer_preserves_non_derivable_registry_tarball_url_by_default() {
     let dir = tempfile::tempdir().unwrap();
     let lockfile_path = dir.path().join("pnpm-lock.yaml");

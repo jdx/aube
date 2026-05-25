@@ -257,11 +257,29 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
             // from the importer's `version:` URL — pnpm v9 encodes
             // the subpath in the snapshot key and doesn't always
             // echo it on the resolution block.
-            if let Some(pkg_info) = raw.packages.get(&canonical)
+            let pkg_info = raw.packages.get(&canonical).or_else(|| match local {
+                LocalSource::Git(git) => raw.packages.values().find(|pkg_info| {
+                    pkg_info
+                        .resolution
+                        .as_ref()
+                        .and_then(local_source_from_resolution)
+                        .is_some_and(|candidate| match candidate {
+                            LocalSource::Git(candidate) => {
+                                candidate.resolved == git.resolved
+                                    && candidate.subpath == git.subpath
+                            }
+                            _ => false,
+                        })
+                }),
+                _ => None,
+            });
+            if let Some(pkg_info) = pkg_info
                 && let Some(ref res) = pkg_info.resolution
                 && let Some(mut ls) = local_source_from_resolution(res)
             {
-                local_pkg.integrity = res.integrity.clone();
+                if matches!(ls, LocalSource::Git(_)) {
+                    local_pkg.integrity = res.integrity.clone();
+                }
                 if let LocalSource::Git(ref mut g) = ls
                     && g.subpath.is_none()
                     && let Some(LocalSource::Git(prior)) = &local_pkg.local_source

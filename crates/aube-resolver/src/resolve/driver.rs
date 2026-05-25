@@ -1979,10 +1979,22 @@ fn existing_local_source_integrity(
             g.packages.values().find(|pkg| {
                 pkg.name == name
                     && pkg.version == version
-                    && pkg.local_source.as_ref().is_some_and(|old| old == local)
+                    && pkg
+                        .local_source
+                        .as_ref()
+                        .is_some_and(|old| local_sources_match_for_integrity(old, local))
             })
         })
         .and_then(|pkg| pkg.integrity.clone())
+}
+
+fn local_sources_match_for_integrity(old: &LocalSource, new: &LocalSource) -> bool {
+    match (old, new) {
+        (LocalSource::Git(old), LocalSource::Git(new)) => {
+            old.resolved == new.resolved && old.subpath == new.subpath
+        }
+        _ => old == new,
+    }
 }
 
 #[cfg(test)]
@@ -2028,6 +2040,42 @@ mod tests {
         assert!(
             existing_local_source_integrity(Some(&graph), "dep", "1.0.0", &changed_commit)
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn existing_local_source_integrity_matches_git_by_resolved_commit() {
+        let old_source = LocalSource::Git(GitSource {
+            url: "git+ssh://git@github.com/acme/dep.git".to_string(),
+            committish: None,
+            resolved: "abcdef0123456789abcdef0123456789abcdef01".to_string(),
+            subpath: Some("packages/dep".to_string()),
+        });
+        let graph = LockfileGraph {
+            packages: BTreeMap::from([(
+                "dep@git+ssh://git@github.com/acme/dep.git#abcdef0123456789abcdef0123456789abcdef01"
+                    .to_string(),
+                LockedPackage {
+                    name: "dep".to_string(),
+                    version: "1.0.0".to_string(),
+                    integrity: Some("sha512-old".to_string()),
+                    local_source: Some(old_source),
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        };
+        let resolved_source = LocalSource::Git(GitSource {
+            url: "https://github.com/acme/dep.git".to_string(),
+            committish: Some("main".to_string()),
+            resolved: "abcdef0123456789abcdef0123456789abcdef01".to_string(),
+            subpath: Some("packages/dep".to_string()),
+        });
+
+        assert_eq!(
+            existing_local_source_integrity(Some(&graph), "dep", "1.0.0", &resolved_source)
+                .as_deref(),
+            Some("sha512-old")
         );
     }
 }

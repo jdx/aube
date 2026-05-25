@@ -1,4 +1,4 @@
-use crate::{GitSource, LocalSource, RemoteTarballSource};
+use crate::{GitSource, LocalSource, RemoteTarballSource, parse_git_spec};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
@@ -287,8 +287,11 @@ pub(super) fn local_source_from_resolution(res: &Resolution) -> Option<LocalSour
         return Some(LocalSource::Directory(std::path::PathBuf::from(dir)));
     }
     if let (Some(repo), Some(commit)) = (res.repo.as_ref(), res.commit.as_ref()) {
+        let url = parse_git_spec(repo)
+            .map(|(url, _, _)| url)
+            .unwrap_or_else(|| repo.clone());
         return Some(LocalSource::Git(GitSource {
-            url: repo.clone(),
+            url,
             committish: None,
             resolved: commit.clone(),
             integrity: res.integrity.clone(),
