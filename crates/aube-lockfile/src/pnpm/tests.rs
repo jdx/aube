@@ -2505,6 +2505,48 @@ fn writer_preserves_non_derivable_registry_tarball_url_by_default() {
 }
 
 #[test]
+fn writer_preserves_non_derivable_registry_tarball_url_without_integrity() {
+    let dir = tempfile::tempdir().unwrap();
+    let lockfile_path = dir.path().join("pnpm-lock.yaml");
+    let graph = LockfileGraph {
+        packages: BTreeMap::from([(
+            "@scope/pkg@1.0.0".to_string(),
+            LockedPackage {
+                name: "@scope/pkg".to_string(),
+                version: "1.0.0".to_string(),
+                dep_path: "@scope/pkg@1.0.0".to_string(),
+                tarball_url: Some(
+                    "https://npm.pkg.github.com/download/@scope/pkg/1.0.0/deadbeef".to_string(),
+                ),
+                ..Default::default()
+            },
+        )]),
+        importers: BTreeMap::from([(
+            ".".to_string(),
+            vec![DirectDep {
+                name: "@scope/pkg".to_string(),
+                dep_path: "@scope/pkg@1.0.0".to_string(),
+                dep_type: DepType::Production,
+                specifier: Some("1.0.0".to_string()),
+            }],
+        )]),
+        ..Default::default()
+    };
+    let mut manifest = PackageJson::default();
+    manifest
+        .dependencies
+        .insert("@scope/pkg".to_string(), "1.0.0".to_string());
+
+    write(&lockfile_path, &graph, &manifest).unwrap();
+    let yaml = std::fs::read_to_string(&lockfile_path).unwrap();
+    assert!(
+        yaml.contains("tarball: https://npm.pkg.github.com/download/@scope/pkg/1.0.0/deadbeef"),
+        "{yaml}"
+    );
+    assert!(!yaml.contains("integrity:"), "{yaml}");
+}
+
+#[test]
 fn parser_round_trips_git_hosted_remote_tarball_flag() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("pnpm-lock.yaml");

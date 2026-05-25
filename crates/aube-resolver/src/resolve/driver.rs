@@ -1326,6 +1326,14 @@ impl<'a> ResolveDriver<'a> {
                             format!("git resolve {}: {e}", task.range),
                         )
                     })?;
+            let integrity = integrity.or_else(|| {
+                existing_local_source_integrity(
+                    self.existing,
+                    &task.name,
+                    &version,
+                    &resolved_local,
+                )
+            });
             (resolved_local, version, deps, integrity)
         } else if let LocalSource::RemoteTarball(ref t) = raw_local {
             let (resolved_local, version, deps) =
@@ -1957,5 +1965,69 @@ impl<'a> ResolveDriver<'a> {
         };
         self.link_to_existing_version(task, &matched_ver);
         true
+    }
+}
+
+fn existing_local_source_integrity(
+    existing: Option<&LockfileGraph>,
+    name: &str,
+    version: &str,
+    local: &LocalSource,
+) -> Option<String> {
+    existing
+        .and_then(|g| {
+            g.packages.values().find(|pkg| {
+                pkg.name == name
+                    && pkg.version == version
+                    && pkg.local_source.as_ref().is_some_and(|old| old == local)
+            })
+        })
+        .and_then(|pkg| pkg.integrity.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aube_lockfile::{GitSource, LockedPackage};
+
+    #[test]
+    fn existing_local_source_integrity_matches_resolved_git_commit() {
+        let source = LocalSource::Git(GitSource {
+            url: "git+https://github.com/acme/dep.git".to_string(),
+            committish: Some("main".to_string()),
+            resolved: "abcdef0123456789abcdef0123456789abcdef01".to_string(),
+            subpath: None,
+        });
+        let graph = LockfileGraph {
+            packages: BTreeMap::from([(
+                "dep@git+https://github.com/acme/dep.git#abcdef0123456789abcdef0123456789abcdef01"
+                    .to_string(),
+                LockedPackage {
+                    name: "dep".to_string(),
+                    version: "1.0.0".to_string(),
+                    integrity: Some("sha512-old".to_string()),
+                    local_source: Some(source.clone()),
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            existing_local_source_integrity(Some(&graph), "dep", "1.0.0", &source).as_deref(),
+            Some("sha512-old")
+        );
+
+        let changed_commit = LocalSource::Git(GitSource {
+            resolved: "1111111111111111111111111111111111111111".to_string(),
+            ..match source {
+                LocalSource::Git(g) => g,
+                _ => unreachable!(),
+            }
+        });
+        assert!(
+            existing_local_source_integrity(Some(&graph), "dep", "1.0.0", &changed_commit)
+                .is_none()
+        );
     }
 }

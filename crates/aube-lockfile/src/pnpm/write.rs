@@ -299,8 +299,8 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                     path: None,
                 })
             }
-            None => pkg.integrity.as_ref().map(|i| WritableResolution {
-                integrity: Some(i.clone()),
+            None if pkg.integrity.is_some() || preserve_tarball_url => Some(WritableResolution {
+                integrity: pkg.integrity.clone(),
                 git_hosted: false,
                 directory: None,
                 // Emit the full registry tarball URL when the setting
@@ -319,6 +319,7 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                 type_: None,
                 path: None,
             }),
+            None => None,
         };
         // Mirror pnpm: emit `version:` alongside the resolution block
         // for URL-keyed transitive entries so tooling that matches
