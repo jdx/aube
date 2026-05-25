@@ -74,7 +74,7 @@ landlock = "0.4"
 # NTFS junctions (Windows-only) — used for `node_modules` directory
 # links so installs work without Developer Mode or admin rights.
 # Matches what pnpm does via Node's `fs.symlink(..., 'junction')`.
-junction = "1"
+junction = "2"
 
 # Parallelism
 rayon = "1"
