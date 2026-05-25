@@ -44,10 +44,11 @@ const GITHUB_ACTIONS_BUILD_TYPE: &str =
 /// Probe the ambient environment for an OIDC token without running the
 /// full Fulcio/Rekor signing flow. Used by `--dry-run --provenance` so
 /// users verifying their CI setup find out *now* whether OIDC is wired
-/// up, rather than on the real publish. We deliberately don't parse the
-/// JWT here — a successful `ambient-id` detection is proof that the
-/// runner's token endpoint is reachable and the workload identity is
-/// configured, which is what the dry-run is actually testing for.
+/// up, rather than on the real publish. `NPM_ID_TOKEN` is parsed locally
+/// because the registry has already minted it; otherwise a successful
+/// `ambient-id` detection is proof that the runner's token endpoint is
+/// reachable and the workload identity is configured, which is what the
+/// dry-run is actually testing for.
 pub async fn probe_oidc_available() -> miette::Result<()> {
     detect_oidc_token().await.map(|_| ())
 }

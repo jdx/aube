@@ -2,8 +2,6 @@ use crate::{Error, ResolveTask};
 use aube_lockfile::{LocalSource, LockedPackage};
 use aube_registry::client::RegistryClient;
 use aube_util::path::normalize_lexical;
-use base64::Engine;
-use sha2::Digest;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -479,7 +477,7 @@ pub(crate) async fn resolve_git_source(
                 .map_err(|e| {
                     Error::Registry(name.to_string(), format!("codeload extract panicked: {e}"))
                 })?;
-                let integrity = sha512_integrity(&bytes);
+                let integrity = aube_store::sha512_integrity(&bytes);
                 match extracted {
                     Ok((resolved, version, deps)) => {
                         return Ok((
@@ -569,14 +567,6 @@ pub(crate) async fn resolve_git_source(
     Ok((local, version, deps, None))
 }
 
-fn sha512_integrity(bytes: &[u8]) -> String {
-    let digest = sha2::Sha512::digest(bytes);
-    format!(
-        "sha512-{}",
-        base64::engine::general_purpose::STANDARD.encode(digest)
-    )
-}
-
 /// Fetch a remote tarball URL, compute its sha512 integrity, and read
 /// the enclosed `package.json` for version + transitive deps. Returns
 /// a fully-populated `LocalSource::RemoteTarball` alongside the
@@ -598,13 +588,7 @@ pub(crate) async fn resolve_remote_tarball(
     let name_owned = name.to_string();
     let url = aube_util::url::redact_url(&tarball.url);
     let (integrity, version, deps) = tokio::task::spawn_blocking(move || -> Result<_, Error> {
-        use sha2::{Digest, Sha512};
-        let mut hasher = Sha512::new();
-        hasher.update(&bytes);
-        let digest = hasher.finalize();
-        use base64::Engine;
-        let b64 = base64::engine::general_purpose::STANDARD.encode(digest);
-        let integrity = format!("sha512-{b64}");
+        let integrity = aube_store::sha512_integrity(&bytes);
 
         // Walk the tarball once to pull out the top-level
         // `package.json` (wrapper name varies, so the helper looks

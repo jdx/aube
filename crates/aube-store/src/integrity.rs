@@ -189,13 +189,19 @@ pub fn verify_integrity(data: &[u8], expected: &str) -> Result<(), Error> {
     }
 }
 
-/// Compute the npm/pnpm SHA-512 SRI string for raw tarball bytes.
+/// Return the npm Subresource Integrity string for `data` using SHA-512.
 pub fn sha512_integrity(data: &[u8]) -> String {
+    let digest = SHA512_HASHER.with(|cell| {
+        let mut hasher = cell.borrow_mut();
+        hasher.reset();
+        hasher.update(data);
+        hasher.finalize_reset()
+    });
     use base64::Engine;
-    let mut hasher = Sha512::new();
-    hasher.update(data);
-    let b64 = base64::engine::general_purpose::STANDARD.encode(hasher.finalize());
-    format!("{SHA512_INTEGRITY_PREFIX}{b64}")
+    format!(
+        "{SHA512_INTEGRITY_PREFIX}{}",
+        base64::engine::general_purpose::STANDARD.encode(digest)
+    )
 }
 
 /// Verify a precomputed SHA-512 digest against an SRI integrity

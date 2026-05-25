@@ -598,14 +598,7 @@ pub(crate) fn codeload_integrity_path(target: &Path) -> PathBuf {
 }
 
 fn codeload_integrity(bytes: &[u8]) -> String {
-    use base64::Engine;
-    use sha2::Digest;
-
-    let digest = sha2::Sha512::digest(bytes);
-    format!(
-        "sha512-{}",
-        base64::engine::general_purpose::STANDARD.encode(digest)
-    )
+    crate::sha512_integrity(bytes)
 }
 
 pub(crate) fn read_codeload_integrity(target: &Path) -> Option<String> {
