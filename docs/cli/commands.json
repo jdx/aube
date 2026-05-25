@@ -7637,7 +7637,7 @@
             "name": "json",
             "usage": "--json",
             "help": "Emit the publish result as JSON",
-            "help_long": "Emit the publish result as JSON.\n\nOutput matches `npm publish --json` / `pnpm publish --json`.",
+            "help_long": "Emit the publish result as JSON.\n\nOutput matches `npm publish --json` / `pnpm publish --json`; recursive multi-package publishes emit an array.",
             "help_first_line": "Emit the publish result as JSON",
             "short": [],
             "long": [

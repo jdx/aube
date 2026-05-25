@@ -77,7 +77,7 @@ pub struct PublishArgs {
     pub ignore_scripts: bool,
     /// Emit the publish result as JSON.
     ///
-    /// Output matches `npm publish --json` / `pnpm publish --json`.
+    /// Output matches `npm publish --json` / `pnpm publish --json`; recursive multi-package publishes emit an array.
     #[arg(long)]
     pub json: bool,
     /// Skip the "working tree must be clean" check.
@@ -284,7 +284,7 @@ async fn run_recursive(
     }
 
     if args.json {
-        emit_json_many(&outcomes)?;
+        emit_json_outcomes(&outcomes)?;
     } else {
         for o in &outcomes {
             emit_outcome_line(o);
@@ -902,9 +902,8 @@ fn emit_outcome_line(outcome: &PublishOutcome) {
     }
 }
 
-fn emit_json_many(outcomes: &[PublishOutcome]) -> miette::Result<()> {
-    let arr: Vec<serde_json::Value> = outcomes.iter().map(publish_outcome_json).collect();
-    let out = serde_json::to_string_pretty(&arr).into_diagnostic()?;
+fn emit_json_outcomes(outcomes: &[PublishOutcome]) -> miette::Result<()> {
+    let out = serde_json::to_string_pretty(&publish_outcomes_json(outcomes)).into_diagnostic()?;
     println!("{out}");
     Ok(())
 }
@@ -913,6 +912,17 @@ fn emit_json_single(outcome: &PublishOutcome) -> miette::Result<()> {
     let out = serde_json::to_string_pretty(&publish_outcome_json(outcome)).into_diagnostic()?;
     println!("{out}");
     Ok(())
+}
+
+fn publish_outcomes_json(outcomes: &[PublishOutcome]) -> serde_json::Value {
+    match outcomes {
+        [outcome] => publish_outcome_json(outcome),
+        _ => publish_outcomes_json_array(outcomes),
+    }
+}
+
+fn publish_outcomes_json_array(outcomes: &[PublishOutcome]) -> serde_json::Value {
+    serde_json::Value::Array(outcomes.iter().map(publish_outcome_json).collect())
 }
 
 fn publish_outcome_json(outcome: &PublishOutcome) -> serde_json::Value {
@@ -1260,6 +1270,31 @@ mod tests {
                 .and_then(|v| v.as_str())
                 .is_some_and(|s| s.starts_with("sha512-"))
         );
+    }
+
+    #[test]
+    fn publish_json_outcomes_uses_array_only_for_multiple_packages() {
+        let first = PublishOutcome {
+            name: "one".to_string(),
+            version: "1.0.0".to_string(),
+            registry_url: "https://registry.npmjs.org/".to_string(),
+            archive: None,
+            status: PublishStatus::DryRun,
+        };
+        let second = PublishOutcome {
+            name: "two".to_string(),
+            version: "2.0.0".to_string(),
+            registry_url: "https://registry.npmjs.org/".to_string(),
+            archive: None,
+            status: PublishStatus::DryRun,
+        };
+
+        let single = publish_outcomes_json(std::slice::from_ref(&first));
+        assert_eq!(single.get("name").and_then(|v| v.as_str()), Some("one"));
+        assert!(!single.is_array());
+
+        let multiple = publish_outcomes_json(&[first, second]);
+        assert_eq!(multiple.as_array().map(Vec::len), Some(2));
     }
 
     #[test]

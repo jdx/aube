@@ -33,7 +33,7 @@ Suppresses `prepublishOnly`, `prepublish`, `prepack`, `prepare`, `postpack`, `pu
 
 Emit the publish result as JSON.
 
-Output matches `npm publish --json` / `pnpm publish --json`.
+Output matches `npm publish --json` / `pnpm publish --json`; recursive multi-package publishes emit an array.
 
 ### `--no-git-checks`
 
