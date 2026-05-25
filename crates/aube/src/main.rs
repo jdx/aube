@@ -466,7 +466,6 @@ enum Commands {
     #[command(hide = true, name = "set-script")]
     SetScript(commands::npm_fallback::FallbackArgs),
     /// Stage packages for publishing (not implemented — use `npm stage`)
-    #[command(hide = true)]
     Stage(commands::npm_fallback::FallbackArgs),
     /// Start a package (shortcut for `run start`)
     Start(commands::run::ScriptArgs),
