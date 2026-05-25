@@ -451,11 +451,6 @@ async fn publish_one(
         });
     }
 
-    let trusted_publish_token = trusted_publish_token(client, &registry_url, &name).await?;
-    if trusted_publish_token.is_none() {
-        ensure_registry_auth(client, &registry_url)?;
-    }
-
     // Pre-flight: ask the registry whether `name@version` is already
     // there. In fanout mode a hit is a silent skip (so `-r publish` is
     // idempotent on partial success) and in single-package mode it is
@@ -477,6 +472,11 @@ async fn publish_one(
             "aube publish: {name}@{version} is already on {registry_url}\n\
              help: pass --force to republish (the registry must allow it; npm's public registry does not)"
         ));
+    }
+
+    let trusted_publish_token = trusted_publish_token(client, &registry_url, &name).await?;
+    if trusted_publish_token.is_none() {
+        ensure_registry_auth(client, &registry_url)?;
     }
 
     // Lifecycle hooks + tarball build only happen now that we know
@@ -595,13 +595,16 @@ async fn trusted_publish_token(
     registry_url: &str,
     package_name: &str,
 ) -> miette::Result<Option<String>> {
-    let Some(id_token) = npm_oidc_id_token(registry_url).await? else {
+    let Some(id_token) = npm_oidc_id_token(client, registry_url).await? else {
         return Ok(None);
     };
     exchange_npm_oidc_token(client, registry_url, package_name, &id_token).await
 }
 
-async fn npm_oidc_id_token(registry_url: &str) -> miette::Result<Option<String>> {
+async fn npm_oidc_id_token(
+    client: &RegistryClient,
+    registry_url: &str,
+) -> miette::Result<Option<String>> {
     if let Ok(token) = std::env::var("NPM_ID_TOKEN")
         && !token.trim().is_empty()
     {
@@ -634,8 +637,8 @@ async fn npm_oidc_id_token(registry_url: &str) -> miette::Result<Option<String>>
         .wrap_err("invalid ACTIONS_ID_TOKEN_REQUEST_URL")?;
     url.query_pairs_mut().append_pair("audience", &audience);
 
-    let resp = reqwest::Client::new()
-        .get(url)
+    let resp = client
+        .request(reqwest::Method::GET, url.as_str(), registry_url)
         .header(reqwest::header::ACCEPT, "application/json")
         .bearer_auth(request_token)
         .send()
