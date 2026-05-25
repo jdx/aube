@@ -40,6 +40,7 @@ use reqwest::Url;
 use serde::Deserialize;
 use sha1::Digest as _;
 use sha2::Sha512;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Args)]
@@ -540,28 +541,34 @@ async fn publish_one(
     if trusted_publish_token.is_none() {
         ensure_registry_auth(client, &registry_url)?;
     }
-    let mut req = if let Some(token) = trusted_publish_token.as_deref() {
-        client
-            .request(reqwest::Method::PUT, &url, &registry_url)
-            .bearer_auth(token)
-    } else {
-        client.authed_request(reqwest::Method::PUT, &url, &registry_url)
-    }
-    .header("content-type", "application/json")
-    .body(serde_json::to_vec(&body).into_diagnostic()?);
-    if let Some(otp) = &args.otp {
-        req = req.header("npm-otp", otp);
-    }
-
-    let resp = req
-        .send()
-        .await
-        .into_diagnostic()
-        .wrap_err_with(|| format!("failed to PUT {url}"))?;
-    let status = resp.status();
-    if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        return Err(miette!("publish failed: {status}: {}", body.trim()));
+    let body_bytes = serde_json::to_vec(&body).into_diagnostic()?;
+    match send_publish_put(
+        client,
+        &url,
+        &registry_url,
+        body_bytes.clone(),
+        trusted_publish_token.as_deref(),
+        args.otp.as_deref(),
+    )
+    .await?
+    {
+        Ok(()) => {}
+        Err(first) if args.otp.is_none() && publish_failure_needs_otp(&first) => {
+            let otp = read_publish_otp(&archive.name, &archive.version)?;
+            if let Err(second) = send_publish_put(
+                client,
+                &url,
+                &registry_url,
+                body_bytes,
+                trusted_publish_token.as_deref(),
+                Some(&otp),
+            )
+            .await?
+            {
+                return Err(publish_failure_report(second));
+            }
+        }
+        Err(failure) => return Err(publish_failure_report(failure)),
     }
 
     run_publish_lifecycle_post(pkg_dir, &manifest, args.ignore_scripts).await?;
@@ -702,6 +709,94 @@ async fn exchange_npm_oidc_token(
         .into_diagnostic()
         .wrap_err("failed to parse npm OIDC token exchange response")?;
     Ok(body.token.filter(|token| !token.trim().is_empty()))
+}
+
+struct PublishHttpFailure {
+    status: reqwest::StatusCode,
+    body: String,
+}
+
+async fn send_publish_put(
+    client: &RegistryClient,
+    url: &str,
+    registry_url: &str,
+    body: Vec<u8>,
+    trusted_publish_token: Option<&str>,
+    otp: Option<&str>,
+) -> miette::Result<Result<(), PublishHttpFailure>> {
+    let mut req = if let Some(token) = trusted_publish_token {
+        client
+            .request(reqwest::Method::PUT, url, registry_url)
+            .bearer_auth(token)
+    } else {
+        client.authed_request(reqwest::Method::PUT, url, registry_url)
+    }
+    .header("content-type", "application/json")
+    .body(body);
+    if let Some(otp) = otp {
+        req = req.header("npm-otp", otp);
+    }
+
+    let resp = req
+        .send()
+        .await
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to PUT {url}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Ok(Err(PublishHttpFailure { status, body }));
+    }
+
+    Ok(Ok(()))
+}
+
+fn publish_failure_report(failure: PublishHttpFailure) -> miette::Report {
+    miette!(
+        "publish failed: {}: {}",
+        failure.status,
+        failure.body.trim()
+    )
+}
+
+fn publish_failure_needs_otp(failure: &PublishHttpFailure) -> bool {
+    if failure.status != reqwest::StatusCode::UNAUTHORIZED
+        && failure.status != reqwest::StatusCode::FORBIDDEN
+    {
+        return false;
+    }
+    let body = failure.body.to_ascii_lowercase();
+    let requires = body.contains("required") || body.contains("requires");
+    let two_factor =
+        body.contains("two-factor") || body.contains("two factor") || body.contains("2fa");
+    body.contains("eotp")
+        || body.contains("npm-otp")
+        || body.contains("one-time password")
+        || body.contains("one time password")
+        || (body.contains("otp") && requires)
+        || (two_factor && requires)
+}
+
+fn read_publish_otp(name: &str, version: &str) -> miette::Result<String> {
+    if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
+        return Err(miette!(
+            "publish requires a one-time password (OTP) for {name}@{version}\n\
+             help: pass --otp <CODE> when running non-interactively"
+        ));
+    }
+
+    let description = format!("Enter one-time password for {name}@{version}");
+    let otp = demand::Input::new("OTP")
+        .description(&description)
+        .mask_on_submit(true)
+        .run()
+        .into_diagnostic()
+        .wrap_err("failed to read OTP")?;
+    let otp = otp.trim().to_string();
+    if otp.is_empty() {
+        return Err(miette!("no OTP entered"));
+    }
+    Ok(otp)
 }
 
 /// Pre-pack chain for publish: `prepublishOnly` → `prepublish` →
@@ -982,6 +1077,70 @@ mod tests {
             put_url("https://registry.npmjs.org", "lodash"),
             "https://registry.npmjs.org/lodash"
         );
+    }
+
+    #[test]
+    fn publish_failure_detects_npm_otp_challenge() {
+        let failure = PublishHttpFailure {
+            status: reqwest::StatusCode::UNAUTHORIZED,
+            body: r#"{"error":"EOTP","reason":"This operation requires a one-time password."}"#
+                .into(),
+        };
+        assert!(publish_failure_needs_otp(&failure));
+    }
+
+    #[test]
+    fn publish_failure_detects_npm_otp_header_hint() {
+        let failure = PublishHttpFailure {
+            status: reqwest::StatusCode::FORBIDDEN,
+            body: "missing npm-otp header".into(),
+        };
+        assert!(publish_failure_needs_otp(&failure));
+    }
+
+    #[test]
+    fn publish_failure_detects_two_factor_required_challenge() {
+        let failure = PublishHttpFailure {
+            status: reqwest::StatusCode::FORBIDDEN,
+            body: "Package requires two-factor authentication for publishing".into(),
+        };
+        assert!(publish_failure_needs_otp(&failure));
+    }
+
+    #[test]
+    fn publish_failure_detects_2fa_required_challenge() {
+        let failure = PublishHttpFailure {
+            status: reqwest::StatusCode::FORBIDDEN,
+            body: "2FA is required for this operation".into(),
+        };
+        assert!(publish_failure_needs_otp(&failure));
+    }
+
+    #[test]
+    fn publish_failure_does_not_prompt_for_plain_auth_failure() {
+        let failure = PublishHttpFailure {
+            status: reqwest::StatusCode::UNAUTHORIZED,
+            body: "invalid npm token".into(),
+        };
+        assert!(!publish_failure_needs_otp(&failure));
+    }
+
+    #[test]
+    fn publish_failure_does_not_prompt_for_unrelated_two_factor_text() {
+        let failure = PublishHttpFailure {
+            status: reqwest::StatusCode::FORBIDDEN,
+            body: "two-factor authentication is disabled for this account".into(),
+        };
+        assert!(!publish_failure_needs_otp(&failure));
+    }
+
+    #[test]
+    fn publish_failure_does_not_prompt_for_server_error() {
+        let failure = PublishHttpFailure {
+            status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            body: "EOTP".into(),
+        };
+        assert!(!publish_failure_needs_otp(&failure));
     }
 
     fn write_manifest(dir: &Path, body: &str) -> PathBuf {
