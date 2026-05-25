@@ -9562,7 +9562,7 @@
           }
         ],
         "mounts": [],
-        "hide": false,
+        "hide": true,
         "help": "Stage packages for publishing (not implemented — use `npm stage`)",
         "name": "stage",
         "aliases": [],

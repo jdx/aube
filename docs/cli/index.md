@@ -179,7 +179,6 @@ Run from the workspace root regardless of the current package
 - [`aube root [-g --global]`](/cli/root.md)
 - [`aube run [FLAGS] [SCRIPT] [ARGS]…`](/cli/run.md)
 - [`aube sbom [FLAGS]`](/cli/sbom.md)
-- [`aube stage [FLAGS]`](/cli/stage.md)
 - [`aube start [FLAGS] [ARGS]…`](/cli/start.md)
 - [`aube stop [FLAGS] [ARGS]…`](/cli/stop.md)
 - [`aube store <SUBCOMMAND>`](/cli/store.md)
