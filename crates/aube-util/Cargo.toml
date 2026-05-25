@@ -21,6 +21,7 @@ tracing = { workspace = true }
 bytes = "1"
 tokio = { workspace = true }
 reqwest = { workspace = true }
+webpki-root-certs = { workspace = true }
 thiserror = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]

@@ -136,7 +136,7 @@ async fn web_login(registry: &str) -> miette::Result<String> {
     };
     let login_endpoint = format!("{base}-/v1/login");
 
-    let client = reqwest::Client::builder()
+    let client = aube_util::http::with_webpki_root_fallback(reqwest::Client::builder())
         .user_agent(concat!("aube/", env!("CARGO_PKG_VERSION")))
         .build()
         .into_diagnostic()

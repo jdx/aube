@@ -422,7 +422,11 @@ impl OsvBloomClient {
     }
 
     pub fn build_client() -> Result<reqwest::Client, BloomError> {
-        Ok(reqwest::Client::builder().timeout(FETCH_TIMEOUT).build()?)
+        Ok(
+            aube_util::http::with_webpki_root_fallback(reqwest::Client::builder())
+                .timeout(FETCH_TIMEOUT)
+                .build()?,
+        )
     }
 
     fn load_state(&self) -> LocalState {

@@ -103,7 +103,7 @@ fn build_http_client_inner(
             std::env::consts::ARCH
         )
     });
-    let mut builder = reqwest::Client::builder()
+    let mut builder = aube_util::http::with_webpki_root_fallback(reqwest::Client::builder())
         .user_agent(user_agent)
         // Wire-level decompression for packument JSON. Tarball
         // requests explicitly send `Accept-Encoding: identity`

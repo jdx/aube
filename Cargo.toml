@@ -53,7 +53,8 @@ clap = { version = "4", features = ["derive"] }
 strum = { version = "0.28", features = ["derive"] }
 
 # HTTP
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "http2", "charset", "system-proxy", "gzip", "brotli", "zstd", "hickory-dns"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls", "http2", "charset", "system-proxy", "gzip", "brotli", "zstd", "hickory-dns"] }
+webpki-root-certs = "1"
 
 # Hashing
 sha1 = "0.10"

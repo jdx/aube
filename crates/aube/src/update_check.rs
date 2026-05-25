@@ -85,7 +85,7 @@ async fn latest_version(cwd: &Path) -> Option<String> {
 }
 
 async fn fetch_latest() -> Option<String> {
-    let client = reqwest::Client::builder()
+    let client = aube_util::http::with_webpki_root_fallback(reqwest::Client::builder())
         .timeout(FETCH_TIMEOUT)
         .build()
         .ok()?;
