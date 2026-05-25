@@ -748,10 +748,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c673075a2e0e5f4a1dde27ce9dee1ea4558c7ffe648f576438a20ca1d2acc4b0"
 dependencies = [
  "iana-time-zone",
- "js-sys",
  "num-traits",
- "serde",
- "wasm-bindgen",
  "windows-link 0.2.1",
 ]
 
@@ -2248,6 +2245,47 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
+name = "jiff"
+version = "0.2.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6835eea34fb6321b9b3aa7b685c2b433948c09447e389dc017fdf687d5d11e65"
+dependencies = [
+ "jiff-static",
+ "jiff-tzdb-platform",
+ "log",
+ "portable-atomic",
+ "portable-atomic-util",
+ "serde_core",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "jiff-static"
+version = "0.2.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c22e04db9c58f5136eb1757f3d5c49a7b187f49e52185228cbd2f5acdfcc08c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "jiff-tzdb"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c900ef84826f1338a557697dc8fc601df9ca9af4ac137c7fb61d4c6f2dfd3076"
+
+[[package]]
+name = "jiff-tzdb-platform"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "875a5a69ac2bab1a891711cf5eccbec1ce0341ea805560dcd90b7a2e925132e8"
+dependencies = [
+ "jiff-tzdb",
+]
+
+[[package]]
 name = "jni"
 version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3021,6 +3059,15 @@ name = "portable-atomic"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
+
+[[package]]
+name = "portable-atomic-util"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2a106d1259c23fac8e543272398ae0e3c0b8d33c88ed73d0cc71b0f1d902618"
+dependencies = [
+ "portable-atomic",
+]
 
 [[package]]
 name = "potential_utf"
@@ -4008,9 +4055,9 @@ dependencies = [
 
 [[package]]
 name = "sigstore-bundle"
-version = "0.6.6"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e7dc53c8a941858d01479622dbb7650aaa2ee0ca1fb58fb6cdddbfc3064abbb"
+checksum = "9a86d28a25d9e6107e02ca60fc60dfeb7cdc2b98251950d6fcd055f2afa31acb"
 dependencies = [
  "base64",
  "hex",
@@ -4026,9 +4073,9 @@ dependencies = [
 
 [[package]]
 name = "sigstore-crypto"
-version = "0.6.6"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da90c3d9af638898a5fdc347479b18f950bb0dde11ecf2244f94cd28135da53b"
+checksum = "9cdc66f1480e176533425cc880bc5f8a8e0d88ae1fe2701e98de4fb68984b71c"
 dependencies = [
  "aws-lc-rs",
  "base64",
@@ -4036,7 +4083,7 @@ dependencies = [
  "der",
  "digest 0.10.7",
  "pem",
- "rand_core 0.10.1",
+ "rand_core 0.9.5",
  "sha2 0.10.9",
  "signature",
  "sigstore-types",
@@ -4048,9 +4095,9 @@ dependencies = [
 
 [[package]]
 name = "sigstore-fulcio"
-version = "0.6.6"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c60b95ecc87b2e279705e4a617cfb2d668bb9dfb15b3a99322524b6f44a4201b"
+checksum = "78654d1d908925ff3c0634a8bc5199587b6d37ec7b777fedda86687924f088e0"
 dependencies = [
  "base64",
  "reqwest",
@@ -4065,9 +4112,9 @@ dependencies = [
 
 [[package]]
 name = "sigstore-merkle"
-version = "0.6.6"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c0d53558825c77716855c13794306fff766854c1bf92948e77d7890da3f2455"
+checksum = "a4dbea5d8d5f293dfc2ed6abd06dc26a5ef017af126e53e3e36a6b2f7b7dac8c"
 dependencies = [
  "base64",
  "hex",
@@ -4078,14 +4125,14 @@ dependencies = [
 
 [[package]]
 name = "sigstore-oidc"
-version = "0.6.6"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cff865c405b9bcc2d8f684245307880c282c87edcd34b0039babfde9ae301ba"
+checksum = "6e2146f7779690f14313299bc3f2ec87af26cbb96c44a77a4a61dec4422b0007"
 dependencies = [
  "ambient-id",
  "base64",
  "open",
- "rand 0.10.1",
+ "rand 0.9.4",
  "reqwest",
  "serde",
  "serde_json",
@@ -4098,9 +4145,9 @@ dependencies = [
 
 [[package]]
 name = "sigstore-rekor"
-version = "0.6.6"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "641fdaaa40d0cd6e249cf1671c2240beff1a3ece578062cf43e750779e8db2b3"
+checksum = "fbe0bf948de89bed9b3b5c9d62940264a4da60db3518006b952b107d0e71926f"
 dependencies = [
  "base64",
  "hex",
@@ -4116,9 +4163,9 @@ dependencies = [
 
 [[package]]
 name = "sigstore-sign"
-version = "0.6.6"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67ae2a8b1e76abe552de2ba89c85013d09753beeebc76b5c50bfdff4abc689a1"
+checksum = "6d21f5037998997f2e79f568efd48fc16649a78580e0eb45390a0b7a6a3871b6"
 dependencies = [
  "base64",
  "serde_json",
@@ -4136,13 +4183,13 @@ dependencies = [
 
 [[package]]
 name = "sigstore-trust-root"
-version = "0.6.6"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6b0d2550f05c096400066e858db13d91f9de3b750a7541fb1291c1dc80ca290"
+checksum = "54fdf65b1207f96d4b1e5b44028fe3e078d40a50f6316715f6ad97ae21b0bfeb"
 dependencies = [
  "base64",
- "chrono",
  "hex",
+ "jiff",
  "rustls-pki-types",
  "serde",
  "serde_json",
@@ -4154,19 +4201,19 @@ dependencies = [
 
 [[package]]
 name = "sigstore-tsa"
-version = "0.6.6"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bc86c8abc1ece6832236e7e34e9baebb5d4d40490c0332b814a0d8624ca7255"
+checksum = "860eb6a645e0a22fa316031b06e9e87f9310c21915743bfa83901472dd3e7146"
 dependencies = [
  "aws-lc-rs",
  "base64",
- "chrono",
  "cmpv2",
  "cms",
  "const-oid 0.9.6",
  "der",
  "hex",
- "rand 0.10.1",
+ "jiff",
+ "rand 0.9.4",
  "reqwest",
  "rustls-pki-types",
  "rustls-webpki",
@@ -4180,12 +4227,11 @@ dependencies = [
 
 [[package]]
 name = "sigstore-types"
-version = "0.6.6"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8d870c9bcfdf83396ac2bd2d6a23c5d09ec02cc9fda50fa1cbb3dd71a9bee53"
+checksum = "7fb0334b69834c1f29757e57ade7e9bdbc42f5383cc22d003256d4d2df47af13"
 dependencies = [
  "base64",
- "chrono",
  "hex",
  "pem",
  "serde",
