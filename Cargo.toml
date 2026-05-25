@@ -98,7 +98,7 @@ smallvec = { version = "1", features = ["serde"] }
 base64 = "0.22"
 
 # Sigstore (provenance attestation on `publish`)
-sigstore-sign = "0.6"
+sigstore-sign = "0.8"
 sigstore-oidc = "0.6"
 sigstore-types = "0.6"
 # Pinned to an exact `0.0.x` because the crate is pre-1.0 and the `0.0`
