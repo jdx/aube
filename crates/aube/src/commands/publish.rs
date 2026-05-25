@@ -474,11 +474,6 @@ async fn publish_one(
         ));
     }
 
-    let trusted_publish_token = trusted_publish_token(client, &registry_url, &name).await?;
-    if trusted_publish_token.is_none() {
-        ensure_registry_auth(client, &registry_url)?;
-    }
-
     // Lifecycle hooks + tarball build only happen now that we know
     // we're actually going to PUT. For a re-run of `-r publish` where
     // every package is already on the registry, the loop never reaches
@@ -541,6 +536,10 @@ async fn publish_one(
     )?;
 
     let url = put_url(&registry_url, &archive.name);
+    let trusted_publish_token = trusted_publish_token(client, &registry_url, &archive.name).await?;
+    if trusted_publish_token.is_none() {
+        ensure_registry_auth(client, &registry_url)?;
+    }
     let mut req = if let Some(token) = trusted_publish_token.as_deref() {
         client
             .request(reqwest::Method::PUT, &url, &registry_url)
@@ -637,27 +636,38 @@ async fn npm_oidc_id_token(
         .wrap_err("invalid ACTIONS_ID_TOKEN_REQUEST_URL")?;
     url.query_pairs_mut().append_pair("audience", &audience);
 
-    let resp = client
+    let resp = match client
         .request(reqwest::Method::GET, url.as_str(), registry_url)
         .header(reqwest::header::ACCEPT, "application/json")
         .bearer_auth(request_token)
         .send()
         .await
-        .into_diagnostic()
-        .wrap_err("failed to request GitHub Actions OIDC token for npm")?;
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            tracing::debug!(
+                error = %e,
+                "GitHub Actions OIDC token request failed; falling back to configured registry auth"
+            );
+            return Ok(None);
+        }
+    };
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(miette!(
-            "failed to request GitHub Actions OIDC token for npm: {status}: {}",
-            body.trim()
-        ));
+        tracing::debug!(
+            %status,
+            body = body.trim(),
+            "GitHub Actions OIDC token request failed; falling back to configured registry auth"
+        );
+        return Ok(None);
     }
-    let body = resp
-        .json::<GitHubOidcResponse>()
-        .await
-        .into_diagnostic()
-        .wrap_err("failed to parse GitHub Actions OIDC token response")?;
+    let Ok(body) = resp.json::<GitHubOidcResponse>().await else {
+        tracing::debug!(
+            "failed to parse GitHub Actions OIDC token response; falling back to configured registry auth"
+        );
+        return Ok(None);
+    };
     Ok(body.value.filter(|token| !token.trim().is_empty()))
 }
 

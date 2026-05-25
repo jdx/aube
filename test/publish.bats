@@ -147,6 +147,132 @@ NODE
 	assert_output "Bearer npm-exchange-token"
 }
 
+@test "aube publish falls back to npmrc auth when GitHub OIDC request fails" {
+	_write_publishable_pkg
+	echo "//127.0.0.1/:_authToken=fallback-token" >.npmrc
+
+	cat >trusted-publish-server.mjs <<'NODE'
+import http from 'node:http';
+import fs from 'node:fs';
+
+const server = http.createServer((req, res) => {
+  if (req.method === 'GET' && req.url.startsWith('/gha-oidc')) {
+    res.statusCode = 500;
+    res.end('oidc unavailable');
+    return;
+  }
+  if (req.method === 'GET' && req.url === '/publish-smoke') {
+    res.statusCode = 404;
+    res.end('{}');
+    return;
+  }
+  if (req.method === 'PUT' && req.url === '/publish-smoke') {
+    fs.writeFileSync('put-auth', req.headers.authorization || '');
+    req.resume();
+    req.on('end', () => {
+      res.statusCode = req.headers.authorization === 'Bearer fallback-token' ? 201 : 401;
+      res.end('{"ok":true}');
+    });
+    return;
+  }
+  res.statusCode = 404;
+  res.end('{}');
+});
+server.listen(0, '127.0.0.1', () => {
+  fs.writeFileSync('trusted-publish-server-port', String(server.address().port));
+});
+NODE
+	node trusted-publish-server.mjs &
+	PUBLISH_SERVER_PID=$!
+	for _ in 1 2 3 4 5 6 7 8 9 10; do
+		[ -f trusted-publish-server-port ] && break
+		sleep 0.1
+	done
+	port="$(cat trusted-publish-server-port)"
+	echo "//127.0.0.1:${port}/:_authToken=fallback-token" >.npmrc
+
+	run env \
+		GITHUB_ACTIONS=true \
+		ACTIONS_ID_TOKEN_REQUEST_URL="http://127.0.0.1:${port}/gha-oidc" \
+		ACTIONS_ID_TOKEN_REQUEST_TOKEN=gha-request-token \
+		aube publish --no-git-checks --registry "http://127.0.0.1:${port}/"
+	rc=$status
+	_stop_publish_server
+	[ "$rc" -eq 0 ]
+
+	run cat put-auth
+	assert_success
+	assert_output "Bearer fallback-token"
+}
+
+@test "aube publish exchanges OIDC token for post-hook package name" {
+	_write_publishable_pkg
+	cat >rewrite-name.mjs <<'NODE'
+import fs from 'node:fs';
+const m = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+m.name = 'publish-renamed';
+fs.writeFileSync('package.json', JSON.stringify(m, null, 2));
+NODE
+	node -e "const fs=require('fs'); const m=JSON.parse(fs.readFileSync('package.json','utf8')); m.scripts={prepublishOnly:'node ./rewrite-name.mjs'}; fs.writeFileSync('package.json', JSON.stringify(m, null, 2))"
+
+	cat >trusted-publish-server.mjs <<'NODE'
+import http from 'node:http';
+import fs from 'node:fs';
+
+const server = http.createServer((req, res) => {
+  if (req.method === 'GET' && req.url === '/publish-smoke') {
+    res.statusCode = 404;
+    res.end('{}');
+    return;
+  }
+  if (req.method === 'POST' && req.url === '/-/npm/v1/oidc/token/exchange/package/publish-renamed') {
+    fs.writeFileSync('exchange-auth', req.headers.authorization || '');
+    res.statusCode = 201;
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ token: 'renamed-exchange-token' }));
+    return;
+  }
+  if (req.method === 'PUT' && req.url === '/publish-renamed') {
+    fs.writeFileSync('put-auth', req.headers.authorization || '');
+    req.resume();
+    req.on('end', () => {
+      res.statusCode = req.headers.authorization === 'Bearer renamed-exchange-token' ? 201 : 401;
+      res.end('{"ok":true}');
+    });
+    return;
+  }
+  res.statusCode = 404;
+  res.end('{}');
+});
+server.listen(0, '127.0.0.1', () => {
+  fs.writeFileSync('trusted-publish-server-port', String(server.address().port));
+});
+NODE
+	node trusted-publish-server.mjs &
+	PUBLISH_SERVER_PID=$!
+	for _ in 1 2 3 4 5 6 7 8 9 10; do
+		[ -f trusted-publish-server-port ] && break
+		sleep 0.1
+	done
+	port="$(cat trusted-publish-server-port)"
+
+	run env \
+		NPM_ID_TOKEN=gha-id-token \
+		aube publish --no-git-checks --registry "http://127.0.0.1:${port}/"
+	rc=$status
+	_stop_publish_server
+	[ "$rc" -eq 0 ]
+	assert_output --partial "+ publish-renamed@0.1.0"
+
+	run cat exchange-auth
+	assert_success
+	assert_output "Bearer gha-id-token"
+
+	run cat put-auth
+	assert_success
+	assert_output "Bearer renamed-exchange-token"
+}
+
 @test "aube publish --provenance errors outside an OIDC-capable CI" {
 	_write_publishable_pkg
 
