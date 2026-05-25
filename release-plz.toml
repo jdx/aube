@@ -16,7 +16,6 @@
 # ("aube") that owns the binary. Every other crate publishes to
 # crates.io but is otherwise silent (no per-crate tag, no per-crate
 # GitHub release).
-dependencies_update = true
 publish = true
 changelog_update = true
 git_tag_enable = false
