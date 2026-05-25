@@ -687,6 +687,10 @@ pub(crate) fn extract_codeload_tarball_at(
     // The atomic-rename pattern below makes a populated `target` always
     // a complete tree — no half-extracted state to worry about.
     if target.is_dir() {
+        if read_codeload_integrity(&target).is_none() {
+            let integrity = codeload_integrity(bytes);
+            let _ = std::fs::write(codeload_integrity_path(&target), &integrity);
+        }
         return Ok((target, head_sha));
     }
 

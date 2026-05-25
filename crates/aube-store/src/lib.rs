@@ -1452,6 +1452,29 @@ mod tests {
     }
 
     #[test]
+    fn extract_codeload_tarball_backfills_missing_integrity_sidecar() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        let wrapper = format!("owner-repo-{}", &sha[..7]);
+        let bytes = build_codeload_tarball(
+            &wrapper,
+            &[("package.json", br#"{"name":"x","version":"0.0.1"}"#)],
+        );
+        let url = "https://github.com/owner/repo.git";
+        let (target, _) = extract_codeload_tarball_at(tmp.path(), &bytes, url, sha).unwrap();
+        let sidecar = super::git::codeload_integrity_path(&target);
+        std::fs::remove_file(&sidecar).unwrap();
+
+        let (target2, _) = extract_codeload_tarball_at(tmp.path(), &bytes, url, sha).unwrap();
+        assert_eq!(target, target2);
+        assert!(
+            super::git::read_codeload_integrity(&target2)
+                .as_deref()
+                .is_some_and(|s| s.starts_with("sha512-"))
+        );
+    }
+
+    #[test]
     fn codeload_cache_paths_rejects_invalid_inputs() {
         let tmp = tempfile::tempdir().unwrap();
         // Abbreviated SHA — codeload extracts can't be verified for

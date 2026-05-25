@@ -399,7 +399,6 @@ dependencies = [
  "aube-registry",
  "aube-store",
  "aube-util",
- "base64",
  "flate2",
  "miette",
  "node-semver",
