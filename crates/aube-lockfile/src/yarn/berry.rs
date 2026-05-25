@@ -157,6 +157,7 @@ pub(super) fn parse_berry_str(
                     url: strip_commit_hash(&url),
                     committish: None,
                     resolved: extract_commit_hash(&url).unwrap_or_default(),
+                    integrity: None,
                     subpath: None,
                 }))
             }
@@ -508,6 +509,7 @@ fn classify_remote(url: &str, _block: &yaml_serde::Mapping) -> Option<LocalSourc
             url: strip_commit_hash(url),
             committish: None,
             resolved: extract_commit_hash(url).unwrap_or_default(),
+            integrity: None,
             subpath: None,
         }))
     } else {

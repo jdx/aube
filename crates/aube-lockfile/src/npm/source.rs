@@ -8,6 +8,7 @@ pub(super) fn local_git_source_from_resolved(resolved: &str) -> Option<LocalSour
         url,
         committish,
         resolved,
+        integrity: None,
         subpath,
     }))
 }

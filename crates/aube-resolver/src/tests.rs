@@ -3702,7 +3702,7 @@ async fn optional_dep_is_skipped_while_required_dep_resolves() {
         graph
             .skipped_optional_dependencies
             .get(".")
-            .map_or(true, |skipped| !skipped.contains_key("missing-optional"))
+            .is_none_or(|skipped| !skipped.contains_key("missing-optional"))
     );
 
     server.abort();
@@ -3812,7 +3812,7 @@ async fn optional_dep_with_both_fetches_in_flight() {
         graph
             .skipped_optional_dependencies
             .get(".")
-            .map_or(true, |skipped| !skipped.contains_key("missing-optional"))
+            .is_none_or(|skipped| !skipped.contains_key("missing-optional"))
     );
 
     server.abort();

@@ -242,7 +242,7 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                 path: None,
             }),
             Some(LocalSource::Git(g)) => Some(WritableResolution {
-                integrity: None,
+                integrity: g.integrity.clone(),
                 directory: None,
                 tarball: None,
                 commit: Some(g.resolved.clone()),

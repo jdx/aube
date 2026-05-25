@@ -189,6 +189,15 @@ pub fn verify_integrity(data: &[u8], expected: &str) -> Result<(), Error> {
     }
 }
 
+/// Compute the npm/pnpm SHA-512 SRI string for raw tarball bytes.
+pub fn sha512_integrity(data: &[u8]) -> String {
+    use base64::Engine;
+    let mut hasher = Sha512::new();
+    hasher.update(data);
+    let b64 = base64::engine::general_purpose::STANDARD.encode(hasher.finalize());
+    format!("{SHA512_INTEGRITY_PREFIX}{b64}")
+}
+
 /// Verify a precomputed SHA-512 digest against an SRI integrity
 /// string. Used by the streaming-tarball fetch path: SHA-512 is
 /// computed during the chunk read loop, then handed here so the

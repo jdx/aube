@@ -288,6 +288,7 @@ pub(super) fn local_source_from_resolution(res: &Resolution) -> Option<LocalSour
             url: repo.clone(),
             committish: None,
             resolved: commit.clone(),
+            integrity: res.integrity.clone(),
             subpath: res.path.clone(),
         }));
     }

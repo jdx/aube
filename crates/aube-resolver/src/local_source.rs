@@ -374,8 +374,12 @@ pub(crate) async fn resolve_git_source(
     // already populated the codeload cache. Mirrors `git_shallow_clone`'s
     // top-of-function reuse check.
     if codeload_url.is_some()
-        && let Some((clone_dir, _head_sha)) =
-            aube_store::codeload_cache_lookup(&original_url, &resolved_sha)
+        && git.integrity.is_some()
+        && let Some((clone_dir, _head_sha)) = aube_store::codeload_cache_lookup(
+            &original_url,
+            &resolved_sha,
+            git.integrity.as_deref(),
+        )
     {
         let pkg_root = match &subpath {
             Some(sub) => clone_dir.join(sub),
@@ -399,6 +403,7 @@ pub(crate) async fn resolve_git_source(
                 url: original_url,
                 committish,
                 resolved: resolved_sha,
+                integrity: git.integrity.clone(),
                 subpath,
             }),
             version,
@@ -417,8 +422,15 @@ pub(crate) async fn resolve_git_source(
                 // clone path does. Return the original lockfile URL
                 // in `LocalSource::Git.url` for cross-tool round-trip.
                 let bytes_vec = bytes.to_vec();
+                let integrity = git
+                    .integrity
+                    .clone()
+                    .unwrap_or_else(|| aube_store::sha512_integrity(&bytes_vec));
+                aube_store::verify_integrity(&bytes_vec, &integrity)
+                    .map_err(|e| Error::Registry(name.to_string(), e.to_string()))?;
                 let url_for_extract = original_url.clone();
                 let sha_for_extract = resolved_sha.clone();
+                let integrity_for_extract = integrity.clone();
                 let subpath_for_extract = subpath.clone();
                 let name_for_extract = name.to_string();
                 let extracted = tokio::task::spawn_blocking(move || -> Result<_, Error> {
@@ -426,6 +438,7 @@ pub(crate) async fn resolve_git_source(
                         &bytes_vec,
                         &url_for_extract,
                         &sha_for_extract,
+                        Some(&integrity_for_extract),
                     )
                     .map_err(|e| Error::Registry(name_for_extract.clone(), e.to_string()))?;
                     let pkg_root = match &subpath_for_extract {
@@ -459,6 +472,7 @@ pub(crate) async fn resolve_git_source(
                                 url: original_url,
                                 committish,
                                 resolved,
+                                integrity: Some(integrity),
                                 subpath,
                             }),
                             version,
@@ -527,6 +541,7 @@ pub(crate) async fn resolve_git_source(
                 url: original_url_for_lockfile,
                 committish,
                 resolved,
+                integrity: None,
                 subpath: subpath_for_clone,
             }),
             version,

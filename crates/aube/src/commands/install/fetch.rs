@@ -163,24 +163,34 @@ pub(super) async fn import_local_source(
             // resolver already populated the codeload cache for this
             // (url, commit) pair earlier in the install. Mirrors
             // `git_shallow_clone`'s top-of-function reuse check.
-            let mut clone_dir: Option<std::path::PathBuf> = if codeload_url.is_some() {
-                aube_store::codeload_cache_lookup(&url, &resolved).map(|(dir, _)| dir)
-            } else {
-                None
-            };
+            let mut clone_dir: Option<std::path::PathBuf> =
+                if codeload_url.is_some() && g.integrity.is_some() {
+                    aube_store::codeload_cache_lookup(&url, &resolved, g.integrity.as_deref())
+                        .map(|(dir, _)| dir)
+                } else {
+                    None
+                };
             if clone_dir.is_none()
                 && let (Some(c), Some(url_to_fetch)) = (client, codeload_url.as_deref())
             {
                 match c.fetch_tarball_bytes(url_to_fetch).await {
                     Ok(bytes) => {
                         let bytes_vec = bytes.to_vec();
+                        let integrity = g
+                            .integrity
+                            .clone()
+                            .unwrap_or_else(|| aube_store::sha512_integrity(&bytes_vec));
+                        aube_store::verify_integrity(&bytes_vec, &integrity)
+                            .map_err(|e| miette!("{spec}: {e}{chain}"))?;
                         let url_for_extract = url.clone();
                         let resolved_for_extract = resolved.clone();
+                        let integrity_for_extract = integrity.clone();
                         match tokio::task::spawn_blocking(move || {
                             aube_store::extract_codeload_tarball(
                                 &bytes_vec,
                                 &url_for_extract,
                                 &resolved_for_extract,
+                                Some(&integrity_for_extract),
                             )
                         })
                         .await

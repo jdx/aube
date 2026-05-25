@@ -536,11 +536,12 @@ pub fn extract_codeload_tarball(
     bytes: &[u8],
     url: &str,
     commit: &str,
+    integrity: Option<&str>,
 ) -> Result<(PathBuf, String), Error> {
     let git_root = crate::dirs::cache_dir()
         .map(|d| d.join("git"))
         .unwrap_or_else(std::env::temp_dir);
-    extract_codeload_tarball_at(&git_root, bytes, url, commit)
+    extract_codeload_tarball_at(&git_root, bytes, url, commit, integrity)
 }
 
 /// Return the cached codeload extract for `(url, commit)` without
@@ -555,11 +556,15 @@ pub fn extract_codeload_tarball(
 /// a cached entry — invalid URL/commit shapes, abbreviated SHAs, no
 /// resolvable cache root — so callers can chain straight into the
 /// fetch path on `None` without untangling an `Err`.
-pub fn codeload_cache_lookup(url: &str, commit: &str) -> Option<(PathBuf, String)> {
+pub fn codeload_cache_lookup(
+    url: &str,
+    commit: &str,
+    integrity: Option<&str>,
+) -> Option<(PathBuf, String)> {
     let git_root = crate::dirs::cache_dir()
         .map(|d| d.join("git"))
         .unwrap_or_else(std::env::temp_dir);
-    let (target, head_sha) = codeload_cache_paths(&git_root, url, commit)?;
+    let (target, head_sha) = codeload_cache_paths(&git_root, url, commit, integrity)?;
     target.is_dir().then_some((target, head_sha))
 }
 
@@ -572,6 +577,7 @@ pub(crate) fn codeload_cache_paths(
     cache_root: &Path,
     url: &str,
     commit: &str,
+    integrity: Option<&str>,
 ) -> Option<(PathBuf, String)> {
     if validate_git_positional(url, "git url").is_err()
         || validate_git_positional(commit, "git commit").is_err()
@@ -586,6 +592,10 @@ pub(crate) fn codeload_cache_paths(
     hasher.update(url.as_bytes());
     hasher.update(b"\0");
     hasher.update(head_sha.as_bytes());
+    if let Some(integrity) = integrity {
+        hasher.update(b"\0");
+        hasher.update(integrity.as_bytes());
+    }
     let digest = hasher.finalize();
     let key: String = digest
         .as_bytes()
@@ -611,9 +621,11 @@ pub(crate) fn extract_codeload_tarball_at(
     bytes: &[u8],
     url: &str,
     commit: &str,
+    integrity: Option<&str>,
 ) -> Result<(PathBuf, String), Error> {
     use std::io::Read;
-    let (target, head_sha) = codeload_cache_paths(git_root, url, commit).ok_or_else(|| {
+    let (target, head_sha) =
+        codeload_cache_paths(git_root, url, commit, integrity).ok_or_else(|| {
         Error::Git(format!(
             "extract_codeload_tarball: invalid (url, commit) — commit must be a full 40-char SHA, got {commit}"
         ))

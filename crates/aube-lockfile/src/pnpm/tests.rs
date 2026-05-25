@@ -2,7 +2,9 @@ use super::{
     dep_path::{parse_dep_path, version_to_dep_path},
     parse, write,
 };
-use crate::{CatalogEntry, DepType, DirectDep, LocalSource, LockedPackage, LockfileGraph};
+use crate::{
+    CatalogEntry, DepType, DirectDep, GitSource, LocalSource, LockedPackage, LockfileGraph,
+};
 use aube_manifest::PackageJson;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -2347,4 +2349,67 @@ snapshots:
         .expect("synthesized alias entry from local package's transitive");
     assert_eq!(alias.name, "string-width-cjs");
     assert_eq!(alias.alias_of.as_deref(), Some("string-width"));
+}
+
+#[test]
+fn git_resolution_integrity_roundtrips() {
+    let sha = "abcdef0123456789abcdef0123456789abcdef01";
+    let integrity = "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+    let local = LocalSource::Git(GitSource {
+        url: "https://github.com/owner/repo.git".to_string(),
+        committish: Some(sha.to_string()),
+        resolved: sha.to_string(),
+        integrity: Some(integrity.to_string()),
+        subpath: None,
+    });
+    let dep_path = local.dep_path("gitdep");
+    let mut packages = BTreeMap::new();
+    packages.insert(
+        dep_path.clone(),
+        LockedPackage {
+            name: "gitdep".to_string(),
+            version: "1.0.0".to_string(),
+            integrity: Some(integrity.to_string()),
+            dep_path: dep_path.clone(),
+            local_source: Some(local),
+            ..Default::default()
+        },
+    );
+    let mut importers = BTreeMap::new();
+    importers.insert(
+        ".".to_string(),
+        vec![DirectDep {
+            name: "gitdep".to_string(),
+            dep_path: dep_path.clone(),
+            dep_type: DepType::Production,
+            specifier: Some("github:owner/repo".to_string()),
+        }],
+    );
+    let graph = LockfileGraph {
+        importers,
+        packages,
+        ..LockfileGraph::default()
+    };
+    let manifest = PackageJson {
+        name: Some("root".to_string()),
+        version: Some("0.0.0".to_string()),
+        dependencies: [("gitdep".to_string(), "github:owner/repo".to_string())]
+            .into_iter()
+            .collect(),
+        ..PackageJson::default()
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let lockfile_path = dir.path().join("pnpm-lock.yaml");
+    write(&lockfile_path, &graph, &manifest).unwrap();
+    let yaml = std::fs::read_to_string(&lockfile_path).unwrap();
+    assert!(yaml.contains("type: git"));
+    assert!(yaml.contains(&format!("integrity: {integrity}")));
+
+    let reparsed = parse(&lockfile_path).unwrap();
+    let pkg = reparsed.packages.get(&dep_path).unwrap();
+    assert_eq!(pkg.integrity.as_deref(), Some(integrity));
+    let Some(LocalSource::Git(git)) = pkg.local_source.as_ref() else {
+        panic!("expected git local source");
+    };
+    assert_eq!(git.integrity.as_deref(), Some(integrity));
 }

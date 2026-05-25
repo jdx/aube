@@ -24,8 +24,8 @@ use git::{
 };
 pub use index::{PackageIndex, StoredFile};
 pub use integrity::{
-    SHA512_INTEGRITY_PREFIX, integrity_to_hex, validate_and_encode_name, validate_pkg_content,
-    validate_version, verify_integrity, verify_precomputed_sha512,
+    SHA512_INTEGRITY_PREFIX, integrity_to_hex, sha512_integrity, validate_and_encode_name,
+    validate_pkg_content, validate_version, verify_integrity, verify_precomputed_sha512,
 };
 #[cfg(test)]
 pub(crate) use tarball::normalize_tar_entry_path;
@@ -1394,7 +1394,8 @@ mod tests {
             ],
         );
         let url = "https://github.com/owner/repo.git";
-        let (target, head) = extract_codeload_tarball_at(tmp.path(), &bytes, url, sha).unwrap();
+        let (target, head) =
+            extract_codeload_tarball_at(tmp.path(), &bytes, url, sha, None).unwrap();
         assert_eq!(head, sha);
         // Wrapper component is stripped — `package.json` lives at the
         // target root, not under `target/<wrapper>/package.json`.
@@ -1404,7 +1405,7 @@ mod tests {
 
         // Second call with the same (url, commit) reuses the cached
         // directory rather than re-extracting.
-        let (target2, _) = extract_codeload_tarball_at(tmp.path(), &bytes, url, sha).unwrap();
+        let (target2, _) = extract_codeload_tarball_at(tmp.path(), &bytes, url, sha, None).unwrap();
         assert_eq!(target, target2);
     }
 
@@ -1424,21 +1425,23 @@ mod tests {
         );
 
         // Pre-extract miss.
-        let (expected_target, expected_sha) = codeload_cache_paths(tmp.path(), url, sha).unwrap();
+        let (expected_target, expected_sha) =
+            codeload_cache_paths(tmp.path(), url, sha, None).unwrap();
         assert!(!expected_target.exists());
         // The public lookup uses the real `dirs::cache_dir()` so the
         // test path can't drive it directly. Instead, drive the inner
         // helper through the cache_paths function and verify the
         // exists check parallels the `is_dir` filter `codeload_cache_lookup`
         // applies. After extract, the lookup-equivalent must succeed.
-        let (target, head) = extract_codeload_tarball_at(tmp.path(), &bytes, url, sha).unwrap();
+        let (target, head) =
+            extract_codeload_tarball_at(tmp.path(), &bytes, url, sha, None).unwrap();
         assert_eq!(target, expected_target);
         assert_eq!(head, expected_sha);
         assert!(target.is_dir(), "extract must populate the cache target");
         // A second `extract_codeload_tarball_at` (the equivalent of a
         // post-resolver install-time call) reuses the same dir without
         // re-extracting — same cache path comes back.
-        let (target2, _) = extract_codeload_tarball_at(tmp.path(), &bytes, url, sha).unwrap();
+        let (target2, _) = extract_codeload_tarball_at(tmp.path(), &bytes, url, sha, None).unwrap();
         assert_eq!(target, target2);
     }
 
@@ -1447,18 +1450,39 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         // Abbreviated SHA — codeload extracts can't be verified for
         // non-full-SHA committishes, so the cache key would be ambiguous.
-        assert!(codeload_cache_paths(tmp.path(), "https://example.com/r.git", "abc1234").is_none());
+        assert!(
+            codeload_cache_paths(tmp.path(), "https://example.com/r.git", "abc1234", None)
+                .is_none()
+        );
         // Dash-prefixed URL — `validate_git_positional` rejects.
         assert!(
             codeload_cache_paths(
                 tmp.path(),
                 "--upload-pack=/tmp/evil",
-                "abcdef0123456789abcdef0123456789abcdef01"
+                "abcdef0123456789abcdef0123456789abcdef01",
+                None,
             )
             .is_none()
         );
         // Branch name — not a SHA.
-        assert!(codeload_cache_paths(tmp.path(), "https://example.com/r.git", "main").is_none());
+        assert!(
+            codeload_cache_paths(tmp.path(), "https://example.com/r.git", "main", None).is_none()
+        );
+    }
+
+    #[test]
+    fn codeload_cache_paths_include_integrity_when_present() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sha = "abcdef0123456789abcdef0123456789abcdef01";
+        let url = "https://example.com/r.git";
+        let no_integrity = codeload_cache_paths(tmp.path(), url, sha, None).unwrap();
+        let with_integrity = codeload_cache_paths(tmp.path(), url, sha, Some("sha512-a")).unwrap();
+        let with_other_integrity =
+            codeload_cache_paths(tmp.path(), url, sha, Some("sha512-b")).unwrap();
+
+        assert_ne!(no_integrity.0, with_integrity.0);
+        assert_ne!(with_integrity.0, with_other_integrity.0);
+        assert_eq!(with_integrity.1, sha);
     }
 
     #[test]
@@ -1485,8 +1509,9 @@ mod tests {
         let mut ar = tar::Builder::new(gz);
         ar.append(&h, &body[..]).unwrap();
         let bytes = ar.into_inner().unwrap().finish().unwrap();
-        let err = extract_codeload_tarball_at(tmp.path(), &bytes, "https://example.com/r.git", sha)
-            .unwrap_err();
+        let err =
+            extract_codeload_tarball_at(tmp.path(), &bytes, "https://example.com/r.git", sha, None)
+                .unwrap_err();
         assert!(
             matches!(err, Error::Tar(ref m) if m.contains("unsafe")),
             "expected Error::Tar with unsafe-path message, got {err:?}",
@@ -1501,9 +1526,14 @@ mod tests {
         // upstream `git ls-remote` before reaching here.
         let tmp = tempfile::tempdir().unwrap();
         let bytes = build_codeload_tarball("wrapper", &[("ok", b"ok")]);
-        let err =
-            extract_codeload_tarball_at(tmp.path(), &bytes, "https://example.com/r.git", "abc1234")
-                .unwrap_err();
+        let err = extract_codeload_tarball_at(
+            tmp.path(),
+            &bytes,
+            "https://example.com/r.git",
+            "abc1234",
+            None,
+        )
+        .unwrap_err();
         assert!(matches!(err, Error::Git(ref m) if m.contains("40-char")));
     }
 

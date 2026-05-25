@@ -144,6 +144,7 @@ fn test_write_preserves_git_resolved_url() {
         url: "ssh://git@github.com/owner/repo.git".to_string(),
         committish: Some(sha.to_string()),
         resolved: sha.to_string(),
+        integrity: None,
         subpath: None,
     });
     let dep_path = local.dep_path("git-only");

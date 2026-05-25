@@ -1736,7 +1736,7 @@ mod tests {
         let versions = workspace_package_versions(root).unwrap();
         assert_eq!(versions.len(), 1);
         assert_eq!(versions.get("@my/lib").unwrap(), "1.0.0");
-        assert!(versions.get("@my/root").is_none());
+        assert!(!versions.contains_key("@my/root"));
     }
 
     #[test]

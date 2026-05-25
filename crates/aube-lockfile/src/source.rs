@@ -57,6 +57,10 @@ pub struct GitSource {
     pub url: String,
     pub committish: Option<String>,
     pub resolved: String,
+    /// SHA-512 SRI of the hosted tarball bytes when the git source was
+    /// fetched through a codeload-style archive. Plain git-clone sources
+    /// leave this unset because git object IDs verify the checkout.
+    pub integrity: Option<String>,
     /// pnpm `&path:/sub/dir` selector — when set, only this
     /// subdirectory of the cloned repo is treated as the package
     /// root. Stored without leading slash so dep_path hashes are
@@ -179,6 +183,7 @@ impl LocalSource {
                 url,
                 committish,
                 resolved: String::new(),
+                integrity: None,
                 subpath,
             }));
         }
@@ -683,6 +688,7 @@ mod tests {
             url: url.clone(),
             committish: None,
             resolved: sha.to_string(),
+            integrity: None,
             subpath: None,
         });
         let lockfile_version = source.specifier();
@@ -826,6 +832,7 @@ mod tests {
             url: "https://github.com/org/dep.git".to_string(),
             committish: None,
             resolved: sha.to_string(),
+            integrity: None,
             subpath: Some("packages/special".to_string()),
         });
         let spec = source.specifier();
@@ -964,12 +971,14 @@ mod tests {
             url: "https://example.com/r.git".to_string(),
             committish: None,
             resolved: sha.to_string(),
+            integrity: None,
             subpath: Some("packages/a".to_string()),
         });
         let b = LocalSource::Git(GitSource {
             url: "https://example.com/r.git".to_string(),
             committish: None,
             resolved: sha.to_string(),
+            integrity: None,
             subpath: Some("packages/b".to_string()),
         });
         assert_ne!(a.dep_path("dep"), b.dep_path("dep"));

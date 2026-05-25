@@ -261,6 +261,7 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
                 && let Some(ref res) = pkg_info.resolution
                 && let Some(mut ls) = local_source_from_resolution(res)
             {
+                local_pkg.integrity = res.integrity.clone();
                 if let LocalSource::Git(ref mut g) = ls
                     && g.subpath.is_none()
                     && let Some(LocalSource::Git(prior)) = &local_pkg.local_source
