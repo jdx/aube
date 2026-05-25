@@ -855,15 +855,15 @@ dependencies = [
 
 [[package]]
 name = "clx"
-version = "1.3.0"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fd84e27faf914a0353eab8ac31ca3c8d719a493f46ff884f4b4eb5a5d7f34d0"
+checksum = "20daab9df9e49b0478215055d38362d5973043b7a4af836a58968760755e9a9f"
 dependencies = [
  "console",
  "nix 0.31.3",
  "serde",
  "serde_json",
- "strum 0.27.2",
+ "strum 0.28.0",
  "tera",
  "thiserror 2.0.18",
  "unicode-width 0.2.2",
