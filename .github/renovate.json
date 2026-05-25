@@ -1,4 +1,5 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["local>jdx/renovate-config"]
+  "extends": ["local>jdx/renovate-config"],
+  "ignorePaths": ["fixtures/**"]
 }
