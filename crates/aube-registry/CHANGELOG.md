@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.0](https://github.com/endevco/aube/compare/aube-registry-v1.15.0...aube-registry-v1.16.0) - 2026-05-25
+
+### Fixed
+
+- *(publish)* support npm trusted publishing auth ([#763](https://github.com/endevco/aube/pull/763))
+
+### Other
+
+- *(deps)* bump hickory dns stack ([#780](https://github.com/endevco/aube/pull/780))
+- refresh benchmarks for v1.15.0 ([#750](https://github.com/endevco/aube/pull/750))
+- *(registry)* split client module ([#742](https://github.com/endevco/aube/pull/742))
+- *(registry)* split config module ([#737](https://github.com/endevco/aube/pull/737))
+
 ## [1.15.0](https://github.com/endevco/aube/compare/aube-registry-v1.14.1...aube-registry-v1.15.0) - 2026-05-17
 
 ### Other

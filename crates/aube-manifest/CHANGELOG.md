@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.0](https://github.com/endevco/aube/compare/aube-manifest-v1.15.0...aube-manifest-v1.16.0) - 2026-05-25
+
+### Other
+
+- refresh benchmarks for v1.15.0 ([#750](https://github.com/endevco/aube/pull/750))
+- *(manifest)* split workspace.rs into submodules ([#747](https://github.com/endevco/aube/pull/747))
+
 ## [1.15.0](https://github.com/endevco/aube/compare/aube-manifest-v1.14.1...aube-manifest-v1.15.0) - 2026-05-17
 
 ### Added

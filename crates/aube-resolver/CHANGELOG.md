@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.0](https://github.com/endevco/aube/compare/aube-resolver-v1.15.0...aube-resolver-v1.16.0) - 2026-05-25
+
+### Added
+
+- *(pnpm)* catch up with pnpm 11 parity ([#761](https://github.com/endevco/aube/pull/761))
+
+### Fixed
+
+- *(resolver)* pin hosted git tarball integrity ([#783](https://github.com/endevco/aube/pull/783))
+- *(resolver)* skip fast fail for optional deps ([#756](https://github.com/endevco/aube/pull/756))
+
+### Other
+
+- refresh benchmarks for v1.15.0 ([#750](https://github.com/endevco/aube/pull/750))
+- *(resolver)* hoist BFS state into ResolveDriver, split process_task ([#745](https://github.com/endevco/aube/pull/745))
+- *(resolver)* split resolve.rs into submodules ([#738](https://github.com/endevco/aube/pull/738))
+
 ## [1.15.0](https://github.com/endevco/aube/compare/aube-resolver-v1.14.1...aube-resolver-v1.15.0) - 2026-05-17
 
 ### Added

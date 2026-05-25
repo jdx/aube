@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.0](https://github.com/endevco/aube/compare/v1.15.0...v1.16.0) - 2026-05-25
+
+### Added
+
+- *(pnpm)* catch up with pnpm 11 parity ([#761](https://github.com/endevco/aube/pull/761))
+- *(publish)* add npm stage fallback ([#762](https://github.com/endevco/aube/pull/762))
+
+### Fixed
+
+- *(resolver)* pin hosted git tarball integrity ([#783](https://github.com/endevco/aube/pull/783))
+- *(publish)* prompt for OTP on registry challenge ([#767](https://github.com/endevco/aube/pull/767))
+- *(publish)* support npm trusted publishing auth ([#763](https://github.com/endevco/aube/pull/763))
+- *(update)* include root package in workspace version map ([#757](https://github.com/endevco/aube/pull/757))
+- *(lockfile)* avoid lossy npm metadata drift rewrites ([#753](https://github.com/endevco/aube/pull/753))
+
+### Other
+
+- *(deps)* bump hickory dns stack ([#780](https://github.com/endevco/aube/pull/780))
+- clarify prune commands ([#758](https://github.com/endevco/aube/pull/758))
+- refresh benchmarks for v1.15.0 ([#750](https://github.com/endevco/aube/pull/750))
+- *(commands)* split command-wide helpers ([#749](https://github.com/endevco/aube/pull/749))
+- *(deploy)* split deploy.rs into staging/injection/rewrite/filtering submodules ([#748](https://github.com/endevco/aube/pull/748))
+- *(add)* split command flow helpers ([#746](https://github.com/endevco/aube/pull/746))
+- split main startup helpers ([#744](https://github.com/endevco/aube/pull/744))
+- *(add)* split add.rs into spec/manifest/global submodules ([#740](https://github.com/endevco/aube/pull/740))
+- *(install)* split orchestration setup ([#739](https://github.com/endevco/aube/pull/739))
+
 ## [1.15.0](https://github.com/endevco/aube/compare/v1.14.1...v1.15.0) - 2026-05-17
 
 ### Added

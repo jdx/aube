@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.0](https://github.com/endevco/aube/compare/aube-util-v1.15.0...aube-util-v1.16.0) - 2026-05-25
+
+### Other
+
+- *(deps)* bump hickory dns stack ([#780](https://github.com/endevco/aube/pull/780))
+- refresh benchmarks for v1.15.0 ([#750](https://github.com/endevco/aube/pull/750))
+
 ## [1.15.0](https://github.com/endevco/aube/compare/aube-util-v1.14.1...aube-util-v1.15.0) - 2026-05-17
 
 ### Other

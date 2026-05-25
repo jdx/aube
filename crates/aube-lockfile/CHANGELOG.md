@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.0](https://github.com/endevco/aube/compare/aube-lockfile-v1.15.0...aube-lockfile-v1.16.0) - 2026-05-25
+
+### Added
+
+- *(pnpm)* catch up with pnpm 11 parity ([#761](https://github.com/endevco/aube/pull/761))
+
+### Fixed
+
+- *(resolver)* pin hosted git tarball integrity ([#783](https://github.com/endevco/aube/pull/783))
+- *(lockfile)* avoid lossy npm metadata drift rewrites ([#753](https://github.com/endevco/aube/pull/753))
+
+### Other
+
+- refresh benchmarks for v1.15.0 ([#750](https://github.com/endevco/aube/pull/750))
+
 ## [1.15.0](https://github.com/endevco/aube/compare/aube-lockfile-v1.14.1...aube-lockfile-v1.15.0) - 2026-05-17
 
 ### Added
