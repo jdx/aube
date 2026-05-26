@@ -43,7 +43,7 @@ yamlpatch = "1.25"
 yamlpath = "1.25"
 serde_yaml = "0.9"
 sonic-rs = "0.5"
-toml = "0.8"
+toml = "1.1"
 rkyv = "0.8"
 
 # CLI
