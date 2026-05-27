@@ -158,7 +158,11 @@ pub(super) async fn update_manifest_for_add(
     // (name → version) map once for this invocation and tag any
     // matching specs so the packument-fetch loop skips them and the
     // manifest-write path branches into the workspace formatter.
-    if link_workspace_packages || matches!(opts.workspace_protocol_override, Some(true)) {
+    if !matches!(
+        link_workspace_packages,
+        aube_settings::resolved::LinkWorkspacePackages::False
+    ) || matches!(opts.workspace_protocol_override, Some(true))
+    {
         let workspace_versions = collect_workspace_versions(cwd);
         for spec in &mut parsed {
             if spec.linked_workspace_version.is_some() {

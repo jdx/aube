@@ -116,7 +116,7 @@ Aube generates this page from [`settings.toml`](https://github.com/endevco/aube/
 | [`nodeVersion`](#setting-nodeversion) | `string` | Node.js version aube reports when evaluating `engines` checks. |
 | [`nodeDownloadMirrors`](#setting-nodedownloadmirrors) | `object` | Custom Node.js download mirror URLs. |
 | [`savePrefix`](#setting-saveprefix) | `"^" \| "~" \| ""` | Version prefix used when installing a package. |
-| [`linkWorkspacePackages`](#setting-linkworkspacepackages) | `bool` | Resolve `aube add &lt;name&gt;` against local workspace siblings before falling back to the registry. |
+| [`linkWorkspacePackages`](#setting-linkworkspacepackages) | `"false" \| "true" \| "deep"` | Resolve `aube add &lt;name&gt;` against local workspace siblings before falling back to the registry. |
 | [`saveWorkspaceProtocol`](#setting-saveworkspaceprotocol) | `"true" \| "false" \| "rolling"` | Spec form written to `package.json` when `aube add` resolves against a workspace sibling. |
 | [`tag`](#setting-tag) | `string` | Default dist-tag used by `aube add` without a version. |
 | [`globalDir`](#setting-globaldir) | `path` | Directory where globally installed packages live. |
@@ -2282,14 +2282,14 @@ Resolved from `.npmrc`. `--save-exact` overrides to empty prefix.
 
 Resolve `aube add <name>` against local workspace siblings before falling back to the registry.
 
-- Type: `bool`
-- Default: `false`
+- Type: `"false" | "true" | "deep"`
+- Default: `"false"`
 - Environment: `npm_config_link_workspace_packages`, `NPM_CONFIG_LINK_WORKSPACE_PACKAGES`, `AUBE_LINK_WORKSPACE_PACKAGES`
 - .npmrc keys: `link-workspace-packages`, `linkWorkspacePackages`
 - Workspace YAML keys: `linkWorkspacePackages`
 
-When `true`, `aube add <name>` checks the workspace for a package
-whose `name` matches the spec before falling back to the registry.
+When `true` or `"deep"`, `aube add <name>` checks the workspace for
+a package whose `name` matches the spec before falling back to the registry.
 A match wires the dep up as a workspace link; the manifest specifier
 written to `package.json` is controlled by `saveWorkspaceProtocol`.
 
@@ -2301,10 +2301,8 @@ linked.
 Off by default to match pnpm 8+ — opt in via `pnpm-workspace.yaml`
 when you want every `aube add` to prefer the local copy of a sibling.
 Aube's resolver already prefers workspace siblings on bare semver
-ranges at install time, so this setting only controls `aube add`'s
-manifest-write path; pnpm's `"deep"` value (which extends the
-preference to transitive deps) is therefore not implemented and
-treating the value as a plain bool is intentional.
+ranges at install time, including transitives, so pnpm's `"deep"`
+mode is accepted as an alias for the add-time manifest behavior.
 
 ### `saveWorkspaceProtocol` {#setting-saveworkspaceprotocol}
 

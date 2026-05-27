@@ -74,6 +74,23 @@ storeDir: /tmp/my-store
     }
 
     #[test]
+    fn test_link_workspace_packages_deep() {
+        let yaml = r#"
+packages:
+  - 'packages/*'
+linkWorkspacePackages: deep
+"#;
+        let config: WorkspaceConfig = yaml_serde::from_str(yaml).unwrap();
+        assert_eq!(
+            config
+                .link_workspace_packages
+                .as_ref()
+                .and_then(yaml_serde::Value::as_str),
+            Some("deep")
+        );
+    }
+
+    #[test]
     fn test_catalog() {
         let yaml = r#"
 catalog:
