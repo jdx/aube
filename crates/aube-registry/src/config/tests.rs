@@ -611,26 +611,21 @@ fn top_level_cafile_and_ca_are_parsed() {
 }
 
 #[test]
-fn test_config_global_auth_token() {
+fn unscoped_auth_token_is_pinned_to_same_source_registry() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join(".npmrc"), "_authToken=global-token\n").unwrap();
 
-    // Isolate from the host's real `~/.npmrc` via `load_isolated`:
-    // a developer or CI runner with
-    // `//registry.npmjs.org/:_authToken=...` already logged in
-    // would have that URI-specific token beat our project-level
-    // `_authToken` fallback, since `auth_token_for` checks
-    // per-URI auth before dropping to `global_auth_token`.
+    // Isolate from the host's real `~/.npmrc`: a developer or CI
+    // runner with `//registry.npmjs.org/:_authToken=...` already
+    // logged in would otherwise affect this assertion.
     let config = NpmConfig::load_isolated(dir.path());
     // Unscoped auth is pinned to npmjs at load time. It must not
-    // remain a floating fallback that a later registry override can
-    // pull onto a different host.
+    // remain a floating fallback.
     assert_eq!(
         config.auth_token_for("https://registry.npmjs.org/"),
         Some("global-token")
     );
     assert_eq!(config.auth_token_for("https://registry.example.com/"), None);
-    assert!(config.global_auth_token.is_none());
 }
 
 #[test]
@@ -717,9 +712,9 @@ fn unscoped_tls_client_credentials_are_registry_scoped() {
 fn test_config_defaults() {
     let dir = tempfile::tempdir().unwrap();
     // No .npmrc at all. Same HOME isolation rationale as
-    // `test_config_global_auth_token` — without it this assertion
-    // flakes on any developer box whose `~/.npmrc` has ever been
-    // touched by `npm login`.
+    // `unscoped_auth_token_is_pinned_to_same_source_registry` —
+    // without it this assertion flakes on any developer box whose
+    // `~/.npmrc` has ever been touched by `npm login`.
     let config = NpmConfig::load_isolated(dir.path());
     assert_eq!(config.registry, "https://registry.npmjs.org/");
     assert!(

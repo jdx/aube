@@ -86,12 +86,8 @@ impl NpmConfig {
 
     /// Get the auth token for a given registry URL.
     pub fn auth_token_for(&self, registry_url: &str) -> Option<&str> {
-        if let Some(auth) = self.registry_config_for(registry_url)
-            && let Some(ref token) = auth.auth_token
-        {
-            return Some(token);
-        }
-        self.global_auth_token.as_deref()
+        self.registry_config_for(registry_url)
+            .and_then(|auth| auth.auth_token.as_deref())
     }
 
     pub fn token_helper_for(&self, registry_url: &str) -> Option<&str> {
@@ -409,11 +405,18 @@ impl NpmConfig {
         suffix: &str,
         apply: impl FnOnce(&mut AuthConfig),
     ) {
-        tracing::warn!(
-            code = aube_codes::warnings::WARN_AUBE_UNSCOPED_AUTH_RESCOPED,
-            "unscoped {suffix} from {source:?} was pinned to {registry}; write `{}:{suffix}=...` instead",
-            registry_uri_key(registry)
-        );
+        if matches!(source, NpmrcSource::Env | NpmrcSource::PnpmAuth) {
+            tracing::warn!(
+                code = aube_codes::warnings::WARN_AUBE_UNSCOPED_AUTH_RESCOPED,
+                "unscoped {suffix} from {source:?} was pinned to {registry}"
+            );
+        } else {
+            tracing::warn!(
+                code = aube_codes::warnings::WARN_AUBE_UNSCOPED_AUTH_RESCOPED,
+                "unscoped {suffix} from {source:?} was pinned to {registry}; write `{}:{suffix}=...` instead",
+                registry_uri_key(registry)
+            );
+        }
         let entry = self
             .auth_by_uri
             .entry(registry_uri_key(registry))
