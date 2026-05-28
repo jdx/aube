@@ -732,6 +732,28 @@ fn later_bare_auth_can_override_earlier_bare_auth() {
 }
 
 #[test]
+fn later_uri_scoped_auth_can_override_earlier_bare_auth() {
+    let mut config = NpmConfig::default();
+    config.apply_tagged(vec![
+        (
+            NpmrcSource::User,
+            "_authToken".to_string(),
+            "user-token".to_string(),
+        ),
+        (
+            NpmrcSource::Project,
+            "//registry.npmjs.org/:_authToken".to_string(),
+            "project-token".to_string(),
+        ),
+    ]);
+
+    assert_eq!(
+        config.auth_token_for("https://registry.npmjs.org/"),
+        Some("project-token")
+    );
+}
+
+#[test]
 fn unscoped_tls_client_credentials_are_registry_scoped() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(

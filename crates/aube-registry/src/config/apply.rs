@@ -140,7 +140,6 @@ impl NpmConfig {
         let mut project_registry = "https://registry.npmjs.org/".to_string();
         let mut npmrc_auth_file_registry = "https://registry.npmjs.org/".to_string();
         let mut env_registry = "https://registry.npmjs.org/".to_string();
-        let mut explicit_uri_fields = BTreeSet::new();
 
         for (source, key, value) in &entries {
             if key == "registry" {
@@ -152,14 +151,10 @@ impl NpmConfig {
                     &mut npmrc_auth_file_registry,
                     &mut env_registry,
                 ) = normalize_registry_url(value);
-            } else if key.starts_with("//")
-                && let Some((uri, suffix)) = key.rsplit_once(':')
-                && let Some(suffix) = canonical_rescoped_suffix(suffix)
-            {
-                explicit_uri_fields.insert((normalize_npmrc_uri_key(uri), suffix));
             }
         }
 
+        let mut explicit_uri_fields = BTreeSet::new();
         for (source, key, value) in entries {
             if key == "registry" {
                 self.registry = normalize_registry_url(&value);
@@ -400,15 +395,25 @@ impl NpmConfig {
                     // to the same key — matches what `registry_uri_key`
                     // produces on the lookup side after stripping the
                     // scheme's default port.
-                    let entry = self
-                        .auth_by_uri
-                        .entry(normalize_npmrc_uri_key(uri))
-                        .or_default();
+                    let uri_key = normalize_npmrc_uri_key(uri);
+                    let entry = self.auth_by_uri.entry(uri_key.clone()).or_default();
                     match suffix {
-                        "_authToken" => entry.auth_token = Some(value),
-                        "_auth" => entry.auth = Some(value),
-                        "username" => entry.username = Some(value),
-                        "_password" => entry.password = Some(value),
+                        "_authToken" => {
+                            entry.auth_token = Some(value);
+                            explicit_uri_fields.insert((uri_key, "_authToken"));
+                        }
+                        "_auth" => {
+                            entry.auth = Some(value);
+                            explicit_uri_fields.insert((uri_key, "_auth"));
+                        }
+                        "username" => {
+                            entry.username = Some(value);
+                            explicit_uri_fields.insert((uri_key, "username"));
+                        }
+                        "_password" => {
+                            entry.password = Some(value);
+                            explicit_uri_fields.insert((uri_key, "_password"));
+                        }
                         "tokenHelper" | "token-helper" => {
                             // CVE-2025-69262 (pnpm GHSA-2phv-j68v-wwqx)
                             // class: `tokenHelper` is spawned as
@@ -433,11 +438,18 @@ impl NpmConfig {
                                 continue;
                             };
                             entry.token_helper = Some(sanitized);
+                            explicit_uri_fields.insert((uri_key, "tokenHelper"));
                         }
                         "ca" | "ca[]" => entry.tls.ca.push(pem_value(value)),
                         "cafile" | "caFile" => entry.tls.cafile = Some(PathBuf::from(value)),
-                        "cert" => entry.tls.cert = Some(pem_value(value)),
-                        "key" => entry.tls.key = Some(pem_value(value)),
+                        "cert" => {
+                            entry.tls.cert = Some(pem_value(value));
+                            explicit_uri_fields.insert((uri_key, "cert"));
+                        }
+                        "key" => {
+                            entry.tls.key = Some(pem_value(value));
+                            explicit_uri_fields.insert((uri_key, "key"));
+                        }
                         _ => {} // Ignore unknown suffixes for now
                     }
                 }
@@ -458,6 +470,14 @@ impl NpmConfig {
         explicit_uri_field_exists: bool,
         apply: impl FnOnce(&mut AuthConfig),
     ) {
+        if explicit_uri_field_exists {
+            tracing::warn!(
+                code = aube_codes::warnings::WARN_AUBE_UNSCOPED_AUTH_RESCOPED,
+                "ignoring unscoped {suffix} from {source:?}: URI-scoped `{}:{suffix}` is already configured",
+                registry_uri_key(registry)
+            );
+            return;
+        }
         if matches!(source, NpmrcSource::Env | NpmrcSource::PnpmAuth) {
             tracing::warn!(
                 code = aube_codes::warnings::WARN_AUBE_UNSCOPED_AUTH_RESCOPED,
@@ -474,9 +494,7 @@ impl NpmConfig {
             .auth_by_uri
             .entry(registry_uri_key(registry))
             .or_default();
-        if !explicit_uri_field_exists {
-            apply(entry);
-        }
+        apply(entry);
     }
 }
 
