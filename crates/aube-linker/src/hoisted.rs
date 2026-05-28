@@ -64,7 +64,11 @@ impl HoistedPlacements {
     /// not relink node_modules. `modules_dir_name` must match the
     /// `modulesDir` setting the install used, or the computed paths
     /// won't match what's on disk.
-    pub fn from_graph(root_dir: &Path, graph: &LockfileGraph, modules_dir_name: &str) -> Self {
+    pub fn from_graph(
+        root_dir: &Path,
+        graph: &LockfileGraph,
+        modules_dir_name: &str,
+    ) -> Result<Self, Error> {
         let mut placements = Self::default();
         for (importer_path, deps) in &graph.importers {
             if !crate::is_physical_importer(importer_path) {
@@ -76,9 +80,7 @@ impl HoistedPlacements {
                 root_dir.join(importer_path)
             };
             let nm = importer_dir.join(modules_dir_name);
-            let Ok(plan) = plan_importer(&nm, deps, graph) else {
-                continue;
-            };
+            let plan = plan_importer(&nm, deps, graph)?;
             for node in &plan.nodes {
                 let (Some(dep_path), Some(pkg_dir)) = (&node.dep_path, &node.pkg_dir) else {
                     continue;
@@ -88,7 +90,7 @@ impl HoistedPlacements {
                 }
             }
         }
-        placements
+        Ok(placements)
     }
 
     /// Shallowest placement for `dep_path`, or `None` if the dep is

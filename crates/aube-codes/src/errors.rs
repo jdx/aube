@@ -448,16 +448,16 @@ pub const ALL: &[CodeMeta] = &[
         exit_code: Some(90),
     },
     CodeMeta {
-        name: ERR_AUBE_UNSAFE_PACKAGE_NAME,
-        category: category::MISC_SAFETY,
-        description: "A package/dependency alias would escape its `node_modules` slot if linked.",
-        exit_code: Some(92),
-    },
-    CodeMeta {
         name: ERR_AUBE_UNSAFE_SHEBANG_INTERPRETER,
         category: category::MISC_SAFETY,
         description: "A `#!` shebang named an unsafe interpreter when generating a shim — substituted with `node` instead. Surfaced as `tracing::error!` but install continues.",
         exit_code: Some(91),
+    },
+    CodeMeta {
+        name: ERR_AUBE_UNSAFE_PACKAGE_NAME,
+        category: category::MISC_SAFETY,
+        description: "A package/dependency alias would escape its `node_modules` slot if linked.",
+        exit_code: Some(92),
     },
     CodeMeta {
         name: ERR_AUBE_PATCHES_TRACKING_WRITE,

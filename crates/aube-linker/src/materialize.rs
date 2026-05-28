@@ -687,12 +687,7 @@ pub(crate) fn validate_index_key(key: &str) -> Result<(), Error> {
 /// `node_modules`. npm names allow either `name` or `@scope/name`; every
 /// other slash shape is a filesystem path, not a package slot.
 pub(crate) fn validate_package_link_name(name: &str) -> Result<(), Error> {
-    if name.is_empty()
-        || name.contains('\0')
-        || name.contains('\\')
-        || name.starts_with('/')
-        || name.starts_with('\\')
-    {
+    if name.is_empty() || name.contains('\0') || name.contains('\\') || name.starts_with('/') {
         return Err(Error::UnsafePackageName(name.to_string()));
     }
     let parts: Vec<&str> = name.split('/').collect();
