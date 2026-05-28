@@ -1,4 +1,5 @@
 use super::*;
+use crate::config::types::NpmrcSource;
 use base64::Engine as _;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -705,6 +706,28 @@ fn uri_scoped_auth_beats_later_rescoped_bare_auth() {
     assert_eq!(
         config.auth_token_for("https://registry.npmjs.org/"),
         Some("user-token")
+    );
+}
+
+#[test]
+fn later_bare_auth_can_override_earlier_bare_auth() {
+    let mut config = NpmConfig::default();
+    config.apply_tagged(vec![
+        (
+            NpmrcSource::User,
+            "_authToken".to_string(),
+            "user-token".to_string(),
+        ),
+        (
+            NpmrcSource::Env,
+            "_authToken".to_string(),
+            "env-token".to_string(),
+        ),
+    ]);
+
+    assert_eq!(
+        config.auth_token_for("https://registry.npmjs.org/"),
+        Some("env-token")
     );
 }
 

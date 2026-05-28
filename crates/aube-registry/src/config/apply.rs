@@ -1,4 +1,5 @@
 use base64::Engine as _;
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use super::env::env_any;
@@ -139,6 +140,7 @@ impl NpmConfig {
         let mut project_registry = "https://registry.npmjs.org/".to_string();
         let mut npmrc_auth_file_registry = "https://registry.npmjs.org/".to_string();
         let mut env_registry = "https://registry.npmjs.org/".to_string();
+        let mut explicit_uri_fields = BTreeSet::new();
 
         for (source, key, value) in &entries {
             if key == "registry" {
@@ -150,6 +152,11 @@ impl NpmConfig {
                     &mut npmrc_auth_file_registry,
                     &mut env_registry,
                 ) = normalize_registry_url(value);
+            } else if key.starts_with("//")
+                && let Some((uri, suffix)) = key.rsplit_once(':')
+                && let Some(suffix) = canonical_rescoped_suffix(suffix)
+            {
+                explicit_uri_fields.insert((normalize_npmrc_uri_key(uri), suffix));
             }
         }
 
@@ -165,11 +172,16 @@ impl NpmConfig {
                     &npmrc_auth_file_registry,
                     &env_registry,
                 );
-                self.rescope_unscoped_registry_setting(source, registry, "_authToken", |auth| {
-                    if auth.auth_token.is_none() {
-                        auth.auth_token = Some(value);
-                    }
-                });
+                self.rescope_unscoped_registry_setting(
+                    source,
+                    registry,
+                    "_authToken",
+                    explicit_uri_fields.contains(&(
+                        registry_uri_key(registry),
+                        canonical_rescoped_suffix("_authToken").unwrap_or("_authToken"),
+                    )),
+                    |auth| auth.auth_token = Some(value),
+                );
             } else if key == "_auth" {
                 let registry = source_registry(
                     source,
@@ -179,11 +191,16 @@ impl NpmConfig {
                     &npmrc_auth_file_registry,
                     &env_registry,
                 );
-                self.rescope_unscoped_registry_setting(source, registry, "_auth", |auth| {
-                    if auth.auth.is_none() {
-                        auth.auth = Some(value);
-                    }
-                });
+                self.rescope_unscoped_registry_setting(
+                    source,
+                    registry,
+                    "_auth",
+                    explicit_uri_fields.contains(&(
+                        registry_uri_key(registry),
+                        canonical_rescoped_suffix("_auth").unwrap_or("_auth"),
+                    )),
+                    |auth| auth.auth = Some(value),
+                );
             } else if key == "username" {
                 let registry = source_registry(
                     source,
@@ -193,11 +210,16 @@ impl NpmConfig {
                     &npmrc_auth_file_registry,
                     &env_registry,
                 );
-                self.rescope_unscoped_registry_setting(source, registry, "username", |auth| {
-                    if auth.username.is_none() {
-                        auth.username = Some(value);
-                    }
-                });
+                self.rescope_unscoped_registry_setting(
+                    source,
+                    registry,
+                    "username",
+                    explicit_uri_fields.contains(&(
+                        registry_uri_key(registry),
+                        canonical_rescoped_suffix("username").unwrap_or("username"),
+                    )),
+                    |auth| auth.username = Some(value),
+                );
             } else if key == "_password" {
                 let registry = source_registry(
                     source,
@@ -207,11 +229,16 @@ impl NpmConfig {
                     &npmrc_auth_file_registry,
                     &env_registry,
                 );
-                self.rescope_unscoped_registry_setting(source, registry, "_password", |auth| {
-                    if auth.password.is_none() {
-                        auth.password = Some(value);
-                    }
-                });
+                self.rescope_unscoped_registry_setting(
+                    source,
+                    registry,
+                    "_password",
+                    explicit_uri_fields.contains(&(
+                        registry_uri_key(registry),
+                        canonical_rescoped_suffix("_password").unwrap_or("_password"),
+                    )),
+                    |auth| auth.password = Some(value),
+                );
             } else if matches!(key.as_str(), "cert" | "key") {
                 let suffix = key.clone();
                 let registry = source_registry(
@@ -222,15 +249,23 @@ impl NpmConfig {
                     &npmrc_auth_file_registry,
                     &env_registry,
                 );
-                self.rescope_unscoped_registry_setting(source, registry, &suffix, |auth| {
-                    if suffix == "cert" {
-                        if auth.tls.cert.is_none() {
+                let explicit_uri_field = explicit_uri_fields.contains(&(
+                    registry_uri_key(registry),
+                    canonical_rescoped_suffix(&suffix).unwrap_or(suffix.as_str()),
+                ));
+                self.rescope_unscoped_registry_setting(
+                    source,
+                    registry,
+                    &suffix,
+                    explicit_uri_field,
+                    |auth| {
+                        if suffix == "cert" {
                             auth.tls.cert = Some(pem_value(value));
+                        } else {
+                            auth.tls.key = Some(pem_value(value));
                         }
-                    } else if auth.tls.key.is_none() {
-                        auth.tls.key = Some(pem_value(value));
-                    }
-                });
+                    },
+                );
             } else if matches!(key.as_str(), "tokenHelper" | "token-helper") {
                 if !source.is_trusted_for_subprocess_settings() {
                     tracing::warn!(
@@ -254,11 +289,16 @@ impl NpmConfig {
                     &npmrc_auth_file_registry,
                     &env_registry,
                 );
-                self.rescope_unscoped_registry_setting(source, registry, "tokenHelper", |auth| {
-                    if auth.token_helper.is_none() {
-                        auth.token_helper = Some(sanitized);
-                    }
-                });
+                self.rescope_unscoped_registry_setting(
+                    source,
+                    registry,
+                    "tokenHelper",
+                    explicit_uri_fields.contains(&(
+                        registry_uri_key(registry),
+                        canonical_rescoped_suffix("tokenHelper").unwrap_or("tokenHelper"),
+                    )),
+                    |auth| auth.token_helper = Some(sanitized),
+                );
             } else if matches!(
                 key.as_str(),
                 "https-proxy"
@@ -415,6 +455,7 @@ impl NpmConfig {
         source: NpmrcSource,
         registry: &str,
         suffix: &str,
+        explicit_uri_field_exists: bool,
         apply: impl FnOnce(&mut AuthConfig),
     ) {
         if matches!(source, NpmrcSource::Env | NpmrcSource::PnpmAuth) {
@@ -433,7 +474,22 @@ impl NpmConfig {
             .auth_by_uri
             .entry(registry_uri_key(registry))
             .or_default();
-        apply(entry);
+        if !explicit_uri_field_exists {
+            apply(entry);
+        }
+    }
+}
+
+fn canonical_rescoped_suffix(suffix: &str) -> Option<&'static str> {
+    match suffix {
+        "_authToken" => Some("_authToken"),
+        "_auth" => Some("_auth"),
+        "username" => Some("username"),
+        "_password" => Some("_password"),
+        "cert" => Some("cert"),
+        "key" => Some("key"),
+        "tokenHelper" | "token-helper" => Some("tokenHelper"),
+        _ => None,
     }
 }
 
