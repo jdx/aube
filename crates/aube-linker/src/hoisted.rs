@@ -76,7 +76,9 @@ impl HoistedPlacements {
                 root_dir.join(importer_path)
             };
             let nm = importer_dir.join(modules_dir_name);
-            let plan = plan_importer(&nm, deps, graph);
+            let Ok(plan) = plan_importer(&nm, deps, graph) else {
+                continue;
+            };
             for node in &plan.nodes {
                 let (Some(dep_path), Some(pkg_dir)) = (&node.dep_path, &node.pkg_dir) else {
                     continue;
@@ -172,7 +174,13 @@ impl PlacementPlan {
     /// `requester`. Returns the resulting node index and whether a
     /// fresh entry was created (so the caller knows whether to
     /// enqueue transitive deps).
-    fn place(&mut self, requester: usize, name: &str, dep_path: &str) -> PlaceOutcome {
+    fn place(
+        &mut self,
+        requester: usize,
+        name: &str,
+        dep_path: &str,
+    ) -> Result<PlaceOutcome, Error> {
+        crate::validate_package_link_name(name)?;
         // Walk up from the requester looking for the shallowest
         // ancestor that doesn't already host a different version of
         // `name`. If any ancestor has a matching entry, reuse it.
@@ -181,10 +189,10 @@ impl PlacementPlan {
         loop {
             if let Some(&existing) = self.nodes[cursor].children.get(name) {
                 if self.nodes[existing].dep_path.as_deref() == Some(dep_path) {
-                    return PlaceOutcome {
+                    return Ok(PlaceOutcome {
                         node_idx: existing,
                         created: false,
-                    };
+                    });
                 }
                 // Conflict: must stay at or below `candidate`.
                 break;
@@ -210,10 +218,10 @@ impl PlacementPlan {
         self.nodes[candidate]
             .children
             .insert(name.to_string(), new_idx);
-        PlaceOutcome {
+        Ok(PlaceOutcome {
             node_idx: new_idx,
             created: true,
-        }
+        })
     }
 
     /// Names placed directly in the importer root's `node_modules/`.
@@ -231,7 +239,7 @@ pub(crate) fn plan_importer(
     importer_nm: &Path,
     root_deps: &[DirectDep],
     graph: &LockfileGraph,
-) -> PlacementPlan {
+) -> Result<PlacementPlan, Error> {
     let mut plan = PlacementPlan::new(importer_nm.to_path_buf());
     let mut queue: VecDeque<(usize, String, String)> = VecDeque::new();
 
@@ -246,7 +254,7 @@ pub(crate) fn plan_importer(
     }
 
     while let Some((requester, name, dep_path)) = queue.pop_front() {
-        let outcome = plan.place(requester, &name, &dep_path);
+        let outcome = plan.place(requester, &name, &dep_path)?;
         if !outcome.created {
             continue;
         }
@@ -269,7 +277,7 @@ pub(crate) fn plan_importer(
         }
     }
 
-    plan
+    Ok(plan)
 }
 
 /// Materialize a planned tree onto disk for a single importer.
@@ -297,7 +305,7 @@ pub(crate) fn link_hoisted_importer(
     let nm = importer_dir.join(linker.modules_dir_name());
     crate::mkdirp(&nm)?;
 
-    let plan = plan_importer(&nm, root_deps, graph);
+    let plan = plan_importer(&nm, root_deps, graph)?;
 
     // Sweep any top-level entries that are no longer claimed by the
     // plan. Dotfiles (`.aube`, `.bin`, …) are preserved — .aube in
