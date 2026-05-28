@@ -661,12 +661,23 @@ fn resolution_requires_integrity(
         | Some(LocalSource::Portal(_))
         | Some(LocalSource::Git(_))
         | Some(LocalSource::Exec(_)) => false,
-        Some(LocalSource::RemoteTarball(t)) => !t.git_hosted,
+        Some(LocalSource::RemoteTarball(t)) => !t.git_hosted && !tarball_url_is_hosted_git(&t.url),
         None => resolution
             .tarball
             .as_deref()
-            .is_none_or(|t| t.starts_with("http://") || t.starts_with("https://")),
+            .is_some_and(|t| is_http_url(t) && !tarball_url_is_hosted_git(t)),
     }
+}
+
+fn is_http_url(url: &str) -> bool {
+    url.starts_with("http://") || url.starts_with("https://")
+}
+
+fn tarball_url_is_hosted_git(url: &str) -> bool {
+    url.contains("://codeload.github.com/")
+        || url.contains("://npm.pkg.github.com/")
+        || (url.contains("://gitlab.com/") && url.contains("/-/archive/"))
+        || (url.contains("://bitbucket.org/") && url.contains("/get/"))
 }
 
 fn git_commit_from_dep_path_version(version: &str) -> Option<&str> {

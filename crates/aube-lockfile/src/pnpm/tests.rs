@@ -2523,11 +2523,13 @@ snapshots:
 
 #[test]
 fn parser_rejects_remote_tarball_resolution_without_integrity() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("pnpm-lock.yaml");
-    std::fs::write(
-        &path,
-        r#"
+    for scheme in ["http", "https"] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pnpm-lock.yaml");
+        std::fs::write(
+            &path,
+            format!(
+                r#"
 lockfileVersion: '9.0'
 importers:
   .:
@@ -2537,18 +2539,20 @@ importers:
         version: 1.0.0
 packages:
   demo@1.0.0:
-    resolution: {tarball: https://registry.npmjs.org/demo/-/demo-1.0.0.tgz}
+    resolution: {{tarball: {scheme}://registry.npmjs.org/demo/-/demo-1.0.0.tgz}}
 snapshots:
-  demo@1.0.0: {}
+  demo@1.0.0: {{}}
 "#,
-    )
-    .unwrap();
+            ),
+        )
+        .unwrap();
 
-    let err = parse(&path).unwrap_err().to_string();
-    assert!(
-        err.contains("remote tarball resolution without integrity"),
-        "{err}"
-    );
+        let err = parse(&path).unwrap_err().to_string();
+        assert!(
+            err.contains("remote tarball resolution without integrity"),
+            "{scheme}: {err}"
+        );
+    }
 }
 
 #[test]
