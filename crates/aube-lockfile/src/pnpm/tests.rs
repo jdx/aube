@@ -2557,11 +2557,16 @@ snapshots:
 
 #[test]
 fn parser_rejects_remote_tarball_with_hosted_git_url_in_query() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("pnpm-lock.yaml");
-    std::fs::write(
-        &path,
-        r#"
+    for tarball in [
+        "https://evil.example.com/demo.tgz?ref=://codeload.github.com/acme/demo/tar.gz/abcdef",
+        "https://gitlab.com/acme/demo/demo.tgz?redirect=/-/archive/main",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pnpm-lock.yaml");
+        std::fs::write(
+            &path,
+            format!(
+                r#"
 lockfileVersion: '9.0'
 importers:
   .:
@@ -2571,18 +2576,20 @@ importers:
         version: 1.0.0
 packages:
   demo@1.0.0:
-    resolution: {tarball: https://evil.example.com/demo.tgz?ref=://codeload.github.com/acme/demo/tar.gz/abcdef}
+    resolution: {{tarball: {tarball}}}
 snapshots:
-  demo@1.0.0: {}
+  demo@1.0.0: {{}}
 "#,
-    )
-    .unwrap();
+            ),
+        )
+        .unwrap();
 
-    let err = parse(&path).unwrap_err().to_string();
-    assert!(
-        err.contains("remote tarball resolution without integrity"),
-        "{err}"
-    );
+        let err = parse(&path).unwrap_err().to_string();
+        assert!(
+            err.contains("remote tarball resolution without integrity"),
+            "{tarball}: {err}"
+        );
+    }
 }
 
 #[test]

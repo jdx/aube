@@ -26,12 +26,13 @@ fn http_url_host_and_path(url: &str) -> Option<(String, &str)> {
     let rest = url
         .strip_prefix("https://")
         .or_else(|| url.strip_prefix("http://"))?;
-    let before_query = rest
-        .split_once('?')
-        .map_or(rest, |(before, _)| before)
+    let before_query = rest.split_once('?').map_or(rest, |(before, _)| before);
+    let before_fragment = before_query
         .split_once('#')
-        .map_or(rest, |(before, _)| before);
-    let (authority, path) = before_query.split_once('/').unwrap_or((before_query, ""));
+        .map_or(before_query, |(before, _)| before);
+    let (authority, path) = before_fragment
+        .split_once('/')
+        .unwrap_or((before_fragment, ""));
     let host_port = authority
         .rsplit_once('@')
         .map_or(authority, |(_, host)| host);
