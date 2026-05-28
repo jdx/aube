@@ -19,6 +19,12 @@
       "exit_code": 12
     },
     {
+      "name": "ERR_AUBE_LOCKFILE_POLICY",
+      "category": "Lockfile",
+      "description": "Lockfile entries failed an active supply-chain policy check.",
+      "exit_code": 13
+    },
+    {
       "name": "ERR_AUBE_NO_MATCHING_VERSION",
       "category": "Resolver",
       "description": "No published version of the named package satisfies the requested range.",

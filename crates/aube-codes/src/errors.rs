@@ -15,6 +15,7 @@ use crate::CodeMeta;
 pub const ERR_AUBE_NO_LOCKFILE: &str = "ERR_AUBE_NO_LOCKFILE";
 pub const ERR_AUBE_LOCKFILE_PARSE: &str = "ERR_AUBE_LOCKFILE_PARSE";
 pub const ERR_AUBE_LOCKFILE_UNSUPPORTED_FORMAT: &str = "ERR_AUBE_LOCKFILE_UNSUPPORTED_FORMAT";
+pub const ERR_AUBE_LOCKFILE_POLICY: &str = "ERR_AUBE_LOCKFILE_POLICY";
 
 // ── resolver ─────────────────────────────────────────────────────────
 pub const ERR_AUBE_NO_MATCHING_VERSION: &str = "ERR_AUBE_NO_MATCHING_VERSION";
@@ -131,6 +132,12 @@ pub const ALL: &[CodeMeta] = &[
         category: category::LOCKFILE,
         description: "Lockfile filename was recognized but its format isn't supported on this aube version.",
         exit_code: Some(12),
+    },
+    CodeMeta {
+        name: ERR_AUBE_LOCKFILE_POLICY,
+        category: category::LOCKFILE,
+        description: "Lockfile entries failed an active supply-chain policy check.",
+        exit_code: Some(13),
     },
     // Resolver
     CodeMeta {

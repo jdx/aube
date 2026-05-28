@@ -19,6 +19,7 @@ mod layout;
 mod lifecycle;
 mod link;
 mod lockfile_dir;
+mod lockfile_policy;
 mod materialize;
 pub(crate) mod node_gyp_bootstrap;
 mod resolve;
@@ -571,6 +572,16 @@ pub async fn run(opts: InstallOptions) -> miette::Result<()> {
             // each package's ancestor path.
             crate::dep_chain::set_active(&graph);
             aube_registry::slow_metadata::flush_summary();
+
+            if matches!(mode, FrozenMode::Frozen) {
+                lockfile_policy::verify_frozen_lockfile_policy(
+                    &cwd,
+                    &graph,
+                    &settings_ctx,
+                    opts.network_mode,
+                )
+                .await?;
+            }
 
             // Post-resolve OSV `MAL-*` routing — lockfile-found
             // branch. `fresh_resolution = false` here because the

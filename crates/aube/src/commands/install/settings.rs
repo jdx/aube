@@ -74,7 +74,7 @@ fn map_resolution_mode(
 /// build-time-generated typed accessors in `aube_settings::resolved`
 /// — `.npmrc` first, then `pnpm-workspace.yaml`. CLI override
 /// (currently always `None`, no flag yet) wins over both.
-fn resolve_minimum_release_age(
+pub(super) fn resolve_minimum_release_age(
     ctx: &aube_settings::ResolveCtx<'_>,
     cli_minutes: Option<u64>,
 ) -> Option<aube_resolver::MinimumReleaseAge> {
