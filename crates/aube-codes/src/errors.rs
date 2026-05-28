@@ -58,6 +58,7 @@ pub const ERR_AUBE_LINK_FAILED: &str = "ERR_AUBE_LINK_FAILED";
 pub const ERR_AUBE_PATCH_FAILED: &str = "ERR_AUBE_PATCH_FAILED";
 pub const ERR_AUBE_MISSING_PACKAGE_INDEX: &str = "ERR_AUBE_MISSING_PACKAGE_INDEX";
 pub const ERR_AUBE_UNSAFE_INDEX_KEY: &str = "ERR_AUBE_UNSAFE_INDEX_KEY";
+pub const ERR_AUBE_UNSAFE_PACKAGE_NAME: &str = "ERR_AUBE_UNSAFE_PACKAGE_NAME";
 pub const ERR_AUBE_MISSING_STORE_FILE: &str = "ERR_AUBE_MISSING_STORE_FILE";
 
 // ── scripts ─────────────────────────────────────────────────────────
@@ -458,6 +459,12 @@ pub const ALL: &[CodeMeta] = &[
         category: category::MISC_SAFETY,
         description: "A `#!` shebang named an unsafe interpreter when generating a shim — substituted with `node` instead. Surfaced as `tracing::error!` but install continues.",
         exit_code: Some(91),
+    },
+    CodeMeta {
+        name: ERR_AUBE_UNSAFE_PACKAGE_NAME,
+        category: category::MISC_SAFETY,
+        description: "A package/dependency alias would escape its `node_modules` slot if linked.",
+        exit_code: Some(92),
     },
     CodeMeta {
         name: ERR_AUBE_PATCHES_TRACKING_WRITE,

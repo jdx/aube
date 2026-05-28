@@ -493,6 +493,19 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
             Some(LocalSource::RemoteTarball(_)) if !version_is_http_url => None,
             other => other,
         };
+        if integrity.is_none()
+            && resolution_requires_integrity(
+                pkg_info.and_then(|p| p.resolution.as_ref()),
+                &local_source,
+            )
+        {
+            return Err(Error::parse(
+                path,
+                format!(
+                    "lockfile entry {dep_path:?} has a remote tarball resolution without integrity"
+                ),
+            ));
+        }
 
         packages.insert(
             dep_path.clone(),
@@ -629,6 +642,37 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
         extra_fields: BTreeMap::new(),
         workspace_extra_fields: BTreeMap::new(),
     })
+}
+
+fn resolution_requires_integrity(
+    resolution: Option<&super::raw::Resolution>,
+    local_source: &Option<LocalSource>,
+) -> bool {
+    let Some(resolution) = resolution else {
+        return false;
+    };
+    if resolution.integrity.is_some() || resolution.git_hosted {
+        return false;
+    }
+    match local_source {
+        Some(LocalSource::Tarball(_))
+        | Some(LocalSource::Directory(_))
+        | Some(LocalSource::Link(_))
+        | Some(LocalSource::Portal(_))
+        | Some(LocalSource::Git(_))
+        | Some(LocalSource::Exec(_)) => false,
+        Some(LocalSource::RemoteTarball(t)) => {
+            !t.git_hosted && !super::tarball_url_is_hosted_git(&t.url)
+        }
+        None => resolution
+            .tarball
+            .as_deref()
+            .is_some_and(|t| is_http_url(t) && !super::tarball_url_is_hosted_git(t)),
+    }
+}
+
+fn is_http_url(url: &str) -> bool {
+    url.starts_with("http://") || url.starts_with("https://")
 }
 
 fn git_commit_from_dep_path_version(version: &str) -> Option<&str> {

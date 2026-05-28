@@ -89,10 +89,4 @@ pub struct RegistryClient {
     config: NpmConfig,
     network_mode: NetworkMode,
     fetch_policy: FetchPolicy,
-    /// Cached parsed default-registry URL. The default registry never
-    /// changes mid-process, but `authed()` previously re-parsed
-    /// `self.config.registry` on every authed request via
-    /// `same_host`. On a 2000-pkg install that was thousands of
-    /// `Url::parse` calls. Initialized lazily on first use.
-    default_registry_parsed: std::sync::OnceLock<Option<reqwest::Url>>,
 }

@@ -279,6 +279,10 @@ impl Linker {
         // this graph", which is the common case.
         nested_link_targets: Option<&BTreeMap<String, PathBuf>>,
     ) -> Result<(), Error> {
+        validate_package_link_name(&pkg.name)?;
+        for dep_name in pkg.dependencies.keys() {
+            validate_package_link_name(dep_name)?;
+        }
         let subdir = if apply_hashes {
             self.virtual_store_subdir(dep_path)
         } else {
@@ -677,4 +681,81 @@ pub(crate) fn validate_index_key(key: &str) -> Result<(), Error> {
         }
     }
     Ok(())
+}
+
+/// Validate a package/dependency alias before it becomes a path below
+/// `node_modules`. npm names allow either `name` or `@scope/name`; every
+/// other slash shape is a filesystem path, not a package slot.
+pub(crate) fn validate_package_link_name(name: &str) -> Result<(), Error> {
+    if name.is_empty() || name.contains('\0') || name.contains('\\') || name.starts_with('/') {
+        return Err(Error::UnsafePackageName(name.to_string()));
+    }
+    let parts: Vec<&str> = name.split('/').collect();
+    let ok = match parts.as_slice() {
+        [bare] => is_safe_package_component(bare),
+        [scope, bare] => {
+            scope.starts_with('@')
+                && scope.len() > 1
+                && is_safe_package_component(scope)
+                && is_safe_package_component(bare)
+        }
+        _ => false,
+    };
+    if ok {
+        Ok(())
+    } else {
+        Err(Error::UnsafePackageName(name.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod package_name_tests {
+    use super::*;
+
+    #[test]
+    fn validate_package_link_name_accepts_npm_slots() {
+        validate_package_link_name("react").unwrap();
+        validate_package_link_name("@scope/pkg").unwrap();
+    }
+
+    #[test]
+    fn validate_package_link_name_rejects_path_shapes() {
+        for name in [
+            "",
+            ".",
+            "..",
+            "../evil",
+            "@scope/../evil",
+            "@scope/pkg/extra",
+            "/abs",
+            "C:evil",
+            "pkg\\evil",
+            "pkg\0evil",
+        ] {
+            assert!(
+                matches!(
+                    validate_package_link_name(name),
+                    Err(Error::UnsafePackageName(_))
+                ),
+                "{name:?} should be rejected"
+            );
+        }
+    }
+}
+
+fn is_safe_package_component(component: &str) -> bool {
+    if component.is_empty() || matches!(component, "." | "..") {
+        return false;
+    }
+    if component.len() >= 2 && component.as_bytes()[1] == b':' {
+        return false;
+    }
+    !std::path::Path::new(component).components().any(|c| {
+        matches!(
+            c,
+            std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_)
+        )
+    })
 }

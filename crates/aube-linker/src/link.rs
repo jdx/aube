@@ -389,6 +389,7 @@ impl Linker {
             root_deps
                 .par_iter()
                 .map(|dep| {
+                    crate::validate_package_link_name(&dep.name)?;
                     let target_dir = nm.join(&dep.name);
 
                     // `link:` direct deps point at the on-disk target with
@@ -561,6 +562,7 @@ impl Linker {
                 continue;
             }
             for dep in deps {
+                crate::validate_package_link_name(&dep.name)?;
                 let Some(ws_dir) = workspace_dirs.get(&dep.name) else {
                     continue;
                 };
@@ -1010,6 +1012,7 @@ impl Linker {
                         return Ok(false);
                     }
 
+                    crate::validate_package_link_name(&dep.name)?;
                     let link_path = nm.join(&dep.name);
 
                     // Workspace dep (`workspace:` protocol or bare

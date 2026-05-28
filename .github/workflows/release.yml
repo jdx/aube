@@ -80,7 +80,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ inputs.ref != '' && fromJSON(inputs.dry_run || 'false') && inputs.ref || format('refs/tags/{0}', inputs.tag) }}
           submodules: recursive
@@ -140,7 +140,7 @@ jobs:
             runner: windows-latest
             build-tool: cargo
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ inputs.ref != '' && fromJSON(inputs.dry_run || 'false') && inputs.ref || format('refs/tags/{0}', inputs.tag) }}
           submodules: recursive
@@ -233,7 +233,7 @@ jobs:
     env:
       TARGET: aarch64-unknown-linux-musl
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ inputs.ref != '' && fromJSON(inputs.dry_run || 'false') && inputs.ref || format('refs/tags/{0}', inputs.tag) }}
           submodules: recursive
@@ -362,7 +362,7 @@ jobs:
             build-tool: cargo
             bolt: false
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ inputs.ref != '' && fromJSON(inputs.dry_run || 'false') && inputs.ref || format('refs/tags/{0}', inputs.tag) }}
           submodules: recursive

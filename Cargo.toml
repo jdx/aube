@@ -87,7 +87,7 @@ rayon = "1"
 rustc-hash = "2"
 # Better avalanche than FxHash on dep_path keys with integer peer
 # suffixes. Resolver hot maps only. Rest of workspace stays on FxHash.
-foldhash = "0.1"
+foldhash = "0.2"
 
 # Stack-allocated small vectors for lockfile fields that are empty
 # or tiny in almost every package. os/cpu/libc arrays, bundled deps.

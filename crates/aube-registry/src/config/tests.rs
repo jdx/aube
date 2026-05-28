@@ -1,4 +1,5 @@
 use super::*;
+use crate::config::types::NpmrcSource;
 use base64::Engine as _;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -611,21 +612,169 @@ fn top_level_cafile_and_ca_are_parsed() {
 }
 
 #[test]
-fn test_config_global_auth_token() {
+fn unscoped_auth_token_is_pinned_to_same_source_registry() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join(".npmrc"), "_authToken=global-token\n").unwrap();
 
-    // Isolate from the host's real `~/.npmrc` via `load_isolated`:
-    // a developer or CI runner with
-    // `//registry.npmjs.org/:_authToken=...` already logged in
-    // would have that URI-specific token beat our project-level
-    // `_authToken` fallback, since `auth_token_for` checks
-    // per-URI auth before dropping to `global_auth_token`.
+    // Isolate from the host's real `~/.npmrc`: a developer or CI
+    // runner with `//registry.npmjs.org/:_authToken=...` already
+    // logged in would otherwise affect this assertion.
     let config = NpmConfig::load_isolated(dir.path());
-    // Global token used as fallback
+    // Unscoped auth is pinned to npmjs at load time. It must not
+    // remain a floating fallback.
     assert_eq!(
         config.auth_token_for("https://registry.npmjs.org/"),
         Some("global-token")
+    );
+    assert_eq!(config.auth_token_for("https://registry.example.com/"), None);
+}
+
+#[test]
+fn unscoped_auth_uses_registry_from_same_source() {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        home.path().join(".npmrc"),
+        "registry=https://registry.npmjs.org/\n_authToken=user-token\n",
+    )
+    .unwrap();
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join(".npmrc"),
+        "registry=https://registry.internal.example/\n",
+    )
+    .unwrap();
+
+    let mut config = NpmConfig::default();
+    config.apply_tagged(load_npmrc_entries_tagged_with_home(
+        Some(home.path()),
+        None,
+        project.path(),
+        None,
+    ));
+
+    assert_eq!(
+        config.registry, "https://registry.internal.example/",
+        "project registry still wins as the effective default"
+    );
+    assert_eq!(
+        config.auth_token_for("https://registry.npmjs.org/"),
+        Some("user-token")
+    );
+    assert_eq!(
+        config.auth_token_for("https://registry.internal.example/"),
+        None,
+        "project registry must not inherit user source's unscoped token"
+    );
+}
+
+#[test]
+fn unscoped_auth_uses_same_source_registry_regardless_of_order() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(".npmrc"),
+        "_authToken=private-token\nregistry=https://registry.private.example/\n",
+    )
+    .unwrap();
+
+    let config = NpmConfig::load_isolated(dir.path());
+    assert_eq!(
+        config.auth_token_for("https://registry.private.example/"),
+        Some("private-token")
+    );
+    assert_eq!(config.auth_token_for("https://registry.npmjs.org/"), None);
+}
+
+#[test]
+fn uri_scoped_auth_beats_later_rescoped_bare_auth() {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        home.path().join(".npmrc"),
+        "//registry.npmjs.org/:_authToken=user-token\n",
+    )
+    .unwrap();
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(project.path().join(".npmrc"), "_authToken=project-token\n").unwrap();
+
+    let mut config = NpmConfig::default();
+    config.apply_tagged(load_npmrc_entries_tagged_with_home(
+        Some(home.path()),
+        None,
+        project.path(),
+        None,
+    ));
+
+    assert_eq!(
+        config.auth_token_for("https://registry.npmjs.org/"),
+        Some("user-token")
+    );
+}
+
+#[test]
+fn later_bare_auth_can_override_earlier_bare_auth() {
+    let mut config = NpmConfig::default();
+    config.apply_tagged(vec![
+        (
+            NpmrcSource::User,
+            "_authToken".to_string(),
+            "user-token".to_string(),
+        ),
+        (
+            NpmrcSource::Env,
+            "_authToken".to_string(),
+            "env-token".to_string(),
+        ),
+    ]);
+
+    assert_eq!(
+        config.auth_token_for("https://registry.npmjs.org/"),
+        Some("env-token")
+    );
+}
+
+#[test]
+fn later_uri_scoped_auth_can_override_earlier_bare_auth() {
+    let mut config = NpmConfig::default();
+    config.apply_tagged(vec![
+        (
+            NpmrcSource::User,
+            "_authToken".to_string(),
+            "user-token".to_string(),
+        ),
+        (
+            NpmrcSource::Project,
+            "//registry.npmjs.org/:_authToken".to_string(),
+            "project-token".to_string(),
+        ),
+    ]);
+
+    assert_eq!(
+        config.auth_token_for("https://registry.npmjs.org/"),
+        Some("project-token")
+    );
+}
+
+#[test]
+fn unscoped_tls_client_credentials_are_registry_scoped() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(".npmrc"),
+        "registry=https://registry.example.com/\n\
+         cert=-----BEGIN CERTIFICATE-----\\nclient\\n-----END CERTIFICATE-----\n\
+         key=-----BEGIN PRIVATE KEY-----\\nkey\\n-----END PRIVATE KEY-----\n",
+    )
+    .unwrap();
+
+    let config = NpmConfig::load_isolated(dir.path());
+    let tls = &config
+        .registry_config_for("https://registry.example.com/")
+        .unwrap()
+        .tls;
+    assert!(tls.cert.as_deref().unwrap().contains("\nclient\n"));
+    assert!(tls.key.as_deref().unwrap().contains("\nkey\n"));
+    assert!(
+        config
+            .registry_config_for("https://registry.npmjs.org/")
+            .is_none()
     );
 }
 
@@ -633,9 +782,9 @@ fn test_config_global_auth_token() {
 fn test_config_defaults() {
     let dir = tempfile::tempdir().unwrap();
     // No .npmrc at all. Same HOME isolation rationale as
-    // `test_config_global_auth_token` — without it this assertion
-    // flakes on any developer box whose `~/.npmrc` has ever been
-    // touched by `npm login`.
+    // `unscoped_auth_token_is_pinned_to_same_source_registry` —
+    // without it this assertion flakes on any developer box whose
+    // `~/.npmrc` has ever been touched by `npm login`.
     let config = NpmConfig::load_isolated(dir.path());
     assert_eq!(config.registry, "https://registry.npmjs.org/");
     assert!(
