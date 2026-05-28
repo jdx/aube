@@ -166,7 +166,9 @@ impl NpmConfig {
                     &env_registry,
                 );
                 self.rescope_unscoped_registry_setting(source, registry, "_authToken", |auth| {
-                    auth.auth_token = Some(value)
+                    if auth.auth_token.is_none() {
+                        auth.auth_token = Some(value);
+                    }
                 });
             } else if key == "_auth" {
                 let registry = source_registry(
@@ -178,7 +180,9 @@ impl NpmConfig {
                     &env_registry,
                 );
                 self.rescope_unscoped_registry_setting(source, registry, "_auth", |auth| {
-                    auth.auth = Some(value)
+                    if auth.auth.is_none() {
+                        auth.auth = Some(value);
+                    }
                 });
             } else if key == "username" {
                 let registry = source_registry(
@@ -190,7 +194,9 @@ impl NpmConfig {
                     &env_registry,
                 );
                 self.rescope_unscoped_registry_setting(source, registry, "username", |auth| {
-                    auth.username = Some(value)
+                    if auth.username.is_none() {
+                        auth.username = Some(value);
+                    }
                 });
             } else if key == "_password" {
                 let registry = source_registry(
@@ -202,7 +208,9 @@ impl NpmConfig {
                     &env_registry,
                 );
                 self.rescope_unscoped_registry_setting(source, registry, "_password", |auth| {
-                    auth.password = Some(value)
+                    if auth.password.is_none() {
+                        auth.password = Some(value);
+                    }
                 });
             } else if matches!(key.as_str(), "cert" | "key") {
                 let suffix = key.clone();
@@ -216,8 +224,10 @@ impl NpmConfig {
                 );
                 self.rescope_unscoped_registry_setting(source, registry, &suffix, |auth| {
                     if suffix == "cert" {
-                        auth.tls.cert = Some(pem_value(value));
-                    } else {
+                        if auth.tls.cert.is_none() {
+                            auth.tls.cert = Some(pem_value(value));
+                        }
+                    } else if auth.tls.key.is_none() {
                         auth.tls.key = Some(pem_value(value));
                     }
                 });
@@ -245,7 +255,9 @@ impl NpmConfig {
                     &env_registry,
                 );
                 self.rescope_unscoped_registry_setting(source, registry, "tokenHelper", |auth| {
-                    auth.token_helper = Some(sanitized)
+                    if auth.token_helper.is_none() {
+                        auth.token_helper = Some(sanitized);
+                    }
                 });
             } else if matches!(
                 key.as_str(),

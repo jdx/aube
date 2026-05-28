@@ -684,6 +684,31 @@ fn unscoped_auth_uses_same_source_registry_regardless_of_order() {
 }
 
 #[test]
+fn uri_scoped_auth_beats_later_rescoped_bare_auth() {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        home.path().join(".npmrc"),
+        "//registry.npmjs.org/:_authToken=user-token\n",
+    )
+    .unwrap();
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(project.path().join(".npmrc"), "_authToken=project-token\n").unwrap();
+
+    let mut config = NpmConfig::default();
+    config.apply_tagged(load_npmrc_entries_tagged_with_home(
+        Some(home.path()),
+        None,
+        project.path(),
+        None,
+    ));
+
+    assert_eq!(
+        config.auth_token_for("https://registry.npmjs.org/"),
+        Some("user-token")
+    );
+}
+
+#[test]
 fn unscoped_tls_client_credentials_are_registry_scoped() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
