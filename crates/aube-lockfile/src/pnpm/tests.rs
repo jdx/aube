@@ -2556,6 +2556,36 @@ snapshots:
 }
 
 #[test]
+fn parser_rejects_remote_tarball_with_hosted_git_url_in_query() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pnpm-lock.yaml");
+    std::fs::write(
+        &path,
+        r#"
+lockfileVersion: '9.0'
+importers:
+  .:
+    dependencies:
+      demo:
+        specifier: 1.0.0
+        version: 1.0.0
+packages:
+  demo@1.0.0:
+    resolution: {tarball: https://evil.example.com/demo.tgz?ref=://codeload.github.com/acme/demo/tar.gz/abcdef}
+snapshots:
+  demo@1.0.0: {}
+"#,
+    )
+    .unwrap();
+
+    let err = parse(&path).unwrap_err().to_string();
+    assert!(
+        err.contains("remote tarball resolution without integrity"),
+        "{err}"
+    );
+}
+
+#[test]
 fn parser_allows_git_hosted_tarball_resolution_without_integrity() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("pnpm-lock.yaml");
