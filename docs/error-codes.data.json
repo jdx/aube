@@ -525,6 +525,12 @@
       "exit_code": null
     },
     {
+      "name": "WARN_AUBE_UNSCOPED_AUTH_RESCOPED",
+      "category": "Registry config (trust gates)",
+      "description": "An unscoped registry credential was pinned to the registry declared by the same config source.",
+      "exit_code": null
+    },
+    {
       "name": "WARN_AUBE_UNTRUSTED_TOKEN_HELPER",
       "category": "Registry config (trust gates)",
       "description": "`tokenHelper` came from an untrusted source (CVE-2025-69262 class).",

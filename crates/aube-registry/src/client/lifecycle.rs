@@ -62,7 +62,6 @@ impl RegistryClient {
             config,
             network_mode: NetworkMode::Online,
             fetch_policy,
-            default_registry_parsed: std::sync::OnceLock::new(),
         }
     }
 
