@@ -10,9 +10,16 @@ name: publish-smoke
 #   endevco/aube / .github/workflows/publish-smoke.yml
 # - @endevco/aube-publish-otp-smoke must be owned by the same npm account
 #   as the NPM_TOKEN repository secret. If that account requires 2FA for
-#   writes, dispatch this workflow with the current OTP code.
+#   writes, prefer setting NPM_OTP_SECRET to that account's base32 TOTP
+#   seed so the workflow can generate a fresh OTP immediately before
+#   publishing. The manual otp input is a fallback for quick re-runs.
 
 on:
+  push:
+    branches:
+      # Lets maintainers test changes to this workflow before it exists on
+      # main. Keep this narrow so normal feature branches never publish.
+      - test/npm-publish-smoke
   workflow_dispatch:
     inputs:
       mode:
@@ -81,7 +88,7 @@ jobs:
           echo "stage=$STAGE" >> "$GITHUB_OUTPUT"
 
       - name: Publish with npm Trusted Publishing
-        if: ${{ inputs.mode == 'both' || inputs.mode == 'oidc' }}
+        if: ${{ github.event_name == 'push' || inputs.mode == 'both' || inputs.mode == 'oidc' }}
         env:
           STAGE: ${{ steps.pkg.outputs.stage }}
           VERSION: ${{ steps.pkg.outputs.version }}
@@ -106,9 +113,10 @@ jobs:
           npm view "$OIDC_PACKAGE@$VERSION" version
 
       - name: Publish with token and OTP
-        if: ${{ inputs.mode == 'both' || inputs.mode == 'otp' }}
+        if: ${{ github.event_name == 'push' || inputs.mode == 'both' || inputs.mode == 'otp' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_OTP_SECRET: ${{ secrets.NPM_OTP_SECRET }}
           NPM_OTP: ${{ inputs.otp }}
           STAGE: ${{ steps.pkg.outputs.stage }}
           VERSION: ${{ steps.pkg.outputs.version }}
@@ -141,6 +149,10 @@ jobs:
           )
           if [ -n "${NPM_OTP:-}" ]; then
             args+=(--otp "$NPM_OTP")
+          elif [ -n "${NPM_OTP_SECRET:-}" ]; then
+            OTP="$(node "$GITHUB_WORKSPACE/npm/scripts/totp.mjs" "$NPM_OTP_SECRET")"
+            echo "::add-mask::$OTP"
+            args+=(--otp "$OTP")
           fi
           "$GITHUB_WORKSPACE/target/debug/aube" "${args[@]}"
           npm view "$OTP_PACKAGE@$VERSION" version
