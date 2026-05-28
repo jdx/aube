@@ -49,6 +49,7 @@ jobs:
       id-token: write
     env:
       DIST_TAG: smoke
+      MODE: ${{ github.event_name == 'push' && 'both' || inputs.mode }}
       OIDC_PACKAGE: "@endevco/aube-publish-oidc-smoke"
       OTP_PACKAGE: "@endevco/aube-publish-otp-smoke"
     steps:
@@ -88,7 +89,7 @@ jobs:
           echo "stage=$STAGE" >> "$GITHUB_OUTPUT"
 
       - name: Publish with npm Trusted Publishing
-        if: ${{ github.event_name == 'push' || inputs.mode == 'both' || inputs.mode == 'oidc' }}
+        if: ${{ env.MODE == 'both' || env.MODE == 'oidc' }}
         env:
           STAGE: ${{ steps.pkg.outputs.stage }}
           VERSION: ${{ steps.pkg.outputs.version }}
@@ -104,16 +105,25 @@ jobs:
           pkg.version = version;
           fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           NODE
+          set +e
           "$GITHUB_WORKSPACE/target/debug/aube" publish \
             --no-git-checks \
             --access public \
             --tag "$DIST_TAG" \
             --provenance \
             --registry https://registry.npmjs.org/
-          npm view "$OIDC_PACKAGE@$VERSION" version
+          rc=$?
+          set -e
+          echo "OIDC_STATUS=$rc" >> "$GITHUB_ENV"
+          if [ "$rc" -eq 0 ]; then
+            npm view "$OIDC_PACKAGE@$VERSION" version
+          else
+            echo "::error::OIDC publish failed with exit code $rc"
+          fi
+          exit 0
 
       - name: Publish with token and OTP
-        if: ${{ github.event_name == 'push' || inputs.mode == 'both' || inputs.mode == 'otp' }}
+        if: ${{ env.MODE == 'both' || env.MODE == 'otp' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_OTP_SECRET: ${{ secrets.NPM_OTP_SECRET }}
@@ -154,5 +164,33 @@ jobs:
             echo "::add-mask::$OTP"
             args+=(--otp "$OTP")
           fi
+          set +e
           "$GITHUB_WORKSPACE/target/debug/aube" "${args[@]}"
-          npm view "$OTP_PACKAGE@$VERSION" version
+          rc=$?
+          set -e
+          echo "OTP_STATUS=$rc" >> "$GITHUB_ENV"
+          if [ "$rc" -eq 0 ]; then
+            npm view "$OTP_PACKAGE@$VERSION" version
+          else
+            echo "::error::OTP publish failed with exit code $rc"
+          fi
+          exit 0
+
+      - name: Check smoke results
+        if: always()
+        run: |
+          set -euo pipefail
+          failed=0
+          if [ "$MODE" = "both" ] || [ "$MODE" = "oidc" ]; then
+            if [ "${OIDC_STATUS:-missing}" != "0" ]; then
+              echo "::error::OIDC smoke failed: ${OIDC_STATUS:-missing}"
+              failed=1
+            fi
+          fi
+          if [ "$MODE" = "both" ] || [ "$MODE" = "otp" ]; then
+            if [ "${OTP_STATUS:-missing}" != "0" ]; then
+              echo "::error::OTP smoke failed: ${OTP_STATUS:-missing}"
+              failed=1
+            fi
+          fi
+          exit "$failed"
