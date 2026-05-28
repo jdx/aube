@@ -622,10 +622,94 @@ fn test_config_global_auth_token() {
     // `_authToken` fallback, since `auth_token_for` checks
     // per-URI auth before dropping to `global_auth_token`.
     let config = NpmConfig::load_isolated(dir.path());
-    // Global token used as fallback
+    // Unscoped auth is pinned to npmjs at load time. It must not
+    // remain a floating fallback that a later registry override can
+    // pull onto a different host.
     assert_eq!(
         config.auth_token_for("https://registry.npmjs.org/"),
         Some("global-token")
+    );
+    assert_eq!(config.auth_token_for("https://registry.example.com/"), None);
+    assert!(config.global_auth_token.is_none());
+}
+
+#[test]
+fn unscoped_auth_uses_registry_from_same_source() {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        home.path().join(".npmrc"),
+        "registry=https://registry.npmjs.org/\n_authToken=user-token\n",
+    )
+    .unwrap();
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join(".npmrc"),
+        "registry=https://registry.internal.example/\n",
+    )
+    .unwrap();
+
+    let mut config = NpmConfig::default();
+    config.apply_tagged(load_npmrc_entries_tagged_with_home(
+        Some(home.path()),
+        None,
+        project.path(),
+        None,
+    ));
+
+    assert_eq!(
+        config.registry, "https://registry.internal.example/",
+        "project registry still wins as the effective default"
+    );
+    assert_eq!(
+        config.auth_token_for("https://registry.npmjs.org/"),
+        Some("user-token")
+    );
+    assert_eq!(
+        config.auth_token_for("https://registry.internal.example/"),
+        None,
+        "project registry must not inherit user source's unscoped token"
+    );
+}
+
+#[test]
+fn unscoped_auth_uses_same_source_registry_regardless_of_order() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(".npmrc"),
+        "_authToken=private-token\nregistry=https://registry.private.example/\n",
+    )
+    .unwrap();
+
+    let config = NpmConfig::load_isolated(dir.path());
+    assert_eq!(
+        config.auth_token_for("https://registry.private.example/"),
+        Some("private-token")
+    );
+    assert_eq!(config.auth_token_for("https://registry.npmjs.org/"), None);
+}
+
+#[test]
+fn unscoped_tls_client_credentials_are_registry_scoped() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(".npmrc"),
+        "registry=https://registry.example.com/\n\
+         cert=-----BEGIN CERTIFICATE-----\\nclient\\n-----END CERTIFICATE-----\n\
+         key=-----BEGIN PRIVATE KEY-----\\nkey\\n-----END PRIVATE KEY-----\n",
+    )
+    .unwrap();
+
+    let config = NpmConfig::load_isolated(dir.path());
+    let tls = &config
+        .registry_config_for("https://registry.example.com/")
+        .unwrap()
+        .tls;
+    assert!(tls.cert.as_deref().unwrap().contains("\nclient\n"));
+    assert!(tls.key.as_deref().unwrap().contains("\nkey\n"));
+    assert!(
+        config
+            .registry_config_for("https://registry.npmjs.org/")
+            .is_none()
     );
 }
 

@@ -138,11 +138,119 @@ impl NpmConfig {
     }
 
     pub(super) fn apply_tagged(&mut self, entries: Vec<(NpmrcSource, String, String)>) {
+        let mut user_registry = "https://registry.npmjs.org/".to_string();
+        let mut pnpm_auth_registry = "https://registry.npmjs.org/".to_string();
+        let mut project_registry = "https://registry.npmjs.org/".to_string();
+        let mut npmrc_auth_file_registry = "https://registry.npmjs.org/".to_string();
+        let mut env_registry = "https://registry.npmjs.org/".to_string();
+
+        for (source, key, value) in &entries {
+            if key == "registry" {
+                *source_registry_mut(
+                    *source,
+                    &mut user_registry,
+                    &mut pnpm_auth_registry,
+                    &mut project_registry,
+                    &mut npmrc_auth_file_registry,
+                    &mut env_registry,
+                ) = normalize_registry_url(value);
+            }
+        }
+
         for (source, key, value) in entries {
             if key == "registry" {
                 self.registry = normalize_registry_url(&value);
             } else if key == "_authToken" {
-                self.global_auth_token = Some(value);
+                let registry = source_registry(
+                    source,
+                    &user_registry,
+                    &pnpm_auth_registry,
+                    &project_registry,
+                    &npmrc_auth_file_registry,
+                    &env_registry,
+                );
+                self.rescope_unscoped_registry_setting(source, registry, "_authToken", |auth| {
+                    auth.auth_token = Some(value)
+                });
+            } else if key == "_auth" {
+                let registry = source_registry(
+                    source,
+                    &user_registry,
+                    &pnpm_auth_registry,
+                    &project_registry,
+                    &npmrc_auth_file_registry,
+                    &env_registry,
+                );
+                self.rescope_unscoped_registry_setting(source, registry, "_auth", |auth| {
+                    auth.auth = Some(value)
+                });
+            } else if key == "username" {
+                let registry = source_registry(
+                    source,
+                    &user_registry,
+                    &pnpm_auth_registry,
+                    &project_registry,
+                    &npmrc_auth_file_registry,
+                    &env_registry,
+                );
+                self.rescope_unscoped_registry_setting(source, registry, "username", |auth| {
+                    auth.username = Some(value)
+                });
+            } else if key == "_password" {
+                let registry = source_registry(
+                    source,
+                    &user_registry,
+                    &pnpm_auth_registry,
+                    &project_registry,
+                    &npmrc_auth_file_registry,
+                    &env_registry,
+                );
+                self.rescope_unscoped_registry_setting(source, registry, "_password", |auth| {
+                    auth.password = Some(value)
+                });
+            } else if matches!(key.as_str(), "cert" | "key") {
+                let suffix = key.clone();
+                let registry = source_registry(
+                    source,
+                    &user_registry,
+                    &pnpm_auth_registry,
+                    &project_registry,
+                    &npmrc_auth_file_registry,
+                    &env_registry,
+                );
+                self.rescope_unscoped_registry_setting(source, registry, &suffix, |auth| {
+                    if suffix == "cert" {
+                        auth.tls.cert = Some(pem_value(value));
+                    } else {
+                        auth.tls.key = Some(pem_value(value));
+                    }
+                });
+            } else if matches!(key.as_str(), "tokenHelper" | "token-helper") {
+                if !source.is_trusted_for_subprocess_settings() {
+                    tracing::warn!(
+                        code = aube_codes::warnings::WARN_AUBE_UNTRUSTED_TOKEN_HELPER,
+                        "ignoring tokenHelper from untrusted source {source:?}: committed `.npmrc` cannot set this"
+                    );
+                    continue;
+                }
+                let Some(sanitized) = sanitize_token_helper(&value) else {
+                    tracing::warn!(
+                        code = aube_codes::warnings::WARN_AUBE_INVALID_TOKEN_HELPER,
+                        "ignoring tokenHelper: value is not a bare absolute path: {value:?}"
+                    );
+                    continue;
+                };
+                let registry = source_registry(
+                    source,
+                    &user_registry,
+                    &pnpm_auth_registry,
+                    &project_registry,
+                    &npmrc_auth_file_registry,
+                    &env_registry,
+                );
+                self.rescope_unscoped_registry_setting(source, registry, "tokenHelper", |auth| {
+                    auth.token_helper = Some(sanitized)
+                });
             } else if matches!(
                 key.as_str(),
                 "https-proxy"
@@ -292,5 +400,58 @@ impl NpmConfig {
             // source list from settings.toml. Add a new branch here
             // only if the key maps to a registry-client concept.
         }
+    }
+
+    fn rescope_unscoped_registry_setting(
+        &mut self,
+        source: NpmrcSource,
+        registry: &str,
+        suffix: &str,
+        apply: impl FnOnce(&mut AuthConfig),
+    ) {
+        tracing::warn!(
+            code = aube_codes::warnings::WARN_AUBE_UNSCOPED_AUTH_RESCOPED,
+            "unscoped {suffix} from {source:?} was pinned to {registry}; write `{}:{suffix}=...` instead",
+            registry_uri_key(registry)
+        );
+        let entry = self
+            .auth_by_uri
+            .entry(registry_uri_key(registry))
+            .or_default();
+        apply(entry);
+    }
+}
+
+fn source_registry<'a>(
+    source: NpmrcSource,
+    user: &'a str,
+    pnpm_auth: &'a str,
+    project: &'a str,
+    npmrc_auth_file: &'a str,
+    env: &'a str,
+) -> &'a str {
+    match source {
+        NpmrcSource::User => user,
+        NpmrcSource::PnpmAuth => pnpm_auth,
+        NpmrcSource::Project => project,
+        NpmrcSource::NpmrcAuthFile => npmrc_auth_file,
+        NpmrcSource::Env => env,
+    }
+}
+
+fn source_registry_mut<'a>(
+    source: NpmrcSource,
+    user: &'a mut String,
+    pnpm_auth: &'a mut String,
+    project: &'a mut String,
+    npmrc_auth_file: &'a mut String,
+    env: &'a mut String,
+) -> &'a mut String {
+    match source {
+        NpmrcSource::User => user,
+        NpmrcSource::PnpmAuth => pnpm_auth,
+        NpmrcSource::Project => project,
+        NpmrcSource::NpmrcAuthFile => npmrc_auth_file,
+        NpmrcSource::Env => env,
     }
 }
