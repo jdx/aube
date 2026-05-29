@@ -65,9 +65,10 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
-      - uses: namespacelabs/nscloud-cache-action@15799a6b54e5765f85b2aac25b3f0df43ed571c0 # v1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2 # zizmor: ignore[cache-poisoning] manual dispatch only; writes are limited to main
         with:
-          cache: rust
+          shared-key: publish-smoke
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build aube
         run: cargo build -p aube
