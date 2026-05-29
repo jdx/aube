@@ -212,6 +212,8 @@ struct PackedFile {
     rel: String,
     /// File size captured while collecting the packlist.
     size: u64,
+    /// Optional in-memory content used when publish normalizes package.json.
+    data_override: Option<Vec<u8>>,
 }
 
 /// In-memory result of packing a project. Reused by `aube publish`,
@@ -234,6 +236,13 @@ pub(crate) struct BuiltArchive {
 /// `aube pack` (writes the bytes to disk) and the forthcoming
 /// `aube publish` (hashes and uploads them).
 pub(crate) fn build_archive(project_dir: &Path) -> miette::Result<BuiltArchive> {
+    build_archive_with_package_json(project_dir, None)
+}
+
+pub(crate) fn build_archive_with_package_json(
+    project_dir: &Path,
+    package_json: Option<Vec<u8>>,
+) -> miette::Result<BuiltArchive> {
     let manifest = PackageJson::from_path(&project_dir.join("package.json"))
         .map_err(miette::Report::new)
         .wrap_err("failed to read package.json")?;
@@ -248,7 +257,13 @@ pub(crate) fn build_archive(project_dir: &Path) -> miette::Result<BuiltArchive> 
         .ok_or_else(|| miette!("pack: package.json has no `version` field"))?
         .to_string();
 
-    let files = collect_files(project_dir, &manifest)?;
+    let mut files = collect_files(project_dir, &manifest)?;
+    if let Some(package_json) = package_json
+        && let Some(file) = files.iter_mut().find(|f| f.rel == "package.json")
+    {
+        file.size = package_json.len() as u64;
+        file.data_override = Some(package_json);
+    }
     let filename = tarball_filename(&name, &version);
     let unpacked_size = files.iter().map(|f| f.size).sum();
 
@@ -314,7 +329,12 @@ fn collect_files(project_dir: &Path, manifest: &PackageJson) -> miette::Result<V
             .into_diagnostic()
             .wrap_err_with(|| format!("pack: stat {}", abs.display()))?
             .len();
-        out.push(PackedFile { abs, rel, size });
+        out.push(PackedFile {
+            abs,
+            rel,
+            size,
+            data_override: None,
+        });
     }
     out.sort_by(|a, b| a.rel.cmp(&b.rel));
     Ok(out)
@@ -564,9 +584,12 @@ fn write_tarball<W: Write>(files: &[PackedFile], writer: W) -> miette::Result<()
     let mut builder = tar::Builder::new(gz);
 
     for packed in files {
-        let data = std::fs::read(&packed.abs)
-            .into_diagnostic()
-            .wrap_err_with(|| format!("failed to read {}", packed.abs.display()))?;
+        let data = match &packed.data_override {
+            Some(data) => data.clone(),
+            None => std::fs::read(&packed.abs)
+                .into_diagnostic()
+                .wrap_err_with(|| format!("failed to read {}", packed.abs.display()))?,
+        };
         let mut header = tar::Header::new_gnu();
         header.set_size(data.len() as u64);
         header.set_mode(file_mode(&packed.abs));
