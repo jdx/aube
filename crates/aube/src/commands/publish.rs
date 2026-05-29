@@ -808,7 +808,9 @@ fn publish_failure_needs_otp(failure: &PublishHttpFailure) -> bool {
     body.contains("eotp")
         || body.contains("npm-otp")
         || body.contains("one-time password")
+        || body.contains("one-time pass")
         || body.contains("one time password")
+        || body.contains("one time pass")
         || (body.contains("otp") && requires)
         || (two_factor && requires)
 }
@@ -1137,6 +1139,16 @@ mod tests {
         let failure = PublishHttpFailure {
             status: reqwest::StatusCode::UNAUTHORIZED,
             body: r#"{"error":"EOTP","reason":"This operation requires a one-time password."}"#
+                .into(),
+        };
+        assert!(publish_failure_needs_otp(&failure));
+    }
+
+    #[test]
+    fn publish_failure_detects_npm_one_time_pass_challenge() {
+        let failure = PublishHttpFailure {
+            status: reqwest::StatusCode::UNAUTHORIZED,
+            body: r#"{"error":"You must provide a one-time pass. Upgrade your client to npm@latest in order to use 2FA."}"#
                 .into(),
         };
         assert!(publish_failure_needs_otp(&failure));
