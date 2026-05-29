@@ -45,6 +45,17 @@ jobs:
       OIDC_PACKAGE: "@endevco/aube-publish-oidc-smoke"
       OTP_PACKAGE: "@endevco/aube-publish-otp-smoke"
     steps:
+      - name: Validate mode
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            oidc|otp) ;;
+            *)
+              echo "::error::Unsupported mode: $MODE"
+              exit 1
+              ;;
+          esac
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
