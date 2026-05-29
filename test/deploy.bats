@@ -152,9 +152,9 @@ _setup_workspace_fixture() {
 
 	run aube deploy --filter @test/lib ./out
 	assert_failure
-	# miette wraps the rendered error at ~80 cols; "not empty" can split
-	# once the temp-dir path grows a digit, so match "is not" instead.
-	assert_output --partial "is not"
+	# miette wraps the rendered error at ~80 cols; long temp-dir paths can
+	# split "is not empty" at different points, so match a stable word.
+	assert_output --partial "empty"
 }
 
 @test "aube deploy: glob filter fans out across every match" {
@@ -188,9 +188,9 @@ _setup_workspace_fixture() {
 
 	run aube deploy --filter "@test/*" ./out
 	assert_failure
-	# miette wraps the rendered error at ~80 cols; "not empty" can split
-	# once the temp-dir path grows a digit, so match "is not" instead.
-	assert_output --partial "is not"
+	# miette wraps the rendered error at ~80 cols; long temp-dir paths can
+	# split "is not empty" at different points, so match a stable word.
+	assert_output --partial "empty"
 }
 
 # Narrow @test/lib's publish surface to just package.json + index.js so

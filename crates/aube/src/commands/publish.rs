@@ -28,7 +28,9 @@
 //! "already published" error, leaving the registry itself to decide
 //! whether a republish is allowed.
 
-use crate::commands::pack::{BuiltArchive, build_archive};
+use crate::commands::pack::{
+    BuiltArchive, build_archive, build_archive_with_package_json, tarball_filename,
+};
 use crate::commands::{encode_package_name, ensure_registry_auth};
 use aube_manifest::PackageJson;
 use aube_registry::client::RegistryClient;
@@ -381,16 +383,12 @@ async fn publish_one(
         .as_deref()
         .ok_or_else(|| miette!("publish: {}/package.json has no `name`", pkg_dir.display()))?
         .to_string();
-    let version = manifest
-        .version
-        .as_deref()
-        .ok_or_else(|| {
-            miette!(
-                "publish: {}/package.json has no `version`",
-                pkg_dir.display()
-            )
-        })?
-        .to_string();
+    let version = normalize_publish_version(manifest.version.as_deref().ok_or_else(|| {
+        miette!(
+            "publish: {}/package.json has no `version`",
+            pkg_dir.display()
+        )
+    })?);
 
     // publishConfig in package.json overrides both registry and tag
     // if the user has not passed CLI flags. pnpm and npm both honor
@@ -429,7 +427,7 @@ async fn publish_one(
         // hitting the registry, matching pnpm. `publish` / `postpublish`
         // are skipped — nothing was actually uploaded.
         run_publish_lifecycle_pre(pkg_dir, &manifest, args.ignore_scripts).await?;
-        let archive = build_archive(pkg_dir)?;
+        let archive = build_archive_for_publish(pkg_dir)?;
         super::pack::run_pack_lifecycle_post(pkg_dir, args.ignore_scripts).await?;
         // `--dry-run --provenance` is a common "does my CI actually have
         // OIDC wired up?" smoke test. Silently skipping the OIDC probe
@@ -479,7 +477,7 @@ async fn publish_one(
     // every package is already on the registry, the loop never reaches
     // this point and the whole fanout is script-free and gzip-free.
     run_publish_lifecycle_pre(pkg_dir, &manifest, args.ignore_scripts).await?;
-    let archive = build_archive(pkg_dir)?;
+    let archive = build_archive_for_publish(pkg_dir)?;
     super::pack::run_pack_lifecycle_post(pkg_dir, args.ignore_scripts).await?;
 
     // Re-read the manifest *after* the pre-pack chain. Publish-time
@@ -579,6 +577,46 @@ async fn publish_one(
         archive: Some(archive),
         status: PublishStatus::Published,
     })
+}
+
+fn normalize_archive_for_publish(archive: &mut BuiltArchive) {
+    let version = normalize_publish_version(&archive.version);
+    if version != archive.version {
+        archive.version = version;
+        archive.filename = tarball_filename(&archive.name, &archive.version);
+    }
+}
+
+fn build_archive_for_publish(pkg_dir: &Path) -> miette::Result<BuiltArchive> {
+    let manifest_path = pkg_dir.join("package.json");
+    let manifest_bytes = std::fs::read(&manifest_path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to read {}", manifest_path.display()))?;
+    let mut manifest_json: serde_json::Value =
+        serde_json::from_slice(&manifest_bytes).into_diagnostic()?;
+    let Some(raw_version) = manifest_json.get("version").and_then(|v| v.as_str()) else {
+        return build_archive(pkg_dir);
+    };
+    let version = normalize_publish_version(raw_version);
+    if version == raw_version {
+        return build_archive(pkg_dir);
+    }
+
+    if let Some(obj) = manifest_json.as_object_mut() {
+        obj.insert("version".into(), version.into());
+    }
+    let mut package_json = serde_json::to_vec_pretty(&manifest_json).into_diagnostic()?;
+    package_json.push(b'\n');
+
+    let mut archive = build_archive_with_package_json(pkg_dir, Some(package_json))?;
+    normalize_archive_for_publish(&mut archive);
+    Ok(archive)
+}
+
+fn normalize_publish_version(version: &str) -> String {
+    node_semver::Version::parse(version)
+        .map(|v| v.to_string())
+        .unwrap_or_else(|_| version.to_string())
 }
 
 #[derive(Debug, Deserialize)]
@@ -771,7 +809,9 @@ fn publish_failure_needs_otp(failure: &PublishHttpFailure) -> bool {
     body.contains("eotp")
         || body.contains("npm-otp")
         || body.contains("one-time password")
+        || body.contains("one-time pass")
         || body.contains("one time password")
+        || body.contains("one time pass")
         || (body.contains("otp") && requires)
         || (two_factor && requires)
 }
@@ -999,6 +1039,7 @@ fn build_publish_body(
     let obj = version_doc
         .as_object_mut()
         .ok_or_else(|| miette!("manifest did not serialize to a JSON object"))?;
+    obj.insert("version".into(), archive.version.clone().into());
     obj.insert(
         "_id".into(),
         format!("{}@{}", archive.name, archive.version).into(),
@@ -1099,6 +1140,16 @@ mod tests {
         let failure = PublishHttpFailure {
             status: reqwest::StatusCode::UNAUTHORIZED,
             body: r#"{"error":"EOTP","reason":"This operation requires a one-time password."}"#
+                .into(),
+        };
+        assert!(publish_failure_needs_otp(&failure));
+    }
+
+    #[test]
+    fn publish_failure_detects_npm_one_time_pass_challenge() {
+        let failure = PublishHttpFailure {
+            status: reqwest::StatusCode::UNAUTHORIZED,
+            body: r#"{"error":"You must provide a one-time pass. Upgrade your client to npm@latest in order to use 2FA."}"#
                 .into(),
         };
         assert!(publish_failure_needs_otp(&failure));
@@ -1271,6 +1322,83 @@ mod tests {
                 .and_then(|v| v.as_str())
                 .is_some_and(|s| s.starts_with("sha512-"))
         );
+    }
+
+    #[test]
+    fn publish_normalizes_v_prefixed_semver_like_npm() {
+        assert_eq!(normalize_publish_version("v2026.5.16"), "2026.5.16");
+        assert_eq!(normalize_publish_version("1.2.3-beta.1"), "1.2.3-beta.1");
+        assert_eq!(normalize_publish_version("not-semver"), "not-semver");
+    }
+
+    #[test]
+    fn publish_body_uses_normalized_version_for_registry_metadata() {
+        let mut archive = BuiltArchive {
+            name: "@jdxcode/mise-linux-x64".to_string(),
+            version: "v2026.5.16".to_string(),
+            filename: "jdxcode-mise-linux-x64-v2026.5.16.tgz".to_string(),
+            files: vec!["package.json".to_string()],
+            unpacked_size: 42,
+            tarball: b"archive bytes".to_vec(),
+        };
+        normalize_archive_for_publish(&mut archive);
+
+        let manifest: PackageJson = serde_json::from_value(serde_json::json!({
+            "name": "@jdxcode/mise-linux-x64",
+            "version": "v2026.5.16"
+        }))
+        .unwrap();
+        let body = build_publish_body(
+            &archive,
+            &manifest,
+            "https://registry.npmjs.org/",
+            "latest",
+            Some("public"),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(archive.version, "2026.5.16");
+        assert_eq!(archive.filename, "jdxcode-mise-linux-x64-2026.5.16.tgz");
+        assert_eq!(body["dist-tags"]["latest"], "2026.5.16");
+        assert!(body["versions"].get("2026.5.16").is_some());
+        assert!(body["versions"].get("v2026.5.16").is_none());
+        assert_eq!(body["versions"]["2026.5.16"]["version"], "2026.5.16");
+        assert_eq!(
+            body["versions"]["2026.5.16"]["_id"],
+            "@jdxcode/mise-linux-x64@2026.5.16"
+        );
+    }
+
+    #[test]
+    fn publish_archive_embeds_normalized_package_json_version() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("package.json"),
+            r#"{"name":"@jdxcode/mise-linux-x64","version":"v2026.5.16"}"#,
+        )
+        .unwrap();
+        std::fs::write(tmp.path().join("README.md"), "mise").unwrap();
+
+        let archive = build_archive_for_publish(tmp.path()).unwrap();
+        let gz = flate2::read::GzDecoder::new(archive.tarball.as_slice());
+        let mut tar = tar::Archive::new(gz);
+        let mut package_json = None;
+        for entry in tar.entries().unwrap() {
+            let mut entry = entry.unwrap();
+            if entry.path().unwrap() == std::path::Path::new("package/package.json") {
+                let mut contents = String::new();
+                std::io::Read::read_to_string(&mut entry, &mut contents).unwrap();
+                package_json = Some(contents);
+                break;
+            }
+        }
+        let package_json: serde_json::Value =
+            serde_json::from_str(&package_json.expect("package.json in tarball")).unwrap();
+
+        assert_eq!(archive.version, "2026.5.16");
+        assert_eq!(archive.filename, "jdxcode-mise-linux-x64-2026.5.16.tgz");
+        assert_eq!(package_json["version"], "2026.5.16");
     }
 
     #[test]
