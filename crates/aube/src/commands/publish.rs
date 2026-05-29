@@ -28,7 +28,7 @@
 //! "already published" error, leaving the registry itself to decide
 //! whether a republish is allowed.
 
-use crate::commands::pack::{BuiltArchive, build_archive};
+use crate::commands::pack::{BuiltArchive, build_archive, tarball_filename};
 use crate::commands::{encode_package_name, ensure_registry_auth};
 use aube_manifest::PackageJson;
 use aube_registry::client::RegistryClient;
@@ -380,16 +380,12 @@ async fn publish_one(
         .as_deref()
         .ok_or_else(|| miette!("publish: {}/package.json has no `name`", pkg_dir.display()))?
         .to_string();
-    let version = manifest
-        .version
-        .as_deref()
-        .ok_or_else(|| {
-            miette!(
-                "publish: {}/package.json has no `version`",
-                pkg_dir.display()
-            )
-        })?
-        .to_string();
+    let version = normalize_publish_version(manifest.version.as_deref().ok_or_else(|| {
+        miette!(
+            "publish: {}/package.json has no `version`",
+            pkg_dir.display()
+        )
+    })?);
 
     // publishConfig in package.json overrides both registry and tag
     // if the user has not passed CLI flags. pnpm and npm both honor
@@ -428,7 +424,8 @@ async fn publish_one(
         // hitting the registry, matching pnpm. `publish` / `postpublish`
         // are skipped — nothing was actually uploaded.
         run_publish_lifecycle_pre(pkg_dir, &manifest, args.ignore_scripts).await?;
-        let archive = build_archive(pkg_dir)?;
+        let mut archive = build_archive(pkg_dir)?;
+        normalize_archive_for_publish(&mut archive);
         super::pack::run_pack_lifecycle_post(pkg_dir, args.ignore_scripts).await?;
         // `--dry-run --provenance` is a common "does my CI actually have
         // OIDC wired up?" smoke test. Silently skipping the OIDC probe
@@ -478,7 +475,8 @@ async fn publish_one(
     // every package is already on the registry, the loop never reaches
     // this point and the whole fanout is script-free and gzip-free.
     run_publish_lifecycle_pre(pkg_dir, &manifest, args.ignore_scripts).await?;
-    let archive = build_archive(pkg_dir)?;
+    let mut archive = build_archive(pkg_dir)?;
+    normalize_archive_for_publish(&mut archive);
     super::pack::run_pack_lifecycle_post(pkg_dir, args.ignore_scripts).await?;
 
     // Re-read the manifest *after* the pre-pack chain. Publish-time
@@ -578,6 +576,20 @@ async fn publish_one(
         archive: Some(archive),
         status: PublishStatus::Published,
     })
+}
+
+fn normalize_archive_for_publish(archive: &mut BuiltArchive) {
+    let version = normalize_publish_version(&archive.version);
+    if version != archive.version {
+        archive.version = version;
+        archive.filename = tarball_filename(&archive.name, &archive.version);
+    }
+}
+
+fn normalize_publish_version(version: &str) -> String {
+    node_semver::Version::parse(version)
+        .map(|v| v.to_string())
+        .unwrap_or_else(|_| version.to_string())
 }
 
 #[derive(Debug, Deserialize)]
@@ -998,6 +1010,7 @@ fn build_publish_body(
     let obj = version_doc
         .as_object_mut()
         .ok_or_else(|| miette!("manifest did not serialize to a JSON object"))?;
+    obj.insert("version".into(), archive.version.clone().into());
     obj.insert(
         "_id".into(),
         format!("{}@{}", archive.name, archive.version).into(),
@@ -1269,6 +1282,52 @@ mod tests {
             json.get("integrity")
                 .and_then(|v| v.as_str())
                 .is_some_and(|s| s.starts_with("sha512-"))
+        );
+    }
+
+    #[test]
+    fn publish_normalizes_v_prefixed_semver_like_npm() {
+        assert_eq!(normalize_publish_version("v2026.5.16"), "2026.5.16");
+        assert_eq!(normalize_publish_version("1.2.3-beta.1"), "1.2.3-beta.1");
+        assert_eq!(normalize_publish_version("not-semver"), "not-semver");
+    }
+
+    #[test]
+    fn publish_body_uses_normalized_version_for_registry_metadata() {
+        let mut archive = BuiltArchive {
+            name: "@jdxcode/mise-linux-x64".to_string(),
+            version: "v2026.5.16".to_string(),
+            filename: "jdxcode-mise-linux-x64-v2026.5.16.tgz".to_string(),
+            files: vec!["package.json".to_string()],
+            unpacked_size: 42,
+            tarball: b"archive bytes".to_vec(),
+        };
+        normalize_archive_for_publish(&mut archive);
+
+        let manifest: PackageJson = serde_json::from_value(serde_json::json!({
+            "name": "@jdxcode/mise-linux-x64",
+            "version": "v2026.5.16"
+        }))
+        .unwrap();
+        let body = build_publish_body(
+            &archive,
+            &manifest,
+            "https://registry.npmjs.org/",
+            "latest",
+            Some("public"),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(archive.version, "2026.5.16");
+        assert_eq!(archive.filename, "jdxcode-mise-linux-x64-2026.5.16.tgz");
+        assert_eq!(body["dist-tags"]["latest"], "2026.5.16");
+        assert!(body["versions"].get("2026.5.16").is_some());
+        assert!(body["versions"].get("v2026.5.16").is_none());
+        assert_eq!(body["versions"]["2026.5.16"]["version"], "2026.5.16");
+        assert_eq!(
+            body["versions"]["2026.5.16"]["_id"],
+            "@jdxcode/mise-linux-x64@2026.5.16"
         );
     }
 
