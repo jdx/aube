@@ -18,10 +18,9 @@ on:
       mode:
         description: "Which publish path to exercise"
         required: true
-        default: "both"
+        default: "oidc"
         type: choice
         options:
-          - both
           - oidc
           - otp
       otp:
@@ -54,7 +53,10 @@ jobs:
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
-          package-manager-cache: false
+
+      - uses: namespacelabs/nscloud-cache-action@15799a6b54e5765f85b2aac25b3f0df43ed571c0 # v1
+        with:
+          cache: rust
 
       - name: Build aube
         run: cargo build -p aube
@@ -82,7 +84,7 @@ jobs:
           echo "stage=$STAGE" >> "$GITHUB_OUTPUT"
 
       - name: Publish with npm Trusted Publishing
-        if: ${{ env.MODE == 'both' || env.MODE == 'oidc' }}
+        if: ${{ env.MODE == 'oidc' }}
         env:
           STAGE: ${{ steps.pkg.outputs.stage }}
           VERSION: ${{ steps.pkg.outputs.version }}
@@ -117,7 +119,7 @@ jobs:
           exit 0
 
       - name: Publish with token and OTP
-        if: ${{ env.MODE == 'both' || env.MODE == 'otp' }}
+        if: ${{ env.MODE == 'otp' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_OTP: ${{ inputs.otp }}
@@ -171,13 +173,13 @@ jobs:
         run: |
           set -euo pipefail
           failed=0
-          if [ "$MODE" = "both" ] || [ "$MODE" = "oidc" ]; then
+          if [ "$MODE" = "oidc" ]; then
             if [ "${OIDC_STATUS:-missing}" != "0" ]; then
               echo "::error::OIDC smoke failed: ${OIDC_STATUS:-missing}"
               failed=1
             fi
           fi
-          if [ "$MODE" = "both" ] || [ "$MODE" = "otp" ]; then
+          if [ "$MODE" = "otp" ]; then
             if [ "${OTP_STATUS:-missing}" != "0" ]; then
               echo "::error::OTP smoke failed: ${OTP_STATUS:-missing}"
               failed=1
