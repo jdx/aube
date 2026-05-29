@@ -1,6 +1,6 @@
 use crate::{Error, PackageIndex};
-use sha1::Sha1;
-use sha2::{Digest, Sha256, Sha384, Sha512};
+use sha1::{Digest as _, Sha1};
+use sha2::{Digest as _, Sha256, Sha384, Sha512};
 use std::cell::RefCell;
 
 thread_local! {
