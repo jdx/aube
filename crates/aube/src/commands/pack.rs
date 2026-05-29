@@ -198,7 +198,7 @@ pub(crate) async fn run_root_lifecycle_script(
 
 /// Sanitize a package name into the tarball filename stem.
 /// `@scope/foo` -> `scope-foo`, `foo` -> `foo`.
-fn tarball_filename(name: &str, version: &str) -> String {
+pub(crate) fn tarball_filename(name: &str, version: &str) -> String {
     let sanitized = name.replace('@', "").replace('/', "-");
     format!("{sanitized}-{version}.tgz")
 }
