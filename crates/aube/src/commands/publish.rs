@@ -28,7 +28,9 @@
 //! "already published" error, leaving the registry itself to decide
 //! whether a republish is allowed.
 
-use crate::commands::pack::{BuiltArchive, build_archive, tarball_filename};
+use crate::commands::pack::{
+    BuiltArchive, build_archive, build_archive_with_package_json, tarball_filename,
+};
 use crate::commands::{encode_package_name, ensure_registry_auth};
 use aube_manifest::PackageJson;
 use aube_registry::client::RegistryClient;
@@ -424,8 +426,7 @@ async fn publish_one(
         // hitting the registry, matching pnpm. `publish` / `postpublish`
         // are skipped — nothing was actually uploaded.
         run_publish_lifecycle_pre(pkg_dir, &manifest, args.ignore_scripts).await?;
-        let mut archive = build_archive(pkg_dir)?;
-        normalize_archive_for_publish(&mut archive);
+        let archive = build_archive_for_publish(pkg_dir)?;
         super::pack::run_pack_lifecycle_post(pkg_dir, args.ignore_scripts).await?;
         // `--dry-run --provenance` is a common "does my CI actually have
         // OIDC wired up?" smoke test. Silently skipping the OIDC probe
@@ -475,8 +476,7 @@ async fn publish_one(
     // every package is already on the registry, the loop never reaches
     // this point and the whole fanout is script-free and gzip-free.
     run_publish_lifecycle_pre(pkg_dir, &manifest, args.ignore_scripts).await?;
-    let mut archive = build_archive(pkg_dir)?;
-    normalize_archive_for_publish(&mut archive);
+    let archive = build_archive_for_publish(pkg_dir)?;
     super::pack::run_pack_lifecycle_post(pkg_dir, args.ignore_scripts).await?;
 
     // Re-read the manifest *after* the pre-pack chain. Publish-time
@@ -584,6 +584,32 @@ fn normalize_archive_for_publish(archive: &mut BuiltArchive) {
         archive.version = version;
         archive.filename = tarball_filename(&archive.name, &archive.version);
     }
+}
+
+fn build_archive_for_publish(pkg_dir: &Path) -> miette::Result<BuiltArchive> {
+    let manifest_path = pkg_dir.join("package.json");
+    let manifest_bytes = std::fs::read(&manifest_path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to read {}", manifest_path.display()))?;
+    let mut manifest_json: serde_json::Value =
+        serde_json::from_slice(&manifest_bytes).into_diagnostic()?;
+    let Some(raw_version) = manifest_json.get("version").and_then(|v| v.as_str()) else {
+        return build_archive(pkg_dir);
+    };
+    let version = normalize_publish_version(raw_version);
+    if version == raw_version {
+        return build_archive(pkg_dir);
+    }
+
+    if let Some(obj) = manifest_json.as_object_mut() {
+        obj.insert("version".into(), version.into());
+    }
+    let mut package_json = serde_json::to_vec_pretty(&manifest_json).into_diagnostic()?;
+    package_json.push(b'\n');
+
+    let mut archive = build_archive_with_package_json(pkg_dir, Some(package_json))?;
+    normalize_archive_for_publish(&mut archive);
+    Ok(archive)
 }
 
 fn normalize_publish_version(version: &str) -> String {
@@ -1329,6 +1355,37 @@ mod tests {
             body["versions"]["2026.5.16"]["_id"],
             "@jdxcode/mise-linux-x64@2026.5.16"
         );
+    }
+
+    #[test]
+    fn publish_archive_embeds_normalized_package_json_version() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("package.json"),
+            r#"{"name":"@jdxcode/mise-linux-x64","version":"v2026.5.16"}"#,
+        )
+        .unwrap();
+        std::fs::write(tmp.path().join("README.md"), "mise").unwrap();
+
+        let archive = build_archive_for_publish(tmp.path()).unwrap();
+        let gz = flate2::read::GzDecoder::new(archive.tarball.as_slice());
+        let mut tar = tar::Archive::new(gz);
+        let mut package_json = None;
+        for entry in tar.entries().unwrap() {
+            let mut entry = entry.unwrap();
+            if entry.path().unwrap() == std::path::Path::new("package/package.json") {
+                let mut contents = String::new();
+                std::io::Read::read_to_string(&mut entry, &mut contents).unwrap();
+                package_json = Some(contents);
+                break;
+            }
+        }
+        let package_json: serde_json::Value =
+            serde_json::from_str(&package_json.expect("package.json in tarball")).unwrap();
+
+        assert_eq!(archive.version, "2026.5.16");
+        assert_eq!(archive.filename, "jdxcode-mise-linux-x64-2026.5.16.tgz");
+        assert_eq!(package_json["version"], "2026.5.16");
     }
 
     #[test]
