@@ -15,11 +15,6 @@ name: publish-smoke
 #   publishing. The manual otp input is a fallback for quick re-runs.
 
 on:
-  push:
-    branches:
-      # Lets maintainers test changes to this workflow before it exists on
-      # main. Keep this narrow so normal feature branches never publish.
-      - test/npm-publish-smoke
   workflow_dispatch:
     inputs:
       mode:
@@ -49,7 +44,7 @@ jobs:
       id-token: write
     env:
       DIST_TAG: smoke
-      MODE: ${{ github.event_name == 'push' && 'both' || inputs.mode }}
+      MODE: ${{ inputs.mode }}
       OIDC_PACKAGE: "@endevco/aube-publish-oidc-smoke"
       OTP_PACKAGE: "@endevco/aube-publish-otp-smoke"
     steps:
