@@ -10,9 +10,7 @@ name: publish-smoke
 #   endevco/aube / .github/workflows/publish-smoke.yml
 # - @endevco/aube-publish-otp-smoke must be owned by the same npm account
 #   as the NPM_TOKEN repository secret. If that account requires 2FA for
-#   writes, prefer setting NPM_OTP_SECRET to that account's base32 TOTP
-#   seed so the workflow can generate a fresh OTP immediately before
-#   publishing. The manual otp input is a fallback for quick re-runs.
+#   writes, provide the current one-time password with the otp dispatch input.
 
 on:
   workflow_dispatch:
@@ -122,7 +120,6 @@ jobs:
         if: ${{ env.MODE == 'both' || env.MODE == 'otp' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_OTP_SECRET: ${{ secrets.NPM_OTP_SECRET }}
           NPM_OTP: ${{ inputs.otp }}
           STAGE: ${{ steps.pkg.outputs.stage }}
           VERSION: ${{ steps.pkg.outputs.version }}
@@ -132,9 +129,11 @@ jobs:
             echo "::error::NPM_TOKEN secret is required for the token+OTP smoke path"
             exit 1
           fi
-          if [ -n "${NPM_OTP:-}" ]; then
-            echo "::add-mask::$NPM_OTP"
+          if [ -z "${NPM_OTP:-}" ]; then
+            echo "::error::otp workflow_dispatch input is required for the token+OTP smoke path"
+            exit 1
           fi
+          echo "::add-mask::$NPM_OTP"
           cp -R "$STAGE" "$RUNNER_TEMP/aube-publish-otp"
           cd "$RUNNER_TEMP/aube-publish-otp"
           node - "$OTP_PACKAGE" "$VERSION" <<'NODE'
@@ -153,13 +152,7 @@ jobs:
             --provenance
             --registry https://registry.npmjs.org/
           )
-          if [ -n "${NPM_OTP:-}" ]; then
-            args+=(--otp "$NPM_OTP")
-          elif [ -n "${NPM_OTP_SECRET:-}" ]; then
-            OTP="$(node "$GITHUB_WORKSPACE/npm/scripts/totp.mjs" "$NPM_OTP_SECRET")"
-            echo "::add-mask::$OTP"
-            args+=(--otp "$OTP")
-          fi
+          args+=(--otp "$NPM_OTP")
           set +e
           "$GITHUB_WORKSPACE/target/debug/aube" "${args[@]}"
           rc=$?
