@@ -23,13 +23,9 @@ impl AubeConfigEdit {
                     .wrap_err_with(|| format!("failed to read {}", path.display()));
             }
         };
-        let value = raw
-            .parse::<toml::Value>()
+        let table = toml::from_str::<toml::Table>(&raw)
             .into_diagnostic()
             .wrap_err_with(|| format!("failed to parse {}", path.display()))?;
-        let toml::Value::Table(table) = value else {
-            return Err(miette!("{} must contain a TOML table", path.display()));
-        };
         Ok(Self { table })
     }
 
