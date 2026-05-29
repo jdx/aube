@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.1](https://github.com/endevco/aube/compare/aube-codes-v1.16.0...aube-codes-v1.16.1) - 2026-05-29
+
+### Other
+
+- refresh benchmarks for v1.16.0 ([#787](https://github.com/endevco/aube/pull/787))
+
+### Security
+
+- *(registry)* scope unqualified credentials ([#801](https://github.com/endevco/aube/pull/801))
+- *(linker)* reject unsafe package aliases ([#800](https://github.com/endevco/aube/pull/800))
+
 ## [1.16.0](https://github.com/endevco/aube/compare/aube-codes-v1.15.0...aube-codes-v1.16.0) - 2026-05-25
 
 ### Other

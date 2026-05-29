@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.1](https://github.com/endevco/aube/compare/aube-store-v1.16.0...aube-store-v1.16.1) - 2026-05-29
+
+### Other
+
+- *(deps)* bump sha1 from 0.10.6 to 0.11.0 ([#797](https://github.com/endevco/aube/pull/797))
+- refresh benchmarks for v1.16.0 ([#787](https://github.com/endevco/aube/pull/787))
+
 ## [1.16.0](https://github.com/endevco/aube/compare/aube-store-v1.15.0...aube-store-v1.16.0) - 2026-05-25
 
 ### Added

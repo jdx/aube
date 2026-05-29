@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.1](https://github.com/endevco/aube/compare/aube-registry-v1.16.0...aube-registry-v1.16.1) - 2026-05-29
+
+### Other
+
+- refresh benchmarks for v1.16.0 ([#787](https://github.com/endevco/aube/pull/787))
+
+### Security
+
+- *(registry)* scope unqualified credentials ([#801](https://github.com/endevco/aube/pull/801))
+
 ## [1.16.0](https://github.com/endevco/aube/compare/aube-registry-v1.15.0...aube-registry-v1.16.0) - 2026-05-25
 
 ### Fixed
