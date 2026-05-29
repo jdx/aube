@@ -116,7 +116,8 @@ jobs:
           set -e
           echo "OIDC_STATUS=$rc" >> "$GITHUB_ENV"
           if [ "$rc" -eq 0 ]; then
-            npm view "$OIDC_PACKAGE@$VERSION" version
+            npm view "$OIDC_PACKAGE@$VERSION" version || \
+              echo "::warning::OIDC package published, but npm view did not find it yet"
           else
             echo "::error::OIDC publish failed with exit code $rc"
           fi
@@ -170,7 +171,8 @@ jobs:
           set -e
           echo "OTP_STATUS=$rc" >> "$GITHUB_ENV"
           if [ "$rc" -eq 0 ]; then
-            npm view "$OTP_PACKAGE@$VERSION" version
+            npm view "$OTP_PACKAGE@$VERSION" version || \
+              echo "::warning::OTP package published, but npm view did not find it yet"
           else
             echo "::error::OTP publish failed with exit code $rc"
           fi
