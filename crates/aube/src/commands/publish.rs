@@ -39,6 +39,7 @@ use miette::{Context, IntoDiagnostic, miette};
 use reqwest::Url;
 use serde::Deserialize;
 use sha1::Digest as _;
+use sha2::Digest as _;
 use sha2::Sha512;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};

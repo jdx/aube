@@ -376,6 +376,24 @@ _link_workspace_packages_fixture() {
 	assert_link_exists node_modules/project-4
 }
 
+@test "aube add: linkWorkspacePackages=deep writes workspace:^ for siblings" {
+	_link_workspace_packages_fixture
+	cat >pnpm-workspace.yaml <<-'EOF'
+		packages:
+		  - "**"
+		  - "!store/**"
+		linkWorkspacePackages: deep
+	EOF
+
+	cd project-1
+	run aube add project-2
+	assert_success
+
+	run grep -F '"project-2": "workspace:^"' package.json
+	assert_success
+	assert_link_exists node_modules/project-2
+}
+
 # Ported from pnpm/test/monorepo/index.ts:156
 # ('linking a package inside a monorepo with --link-workspace-packages
 # when installing new dependencies and save-workspace-protocol is

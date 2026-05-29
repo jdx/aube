@@ -1197,6 +1197,40 @@ mod tests {
     }
 
     #[test]
+    fn link_workspace_packages_accepts_deep_from_workspace_yaml() {
+        let npmrc: Vec<(String, String)> = Vec::new();
+        let ws = raw_yaml("linkWorkspacePackages: deep\n");
+        let ctx = ResolveCtx::files_only(&npmrc, &ws);
+        assert_eq!(
+            resolved::link_workspace_packages(&ctx),
+            resolved::LinkWorkspacePackages::Deep
+        );
+    }
+
+    #[test]
+    fn link_workspace_packages_accepts_yaml_bool_values() {
+        let npmrc: Vec<(String, String)> = Vec::new();
+        let ws = raw_yaml("linkWorkspacePackages: true\n");
+        let ctx = ResolveCtx::files_only(&npmrc, &ws);
+        assert_eq!(
+            resolved::link_workspace_packages(&ctx),
+            resolved::LinkWorkspacePackages::True
+        );
+    }
+
+    #[test]
+    fn link_workspace_packages_accepts_deep_from_npmrc() {
+        let npmrc = entries(&[("link-workspace-packages", "deep")]);
+        let ws: std::collections::BTreeMap<String, yaml_serde::Value> =
+            std::collections::BTreeMap::new();
+        let ctx = ResolveCtx::files_only(&npmrc, &ws);
+        assert_eq!(
+            resolved::link_workspace_packages(&ctx),
+            resolved::LinkWorkspacePackages::Deep
+        );
+    }
+
+    #[test]
     fn npmrc_accepts_kebab_alias_for_camel_only_setting() {
         // `virtualStoreDirMaxLength` is declared in settings.toml
         // with the single npmrc key `virtualStoreDirMaxLength`. The

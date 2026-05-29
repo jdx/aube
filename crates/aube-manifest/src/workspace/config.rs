@@ -379,12 +379,12 @@ pub struct WorkspaceConfig {
 
     // -- Workspace-protocol settings --
     /// Resolve `aube add <name>` against local workspace siblings
-    /// before falling back to the registry. Wired through
-    /// `aube_settings::resolved::link_workspace_packages`; the typed
-    /// field exists so `meta::workspace_yaml_keys_...` sees the key
-    /// as a real field and doesn't fall through to `extra`.
+    /// before falling back to the registry. The yaml value can be the
+    /// booleans `true` / `false` or the string `"deep"`, so the typed
+    /// field lands at `yaml_serde::Value` and the resolver normalizes
+    /// via `aube_settings::resolved::LinkWorkspacePackages`.
     #[serde(default)]
-    pub link_workspace_packages: Option<bool>,
+    pub link_workspace_packages: Option<yaml_serde::Value>,
 
     /// Spec form written to `package.json` when `aube add` matches a
     /// workspace sibling. The yaml value can be the booleans `true` /

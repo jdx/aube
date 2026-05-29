@@ -76,28 +76,6 @@ impl RegistryClient {
     pub fn has_resolved_auth_for(&self, registry_url: &str) -> bool {
         self.registry_auth_token_for(registry_url).is_some()
             || self.config.basic_auth_for(registry_url).is_some()
-            || self.config.global_auth_token.is_some()
-    }
-
-    /// Cached equivalent of the previous free `same_host` function.
-    /// The default registry never changes for the lifetime of the
-    /// client, so the previous per-call `Url::parse(&self.config.registry)`
-    /// was pure waste on every authed request. Comparison shape
-    /// (scheme + host + port) is preserved byte-for-byte to keep the
-    /// auth-leak guard semantics identical.
-    fn same_host_as_default(&self, registry_url: &str) -> bool {
-        let parsed_default = self
-            .default_registry_parsed
-            .get_or_init(|| reqwest::Url::parse(&self.config.registry).ok());
-        let Some(a) = parsed_default.as_ref() else {
-            return false;
-        };
-        let Ok(b) = reqwest::Url::parse(registry_url) else {
-            return false;
-        };
-        a.scheme() == b.scheme()
-            && a.host_str() == b.host_str()
-            && a.port_or_known_default() == b.port_or_known_default()
     }
 
     /// Attach auth headers to any `RequestBuilder` keyed off the registry
@@ -114,14 +92,6 @@ impl RegistryClient {
             req.bearer_auth(token)
         } else if let Some(auth) = self.config.basic_auth_for(registry_url) {
             req.header("Authorization", format!("Basic {auth}"))
-        } else if let Some(token) = self.config.global_auth_token.as_ref()
-            && self.same_host_as_default(registry_url)
-        {
-            // Only send the default _authToken when the request hits the
-            // default registry. Stops a malicious scoped registry or a
-            // packument with a dist.tarball pointing at attacker.example
-            // from grabbing the user's npmjs token.
-            req.bearer_auth(token)
         } else {
             req
         }

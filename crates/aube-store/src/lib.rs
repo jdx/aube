@@ -34,9 +34,9 @@ pub(crate) use tarball::{
 };
 
 #[cfg(test)]
-use sha1::Sha1;
+use sha1::{Digest as _, Sha1};
 #[cfg(test)]
-use sha2::{Digest, Sha256, Sha384, Sha512};
+use sha2::{Digest as _, Sha256, Sha384, Sha512};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;

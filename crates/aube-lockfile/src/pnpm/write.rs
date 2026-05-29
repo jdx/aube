@@ -271,7 +271,7 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                 } else {
                     Some(t.integrity.clone())
                 },
-                git_hosted: t.git_hosted || tarball_url_is_hosted_git(&t.url),
+                git_hosted: t.git_hosted || super::tarball_url_is_hosted_git(&t.url),
                 directory: None,
                 tarball: Some(t.url.clone()),
                 commit: None,
@@ -291,7 +291,7 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                         || pkg
                             .tarball_url
                             .as_deref()
-                            .is_some_and(tarball_url_is_hosted_git),
+                            .is_some_and(super::tarball_url_is_hosted_git),
                     directory: None,
                     tarball: pkg.tarball_url.clone(),
                     commit: None,
@@ -306,7 +306,7 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                     || pkg
                         .tarball_url
                         .as_deref()
-                        .is_some_and(tarball_url_is_hosted_git),
+                        .is_some_and(super::tarball_url_is_hosted_git),
                 directory: None,
                 // Emit the full registry tarball URL when the setting
                 // opts in. JSR packages are the exception: npm.jsr.io
@@ -531,13 +531,6 @@ fn registry_tarball_url_is_not_derivable(
         .split_once('#')
         .map_or(path_only, |(path, _)| path);
     !path_only.ends_with(&expected_suffix)
-}
-
-fn tarball_url_is_hosted_git(url: &str) -> bool {
-    url.contains("://codeload.github.com/")
-        || url.contains("://npm.pkg.github.com/")
-        || (url.contains("://gitlab.com/") && url.contains("/-/archive/"))
-        || (url.contains("://bitbucket.org/") && url.contains("/get/"))
 }
 
 fn pruned_time_entries(

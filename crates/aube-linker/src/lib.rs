@@ -27,7 +27,9 @@ mod tests;
 pub use error::Error;
 pub use hoisted::HoistedPlacements;
 pub use link::build_nested_link_targets;
-pub(crate) use materialize::{invalidate_stale_index_for_package, validate_index_key};
+pub(crate) use materialize::{
+    invalidate_stale_index_for_package, validate_index_key, validate_package_link_name,
+};
 pub use patches::Patches;
 pub(crate) use patches::apply_multi_file_patch;
 pub use pool::default_linker_parallelism;

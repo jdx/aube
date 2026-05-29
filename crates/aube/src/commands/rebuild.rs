@@ -130,7 +130,7 @@ pub async fn run(
                     ));
                 }
                 aube_settings::resolved::NodeLinker::Hoisted => Some(
-                    aube_linker::HoistedPlacements::from_graph(&cwd, &graph, &modules_dir_name),
+                    aube_linker::HoistedPlacements::from_graph(&cwd, &graph, &modules_dir_name)?,
                 ),
                 aube_settings::resolved::NodeLinker::Isolated => None,
             };

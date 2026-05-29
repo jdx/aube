@@ -331,6 +331,12 @@
       "exit_code": 91
     },
     {
+      "name": "ERR_AUBE_UNSAFE_PACKAGE_NAME",
+      "category": "Misc / safety",
+      "description": "A package/dependency alias would escape its `node_modules` slot if linked.",
+      "exit_code": 92
+    },
+    {
       "name": "ERR_AUBE_PATCHES_TRACKING_WRITE",
       "category": "Misc / safety",
       "description": "Couldn't write `.aube-applied-patches.json` after applying patches. Non-fatal; next install may miss stale patched entries.",
@@ -516,6 +522,12 @@
       "name": "WARN_AUBE_INVALID_MAXSOCKETS",
       "category": "Registry config (trust gates)",
       "description": "`maxsockets` was 0 or non-numeric.",
+      "exit_code": null
+    },
+    {
+      "name": "WARN_AUBE_UNSCOPED_AUTH_RESCOPED",
+      "category": "Registry config (trust gates)",
+      "description": "An unscoped registry credential was pinned to the registry declared by the same config source.",
       "exit_code": null
     },
     {
