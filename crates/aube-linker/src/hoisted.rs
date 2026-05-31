@@ -68,6 +68,7 @@ impl HoistedPlacements {
         root_dir: &Path,
         graph: &LockfileGraph,
         modules_dir_name: &str,
+        hoisting_limits: HoistingLimits,
     ) -> Result<Self, Error> {
         let mut placements = Self::default();
         for (importer_path, deps) in &graph.importers {
@@ -80,7 +81,7 @@ impl HoistedPlacements {
                 root_dir.join(importer_path)
             };
             let nm = importer_dir.join(modules_dir_name);
-            let plan = plan_importer(&nm, deps, graph, HoistingLimits::None)?;
+            let plan = plan_importer(&nm, deps, graph, hoisting_limits)?;
             for node in &plan.nodes {
                 let (Some(dep_path), Some(pkg_dir)) = (&node.dep_path, &node.pkg_dir) else {
                     continue;
@@ -144,7 +145,6 @@ struct TreeNode {
     parent: Option<usize>,
     children: BTreeMap<String, usize>,
     dep_path: Option<String>,
-    depth: usize,
 }
 
 /// Arena-backed placement tree.
@@ -166,7 +166,6 @@ impl PlacementPlan {
             parent: None,
             children: BTreeMap::new(),
             dep_path: None,
-            depth: 0,
         };
         Self {
             nodes: vec![root],
@@ -224,7 +223,6 @@ impl PlacementPlan {
             parent: Some(candidate),
             children: BTreeMap::new(),
             dep_path: Some(dep_path.to_string()),
-            depth: self.nodes[candidate].depth + 1,
         });
         self.nodes[candidate]
             .children
@@ -540,6 +538,40 @@ mod tests {
         assert_eq!(
             package_dir(&limited, "left-pad@1.0.0"),
             nm.join("app/node_modules/left-pad")
+        );
+    }
+
+    #[test]
+    fn from_graph_respects_dependencies_limit() {
+        let root = tempfile::tempdir().unwrap();
+        let nm = root.path().join("node_modules");
+        let app_dir = nm.join("app");
+        let left_pad_dir = app_dir.join("node_modules/left-pad");
+        std::fs::create_dir_all(&left_pad_dir).unwrap();
+
+        let mut graph = LockfileGraph::default();
+        graph
+            .importers
+            .insert(".".into(), vec![dep("app", "app@1.0.0")]);
+        graph.packages.insert(
+            "app@1.0.0".into(),
+            pkg("app", "1.0.0", &[("left-pad", "1.0.0")]),
+        );
+        graph
+            .packages
+            .insert("left-pad@1.0.0".into(), pkg("left-pad", "1.0.0", &[]));
+
+        let placements = HoistedPlacements::from_graph(
+            root.path(),
+            &graph,
+            "node_modules",
+            HoistingLimits::Dependencies,
+        )
+        .unwrap();
+
+        assert_eq!(
+            placements.package_dir("left-pad@1.0.0"),
+            Some(left_pad_dir.as_path())
         );
     }
 }
