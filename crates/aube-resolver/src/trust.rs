@@ -78,7 +78,7 @@ fn is_approver(v: &serde_json::Value) -> bool {
         serde_json::Value::Null => false,
         serde_json::Value::String(s) => !s.is_empty(),
         serde_json::Value::Array(a) => !a.is_empty(),
-        serde_json::Value::Object(o) => !o.is_empty(),
+        serde_json::Value::Object(o) => !o.is_empty() && o.values().any(|v| !v.is_null()),
         serde_json::Value::Bool(b) => *b,
         serde_json::Value::Number(n) => {
             n.as_i64().is_some_and(|i| i != 0)
@@ -642,6 +642,8 @@ mod tests {
             serde_json::json!(""),
             serde_json::json!([]),
             serde_json::json!({}),
+            serde_json::json!({"name": null}),
+            serde_json::json!({"name": null, "email": null}),
         ] {
             v.approver = Some(malformed.clone());
             assert_eq!(
