@@ -297,13 +297,7 @@ pub(crate) fn plan_importer(
         }
         let child_floor = match hoisting_limits {
             HoistingLimits::None | HoistingLimits::Workspaces => plan.root_idx,
-            HoistingLimits::Dependencies => {
-                if requester == plan.root_idx {
-                    outcome.node_idx
-                } else {
-                    floor
-                }
-            }
+            HoistingLimits::Dependencies => outcome.node_idx,
         };
         for (dep_name, dep_tail) in &pkg.dependencies {
             let child_dep_path = format!("{dep_name}@{dep_tail}");
@@ -523,9 +517,13 @@ mod tests {
             "app@1.0.0".into(),
             pkg("app", "1.0.0", &[("left-pad", "1.0.0")]),
         );
+        graph.packages.insert(
+            "left-pad@1.0.0".into(),
+            pkg("left-pad", "1.0.0", &[("repeat", "1.0.0")]),
+        );
         graph
             .packages
-            .insert("left-pad@1.0.0".into(), pkg("left-pad", "1.0.0", &[]));
+            .insert("repeat@1.0.0".into(), pkg("repeat", "1.0.0", &[]));
         let root_deps = vec![dep("app", "app@1.0.0")];
 
         let unlimited = plan_importer(&nm, &root_deps, &graph, HoistingLimits::None).unwrap();
@@ -533,11 +531,16 @@ mod tests {
             package_dir(&unlimited, "left-pad@1.0.0"),
             nm.join("left-pad")
         );
+        assert_eq!(package_dir(&unlimited, "repeat@1.0.0"), nm.join("repeat"));
 
         let limited = plan_importer(&nm, &root_deps, &graph, HoistingLimits::Dependencies).unwrap();
         assert_eq!(
             package_dir(&limited, "left-pad@1.0.0"),
             nm.join("app/node_modules/left-pad")
+        );
+        assert_eq!(
+            package_dir(&limited, "repeat@1.0.0"),
+            nm.join("app/node_modules/left-pad/node_modules/repeat")
         );
     }
 
