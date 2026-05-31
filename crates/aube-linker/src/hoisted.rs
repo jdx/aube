@@ -191,13 +191,16 @@ impl PlacementPlan {
         // prevent placing a new package that high.
         let mut cursor = requester;
         loop {
-            if let Some(&existing) = self.nodes[cursor].children.get(name)
-                && self.nodes[existing].dep_path.as_deref() == Some(dep_path)
-            {
-                return Ok(PlaceOutcome {
-                    node_idx: existing,
-                    created: false,
-                });
+            if let Some(&existing) = self.nodes[cursor].children.get(name) {
+                if self.nodes[existing].dep_path.as_deref() == Some(dep_path) {
+                    return Ok(PlaceOutcome {
+                        node_idx: existing,
+                        created: false,
+                    });
+                }
+                // A nearer same-name package blocks Node from
+                // resolving to any matching package above it.
+                break;
             }
             match self.nodes[cursor].parent {
                 Some(p) => cursor = p,
@@ -580,6 +583,39 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn dependencies_limit_does_not_reuse_above_version_blocker() {
+        let nm = PathBuf::from("/project/node_modules");
+        let mut graph = LockfileGraph::default();
+        graph.packages.insert(
+            "app@1.0.0".into(),
+            pkg("app", "1.0.0", &[("shared", "2.0.0"), ("tool", "1.0.0")]),
+        );
+        graph.packages.insert(
+            "tool@1.0.0".into(),
+            pkg("tool", "1.0.0", &[("shared", "1.0.0")]),
+        );
+        graph
+            .packages
+            .insert("shared@1.0.0".into(), pkg("shared", "1.0.0", &[]));
+        graph
+            .packages
+            .insert("shared@2.0.0".into(), pkg("shared", "2.0.0", &[]));
+        let root_deps = vec![dep("shared", "shared@1.0.0"), dep("app", "app@1.0.0")];
+
+        let limited = plan_importer(&nm, &root_deps, &graph, HoistingLimits::Dependencies).unwrap();
+
+        let shared_v1_dirs: Vec<_> = limited
+            .nodes
+            .iter()
+            .filter(|node| node.dep_path.as_deref() == Some("shared@1.0.0"))
+            .filter_map(|node| node.pkg_dir.as_ref())
+            .collect();
+        assert_eq!(shared_v1_dirs.len(), 2);
+        assert!(shared_v1_dirs.contains(&&nm.join("shared")));
+        assert!(shared_v1_dirs.contains(&&nm.join("app/node_modules/tool/node_modules/shared")));
     }
 
     #[test]
