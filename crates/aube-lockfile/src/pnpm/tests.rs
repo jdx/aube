@@ -2570,11 +2570,11 @@ importers:
         specifier: https://registry.example.test/demo/-/demo-1.0.0.tgz
         version: https://registry.example.test/demo/-/demo-1.0.0.tgz
 packages:
-  demo@https://registry.example.test/demo/-/demo-1.0.0.tgz:
+  demo@https://registry.example.test/demo/-/demo-1.0.0.tgz(react@18.2.0):
     resolution: {integrity: sha512-demo, tarball: https://registry.example.test/demo/-/demo-1.0.0.tgz}
     version: 1.0.0
 snapshots:
-  demo@https://registry.example.test/demo/-/demo-1.0.0.tgz: {}
+  demo@https://registry.example.test/demo/-/demo-1.0.0.tgz(react@18.2.0): {}
 "#,
     )
     .unwrap();
