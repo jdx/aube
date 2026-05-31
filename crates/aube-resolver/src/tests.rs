@@ -591,6 +591,7 @@ fn make_version(name: &str, version: &str) -> VersionMetadata {
         bin: BTreeMap::new(),
         has_install_script: false,
         deprecated: None,
+        approver: None,
         npm_user: None,
     }
 }
