@@ -16,8 +16,9 @@ jobs:
   # On every push to main: run `release-plz release`. If the current
   # workspace version has no tag yet (because the release PR was just
   # merged), this tags `aube` as `v<version>`, opens a draft GitHub
-  # release, and publishes every workspace crate to crates.io in
-  # dependency order. Otherwise it's a no-op.
+  # release, and publishes every workspace crate to crates.io using
+  # crates.io trusted publishing in dependency order. Otherwise it's a
+  # no-op.
   release-plz-release:
     name: release-plz release
     runs-on: ubuntu-latest
@@ -27,6 +28,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write
+      id-token: write
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
@@ -43,7 +45,6 @@ jobs:
           command: release
         env:
           GITHUB_TOKEN: ${{ secrets.AUBE_GH_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       # The `releases` output is an array of every crate that was
       # published, in dependency order. Since aube depends on all
       # 9 other internal crates, it is the LAST entry — and only it
