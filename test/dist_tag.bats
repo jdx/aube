@@ -28,6 +28,7 @@ teardown() {
 	run aube dist-tag add --help
 	assert_success
 	assert_output --partial "name@version"
+	assert_output --partial "--otp"
 }
 
 @test "aube dist-tag add rejects specs without a version" {
@@ -67,4 +68,5 @@ teardown() {
 	run aube dist-tag remove --help
 	assert_success
 	assert_output --partial "Remove a dist-tag"
+	assert_output --partial "--otp"
 }

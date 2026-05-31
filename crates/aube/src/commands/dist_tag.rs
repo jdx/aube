@@ -43,6 +43,9 @@ pub enum DistTagCommand {
         spec: String,
         /// Tag to create or update. Defaults to `latest`.
         tag: Option<String>,
+        /// One-time password from a 2FA authenticator; sent as `npm-otp`.
+        #[arg(long)]
+        otp: Option<String>,
     },
     /// List every dist-tag for a package.
     ///
@@ -62,19 +65,22 @@ pub enum DistTagCommand {
         package: String,
         /// Tag to remove.
         tag: String,
+        /// One-time password from a 2FA authenticator; sent as `npm-otp`.
+        #[arg(long)]
+        otp: Option<String>,
     },
 }
 
 pub async fn run(args: DistTagArgs) -> miette::Result<()> {
     args.network.install_overrides();
     match args.command {
-        DistTagCommand::Add { spec, tag } => add(&spec, tag.as_deref()).await,
-        DistTagCommand::Rm { package, tag } => rm(&package, &tag).await,
+        DistTagCommand::Add { spec, tag, otp } => add(&spec, tag.as_deref(), otp.as_deref()).await,
+        DistTagCommand::Rm { package, tag, otp } => rm(&package, &tag, otp.as_deref()).await,
         DistTagCommand::Ls { package } => ls(package.as_deref()).await,
     }
 }
 
-async fn add(spec: &str, tag: Option<&str>) -> miette::Result<()> {
+async fn add(spec: &str, tag: Option<&str>, otp: Option<&str>) -> miette::Result<()> {
     let (name, version) = split_name_spec(spec);
     let version = version.ok_or_else(|| {
         miette!(
@@ -92,7 +98,7 @@ async fn add(spec: &str, tag: Option<&str>) -> miette::Result<()> {
     let client = make_client(&cwd);
 
     client
-        .put_dist_tag(name, tag, version)
+        .put_dist_tag(name, tag, version, otp)
         .await
         .map_err(|e| match e {
             aube_registry::Error::NotFound(n) => miette!("package not found: {n}"),
@@ -106,7 +112,7 @@ async fn add(spec: &str, tag: Option<&str>) -> miette::Result<()> {
     Ok(())
 }
 
-async fn rm(package: &str, tag: &str) -> miette::Result<()> {
+async fn rm(package: &str, tag: &str, otp: Option<&str>) -> miette::Result<()> {
     let (name, version_spec) = split_name_spec(package);
     if version_spec.is_some() {
         return Err(miette!(
@@ -118,7 +124,7 @@ async fn rm(package: &str, tag: &str) -> miette::Result<()> {
     let client = make_client(&cwd);
 
     client
-        .delete_dist_tag(name, tag)
+        .delete_dist_tag(name, tag, otp)
         .await
         .map_err(|e| match e {
             aube_registry::Error::NotFound(_) => {
