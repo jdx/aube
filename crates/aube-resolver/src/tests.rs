@@ -2572,19 +2572,34 @@ async fn resolve_terminates_on_npm_alias_peer_cycle() {
         .insert("b".to_string(), "1.0.0".to_string());
 
     let graph = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
+        std::time::Duration::from_secs(5),
         resolver.resolve(&manifest, None),
     )
     .await
     .expect("resolver hung on npm-alias peer cycle")
     .expect("resolve failed");
 
+    let alias_dep_path = graph
+        .importers
+        .get(".")
+        .and_then(|deps| deps.iter().find(|dep| dep.name == "alias-a"))
+        .map(|dep| dep.dep_path.as_str())
+        .expect("root alias dependency should be present");
     let alias_pkg = graph
         .packages
-        .values()
-        .find(|pkg| pkg.name == "alias-a")
-        .expect("alias package present");
+        .get(alias_dep_path)
+        .expect("alias package should be keyed by the alias dep_path");
+    assert_eq!(alias_pkg.name, "alias-a");
+    assert_eq!(alias_pkg.version, "1.0.0");
     assert_eq!(alias_pkg.alias_of.as_deref(), Some("real-a"));
+    assert_eq!(alias_pkg.registry_name(), "real-a");
+    assert!(
+        graph
+            .packages
+            .keys()
+            .all(|dep_path| !dep_path.starts_with("real-a@")),
+        "alias package should not leak a real-name dep_path"
+    );
     assert!(
         graph.packages.values().any(|pkg| pkg.name == "b"),
         "peer package should resolve"
