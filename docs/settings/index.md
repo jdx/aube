@@ -37,6 +37,7 @@ Aube generates this page from [`settings.toml`](https://github.com/endevco/aube/
 | [`registries`](#setting-registries) | `object` | Registry URLs, including scoped registry overrides. |
 | [`hoist`](#setting-hoist) | `bool` | Hoist all dependencies to the hidden modules directory. |
 | [`hoistWorkspacePackages`](#setting-hoistworkspacepackages) | `bool` | Symlink workspace packages into node_modules. |
+| [`hoistingLimits`](#setting-hoistinglimits) | `"none" \| "workspaces" \| "dependencies"` | Limit how far dependencies are hoisted in nodeLinker=hoisted installs. |
 | [`hoistPattern`](#setting-hoistpattern) | `list<string>` | Packages to hoist to the hidden modules directory. |
 | [`publicHoistPattern`](#setting-publichoistpattern) | `list<string>` | Packages to hoist directly to the root node_modules. |
 | [`shamefullyHoist`](#setting-shamefullyhoist) | `bool` | Hoist all dependencies to the root node_modules (shortcut for publicHoistPattern=["*"]). |
@@ -732,6 +733,30 @@ depends on, matching pnpm. When false, those symlinks are omitted —
 cross-importer `workspace:` dependencies still resolve through the
 lockfile, but a top-level `require('<ws-pkg>')` from a package that
 doesn't declare the workspace dep stops working.
+
+### `hoistingLimits` {#setting-hoistinglimits}
+
+Limit how far dependencies are hoisted in nodeLinker=hoisted installs.
+
+- Type: `"none" | "workspaces" | "dependencies"`
+- Default: `"none"`
+- Environment: `npm_config_hoisting_limits`, `NPM_CONFIG_HOISTING_LIMITS`, `AUBE_HOISTING_LIMITS`
+- .npmrc keys: `hoistingLimits`, `hoisting-limits`
+- Workspace YAML keys: `hoistingLimits`
+
+Controls how far packages can be promoted when `nodeLinker=hoisted` is
+active, mirroring Yarn's `nmHoistingLimits` and pnpm's
+`hoistingLimits` setting:
+
+- `none`: hoist as far as possible (default).
+- `workspaces`: hoist only as far as each workspace package. Aube plans
+  hoisted installs per physical importer, so this currently matches
+  `none`.
+- `dependencies`: hoist only up to each workspace package's direct
+  dependencies. Transitive packages stay under the direct dependency
+  that introduced them instead of being promoted to the importer root.
+
+Ignored by the default isolated linker.
 
 ### `hoistPattern` {#setting-hoistpattern}
 
@@ -2837,4 +2862,3 @@ Examples:
 
 - `AUBE_NO_AUTO_INSTALL=1 aube run dev`
 - `echo 'aubeNoAutoInstall=true' >> .npmrc`
-

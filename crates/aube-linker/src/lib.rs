@@ -62,6 +62,20 @@ pub enum NodeLinker {
     Hoisted,
 }
 
+/// Limit how far packages may be promoted in `NodeLinker::Hoisted`.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum HoistingLimits {
+    /// Hoist as far as possible.
+    #[default]
+    None,
+    /// Aube plans hoisted installs per physical importer, so this is
+    /// currently equivalent to `None`.
+    Workspaces,
+    /// Do not hoist transitives above the direct dependency that
+    /// introduced them.
+    Dependencies,
+}
+
 /// Links packages from the global store into a project's node_modules/.
 ///
 /// Uses pnpm-compatible symlink layout backed by a global virtual store:
@@ -146,6 +160,10 @@ pub struct Linker {
     /// lockfile's workspace protocol, but plain `require('<ws-pkg>')`
     /// from the root stops working. Default true.
     hoist_workspace_packages: bool,
+    /// pnpm's `hoistingLimits` for `node-linker=hoisted`. Isolated
+    /// linking ignores this setting because hidden/public hoisting is
+    /// controlled by the separate `hoist*` family above.
+    pub(crate) hoisting_limits: HoistingLimits,
     /// pnpm's `dedupe-direct-deps`: when true, the linker skips
     /// creating a per-importer `node_modules/<name>` symlink for a
     /// direct dep whose root importer already declares the same

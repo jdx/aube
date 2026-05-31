@@ -958,6 +958,10 @@ fn hash_settings(project_dir: &Path, cli_flags: &[(String, String)]) -> String {
     hasher.update(format!("virtual_store_only={virtual_store_only}\0").as_bytes());
     let hoist_workspace_packages = aube_settings::resolved::hoist_workspace_packages(&ctx);
     hasher.update(format!("hoist_workspace_packages={hoist_workspace_packages}\0").as_bytes());
+    let hoisting_limits = aube_settings::resolved::hoisting_limits(&ctx);
+    hasher.update(b"hoisting_limits=");
+    hasher.update(format!("{hoisting_limits:?}").as_bytes());
+    hasher.update(b"\0");
     let dedupe_direct_deps = aube_settings::resolved::dedupe_direct_deps(&ctx);
     hasher.update(format!("dedupe_direct_deps={dedupe_direct_deps}\0").as_bytes());
     let symlink = aube_settings::resolved::symlink(&ctx);

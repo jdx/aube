@@ -115,6 +115,10 @@ pub struct WorkspaceConfig {
     #[serde(default)]
     pub hoist_workspace_packages: Option<bool>,
 
+    /// Limit how far packages may be promoted in `nodeLinker=hoisted`.
+    #[serde(default)]
+    pub hoisting_limits: Option<String>,
+
     /// When true, the linker skips a workspace package's per-importer
     /// `node_modules/<name>` symlink if the workspace root already
     /// links the same package at the same resolved version. Default

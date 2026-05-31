@@ -5,7 +5,9 @@ use aube_lockfile::graph_hash::GraphHashes;
 use aube_store::Store;
 use std::path::{Path, PathBuf};
 
-use crate::{LinkStrategy, Linker, NodeLinker, Patches, default_linker_parallelism};
+use crate::{
+    HoistingLimits, LinkStrategy, Linker, NodeLinker, Patches, default_linker_parallelism,
+};
 
 impl Linker {
     pub fn new(store: &Store, strategy: LinkStrategy) -> Self {
@@ -32,6 +34,7 @@ impl Linker {
             hoist_patterns: vec![glob::Pattern::new("*").expect("'*' is a valid glob pattern")],
             hoist_negations: Vec::new(),
             hoist_workspace_packages: true,
+            hoisting_limits: HoistingLimits::None,
             dedupe_direct_deps: false,
             node_linker: NodeLinker::Isolated,
             link_concurrency: None,
@@ -197,6 +200,13 @@ impl Linker {
     /// parity).
     pub fn with_hoist_workspace_packages(mut self, on: bool) -> Self {
         self.hoist_workspace_packages = on;
+        self
+    }
+
+    /// Configure pnpm's `hoistingLimits` for `node-linker=hoisted`.
+    /// No-op for the default isolated linker.
+    pub fn with_hoisting_limits(mut self, limits: HoistingLimits) -> Self {
+        self.hoisting_limits = limits;
         self
     }
 
