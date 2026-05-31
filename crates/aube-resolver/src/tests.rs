@@ -2530,6 +2530,67 @@ async fn resolve_terminates_on_dependency_cycle() {
     );
 }
 
+// pnpm v11.5.0 fixed a dep-path calculation hang for an npm alias
+// participating in a peer cycle. Keep the fixture small but preserve
+// the shape: root installs `alias-a -> npm:real-a`, `real-a` peers on
+// `b`, and `b` peers back on the alias name while depending on the
+// same alias.
+#[tokio::test]
+async fn resolve_terminates_on_npm_alias_peer_cycle() {
+    let mut real_a = make_packument("real-a", &["1.0.0"], "1.0.0");
+    let real_a_meta = real_a.versions.get_mut("1.0.0").unwrap();
+    real_a_meta
+        .dependencies
+        .insert("b".to_string(), "1.0.0".to_string());
+    real_a_meta
+        .peer_dependencies
+        .insert("b".to_string(), "^1.0.0".to_string());
+
+    let mut b = make_packument("b", &["1.0.0"], "1.0.0");
+    let b_meta = b.versions.get_mut("1.0.0").unwrap();
+    b_meta
+        .dependencies
+        .insert("alias-a".to_string(), "npm:real-a@1.0.0".to_string());
+    b_meta
+        .peer_dependencies
+        .insert("alias-a".to_string(), "1.0.0".to_string());
+
+    // The RegistryClient is never hit because we pre-seed the cache.
+    let client = Arc::new(aube_registry::client::RegistryClient::new(
+        "http://127.0.0.1:0",
+    ));
+    let mut resolver = Resolver::new(client);
+    resolver.cache.insert("real-a".to_string(), real_a);
+    resolver.cache.insert("b".to_string(), b);
+
+    let mut manifest = PackageJson::default();
+    manifest
+        .dependencies
+        .insert("alias-a".to_string(), "npm:real-a@1.0.0".to_string());
+    manifest
+        .dependencies
+        .insert("b".to_string(), "1.0.0".to_string());
+
+    let graph = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        resolver.resolve(&manifest, None),
+    )
+    .await
+    .expect("resolver hung on npm-alias peer cycle")
+    .expect("resolve failed");
+
+    let alias_pkg = graph
+        .packages
+        .values()
+        .find(|pkg| pkg.name == "alias-a")
+        .expect("alias package present");
+    assert_eq!(alias_pkg.alias_of.as_deref(), Some("real-a"));
+    assert!(
+        graph.packages.values().any(|pkg| pkg.name == "b"),
+        "peer package should resolve"
+    );
+}
+
 #[tokio::test]
 async fn auto_install_peers_installs_missing_required_peer() {
     let mut consumer = make_packument("consumer", &["1.0.0"], "1.0.0");
