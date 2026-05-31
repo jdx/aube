@@ -758,6 +758,11 @@ active, mirroring Yarn's `nmHoistingLimits` and pnpm's
 
 Ignored by the default isolated linker.
 
+Examples:
+
+- `echo 'node-linker=hoisted' >> .npmrc`
+- `echo 'hoisting-limits=dependencies' >> .npmrc`
+
 ### `hoistPattern` {#setting-hoistpattern}
 
 Packages to hoist to the hidden modules directory.
@@ -2862,3 +2867,4 @@ Examples:
 
 - `AUBE_NO_AUTO_INSTALL=1 aube run dev`
 - `echo 'aubeNoAutoInstall=true' >> .npmrc`
+
