@@ -21,7 +21,7 @@ jobs:
   bench:
     name: Compare PR performance
     if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release-plz-')
-    runs-on: namespace-profile-endev-linux-amd64;overrides.cache-tag=aube-rust-linux
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -29,9 +29,10 @@ jobs:
           fetch-depth: 0
           submodules: recursive
           persist-credentials: false
-      - uses: namespacelabs/nscloud-cache-action@15799a6b54e5765f85b2aac25b3f0df43ed571c0 # v1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2 # zizmor: ignore[cache-poisoning] save-if gates writes to main; PRs read-only
         with:
-          cache: rust
+          shared-key: linux
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
         with:
           install: false

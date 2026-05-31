@@ -22,7 +22,7 @@ env:
 
 jobs:
   publish-copr:
-    runs-on: namespace-profile-endev-linux-amd64
+    runs-on: ubuntu-latest
     timeout-minutes: 150
     container:
       image: fedora:45

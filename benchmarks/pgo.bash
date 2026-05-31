@@ -327,9 +327,8 @@ fi
 # ---------- Phase 4: BOLT post-link rewrite (instrumentation mode) ----------
 # Why instrumentation rather than the more common `perf record + perf2bolt`
 # LBR flow:
-#   - `perf record -j any,u` needs `kernel.perf_event_paranoid <= 1` —
-#     the Namespace runners we use for PGO default to 2 and don't
-#     honor `sudo sysctl -w` from a workflow step.
+#   - `perf record -j any,u` needs `kernel.perf_event_paranoid <= 1`,
+#     which GitHub-hosted runners don't guarantee.
 #   - aarch64 hosts without ARM v9.2 BRBE can't do LBR sampling at all,
 #     so the perf flow would silently miss profile data on the
 #     aarch64-linux PGO row even if paranoid were 0.

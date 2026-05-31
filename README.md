@@ -264,16 +264,6 @@ Some pnpm commands are intentionally out of scope. Runtime-management commands s
 - [Lockfile compatibility](https://aube.en.dev/package-manager/lockfiles)
 - [Run scripts and binaries](https://aube.en.dev/package-manager/scripts)
 
-## CI
-
-<p>
-  <a href="https://namespace.so">
-    <img src="assets/namespace-logo.svg" alt="Namespace" width="64">
-  </a>
-</p>
-
-Thanks to [Namespace](https://namespace.so) for providing CI for aube.
-
 ## Star History
 
 <a href="https://www.star-history.com/?repos=endevco%2Faube&type=date&legend=top-left">
