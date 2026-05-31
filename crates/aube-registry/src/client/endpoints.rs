@@ -191,12 +191,14 @@ impl RegistryClient {
         // string literal like `"1.2.3"`.
         let body = serde_json::to_string(version).map_err(std::io::Error::other)?;
 
-        let req = self
+        let mut req = self
             .http_for(registry_url)
             .put(&url)
-            .header("npm-auth-type", "web")
             .header("Content-Type", "application/json")
             .body(body);
+        if self.config.is_public_npmjs(name) {
+            req = req.header("npm-auth-type", "web");
+        }
         let req = if let Some(code) = otp {
             req.header("npm-otp", code)
         } else {
@@ -218,10 +220,10 @@ impl RegistryClient {
     ) -> Result<(), Error> {
         let registry_url = self.registry_url_for(name);
         let url = dist_tag_url(registry_url, name, tag);
-        let req = self
-            .http_for(registry_url)
-            .delete(&url)
-            .header("npm-auth-type", "web");
+        let mut req = self.http_for(registry_url).delete(&url);
+        if self.config.is_public_npmjs(name) {
+            req = req.header("npm-auth-type", "web");
+        }
         let req = if let Some(code) = otp {
             req.header("npm-otp", code)
         } else {

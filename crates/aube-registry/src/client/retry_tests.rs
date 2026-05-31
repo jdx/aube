@@ -65,18 +65,16 @@ async fn retries_on_503_then_succeeds() {
 }
 
 #[tokio::test]
-async fn dist_tag_writes_send_web_auth_and_otp_headers() {
+async fn dist_tag_writes_send_otp_header_without_web_auth_for_custom_registry() {
     let server = MockServer::start().await;
     Mock::given(method("PUT"))
         .and(path("/-/package/demo/dist-tags/beta"))
-        .and(header("npm-auth-type", "web"))
         .and(header("npm-otp", "123456"))
         .respond_with(ResponseTemplate::new(200))
         .mount(&server)
         .await;
     Mock::given(method("DELETE"))
         .and(path("/-/package/demo/dist-tags/beta"))
-        .and(header("npm-auth-type", "web"))
         .and(header("npm-otp", "654321"))
         .respond_with(ResponseTemplate::new(200))
         .mount(&server)
@@ -91,6 +89,38 @@ async fn dist_tag_writes_send_web_auth_and_otp_headers() {
         .delete_dist_tag("demo", "beta", Some("654321"))
         .await
         .expect("delete dist-tag should succeed");
+
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 2);
+    for request in requests {
+        assert!(
+            !request.headers.contains_key("npm-auth-type"),
+            "custom registries should not receive npm-auth-type"
+        );
+    }
+}
+
+#[tokio::test]
+async fn dist_tag_writes_omit_otp_header_when_absent() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/-/package/demo/dist-tags/beta"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let client = client_with(&server, FetchPolicy::default());
+    client
+        .put_dist_tag("demo", "beta", "1.2.3", None)
+        .await
+        .expect("put dist-tag should succeed");
+
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+    assert!(
+        !requests[0].headers.contains_key("npm-otp"),
+        "npm-otp should be omitted when no OTP is provided"
+    );
 }
 
 #[tokio::test]
