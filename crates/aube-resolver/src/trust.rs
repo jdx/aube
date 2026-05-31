@@ -79,7 +79,12 @@ fn is_approver(v: &serde_json::Value) -> bool {
         serde_json::Value::String(s) => !s.is_empty(),
         serde_json::Value::Array(a) => !a.is_empty(),
         serde_json::Value::Object(o) => !o.is_empty(),
-        serde_json::Value::Bool(_) | serde_json::Value::Number(_) => true,
+        serde_json::Value::Bool(b) => *b,
+        serde_json::Value::Number(n) => {
+            n.as_i64().is_some_and(|i| i != 0)
+                || n.as_u64().is_some_and(|u| u != 0)
+                || n.as_f64().is_some_and(|f| f != 0.0)
+        }
     }
 }
 
@@ -630,7 +635,10 @@ mod tests {
     fn evidence_empty_approver_is_none() {
         let mut v = version("foo", "1.0.0");
         for malformed in [
+            serde_json::Value::Bool(false),
             serde_json::Value::Null,
+            serde_json::json!(0),
+            serde_json::json!(0.0),
             serde_json::json!(""),
             serde_json::json!([]),
             serde_json::json!({}),
@@ -640,6 +648,23 @@ mod tests {
                 evidence_for(&v),
                 None,
                 "{malformed:?} should not count as staged-publish evidence"
+            );
+        }
+    }
+
+    #[test]
+    fn evidence_truthy_scalar_approver_counts() {
+        let mut v = version("foo", "1.0.0");
+        for approver in [
+            serde_json::Value::Bool(true),
+            serde_json::json!(1),
+            serde_json::json!("release-manager"),
+        ] {
+            v.approver = Some(approver.clone());
+            assert_eq!(
+                evidence_for(&v),
+                Some(TrustEvidence::StagedPublish),
+                "{approver:?} should count as staged-publish evidence"
             );
         }
     }
