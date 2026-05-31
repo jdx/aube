@@ -78,6 +78,20 @@ mod settings_context;
 mod workspace_helpers;
 
 pub(crate) use auto_install::ensure_installed;
+
+pub(crate) fn settings_hoisting_limits_to_linker(
+    value: aube_settings::resolved::HoistingLimits,
+) -> aube_linker::HoistingLimits {
+    match value {
+        aube_settings::resolved::HoistingLimits::None => aube_linker::HoistingLimits::None,
+        aube_settings::resolved::HoistingLimits::Workspaces => {
+            aube_linker::HoistingLimits::Workspaces
+        }
+        aube_settings::resolved::HoistingLimits::Dependencies => {
+            aube_linker::HoistingLimits::Dependencies
+        }
+    }
+}
 pub(crate) use catalog_discovery::{CatalogMap, discover_catalogs, load_workspace_catalogs};
 pub(crate) use dep_filter::DepFilter;
 pub(crate) use fs_helpers::{format_virtual_store_display_prefix, remove_existing, symlink_dir};

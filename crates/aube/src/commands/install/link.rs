@@ -89,15 +89,9 @@ pub(super) fn run_link_phase(input: LinkPhaseInput<'_>) -> miette::Result<LinkPh
     let hoist = aube_settings::resolved::hoist(settings_ctx);
     let hoist_pattern = aube_settings::resolved::hoist_pattern(settings_ctx);
     let hoist_workspace_packages = aube_settings::resolved::hoist_workspace_packages(settings_ctx);
-    let hoisting_limits = match aube_settings::resolved::hoisting_limits(settings_ctx) {
-        aube_settings::resolved::HoistingLimits::None => aube_linker::HoistingLimits::None,
-        aube_settings::resolved::HoistingLimits::Workspaces => {
-            aube_linker::HoistingLimits::Workspaces
-        }
-        aube_settings::resolved::HoistingLimits::Dependencies => {
-            aube_linker::HoistingLimits::Dependencies
-        }
-    };
+    let hoisting_limits = crate::commands::settings_hoisting_limits_to_linker(
+        aube_settings::resolved::hoisting_limits(settings_ctx),
+    );
     let dedupe_direct_deps = aube_settings::resolved::dedupe_direct_deps(settings_ctx);
     let virtual_store_only = aube_settings::resolved::virtual_store_only(settings_ctx);
     // Resolve the layout mode. CLI override wins, then `.npmrc` /

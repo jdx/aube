@@ -123,15 +123,9 @@ pub async fn run(
             // is parsed out of — no need for a separate fallback on the
             // typed struct field.
             let node_linker_setting = aube_settings::resolved::node_linker(&settings_ctx);
-            let hoisting_limits = match aube_settings::resolved::hoisting_limits(&settings_ctx) {
-                aube_settings::resolved::HoistingLimits::None => aube_linker::HoistingLimits::None,
-                aube_settings::resolved::HoistingLimits::Workspaces => {
-                    aube_linker::HoistingLimits::Workspaces
-                }
-                aube_settings::resolved::HoistingLimits::Dependencies => {
-                    aube_linker::HoistingLimits::Dependencies
-                }
-            };
+            let hoisting_limits = crate::commands::settings_hoisting_limits_to_linker(
+                aube_settings::resolved::hoisting_limits(&settings_ctx),
+            );
             let hoisted_placements = match node_linker_setting {
                 aube_settings::resolved::NodeLinker::Pnp => {
                     return Err(miette!(
