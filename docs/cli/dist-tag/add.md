@@ -21,4 +21,4 @@ Tag to create or update. Defaults to `latest`
 
 ### `--otp <OTP>`
 
-One-time password from a 2FA authenticator; sent as `npm-otp`.
+One-time password from a 2FA authenticator; sent as `npm-otp`

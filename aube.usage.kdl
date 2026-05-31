@@ -603,6 +603,9 @@ cmd dist-tag subcommand_required=#true help="Manage package distribution tags on
     }
     cmd add help="Add or update a dist-tag on a package" {
         long_help "Add or update a dist-tag on a package.\n\nSpec must include a concrete version: `aube dist-tag add react@18.2.0 stable`. The tag argument defaults to `latest`."
+        flag --otp help="One-time password from a 2FA authenticator; sent as `npm-otp`" {
+            arg <OTP>
+        }
         arg <SPEC> help="Package spec in `name@version` form (exact version required, ranges and tags aren't resolved here)"
         arg "[TAG]" help="Tag to create or update. Defaults to `latest`" required=#false
     }
@@ -612,6 +615,9 @@ cmd dist-tag subcommand_required=#true help="Manage package distribution tags on
     }
     cmd rm help="Remove a dist-tag from a package" {
         alias remove
+        flag --otp help="One-time password from a 2FA authenticator; sent as `npm-otp`" {
+            arg <OTP>
+        }
         arg <PACKAGE> help="Package name (no version)"
         arg <TAG> help="Tag to remove"
     }

@@ -46,6 +46,6 @@ Use this npm registry URL for package metadata, tarballs, audit requests, dist-t
 
 ## Subcommands
 
-- [`aube dist-tag add <SPEC> [TAG]`](/cli/dist-tag/add.md)
+- [`aube dist-tag add [--otp <OTP>] <SPEC> [TAG]`](/cli/dist-tag/add.md)
 - [`aube dist-tag ls [PACKAGE]`](/cli/dist-tag/ls.md)
-- [`aube dist-tag rm <PACKAGE> <TAG>`](/cli/dist-tag/rm.md)
+- [`aube dist-tag rm [--otp <OTP>] <PACKAGE> <TAG>`](/cli/dist-tag/rm.md)

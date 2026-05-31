@@ -20,4 +20,4 @@ Tag to remove
 
 ### `--otp <OTP>`
 
-One-time password from a 2FA authenticator; sent as `npm-otp`.
+One-time password from a 2FA authenticator; sent as `npm-otp`
