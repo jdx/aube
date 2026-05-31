@@ -105,6 +105,35 @@ async fn dist_tag_writes_send_web_auth_for_public_npmjs() {
 }
 
 #[tokio::test]
+async fn dist_tag_writes_send_web_auth_and_otp_for_public_npmjs() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/-/package/demo/dist-tags/beta"))
+        .and(header("npm-auth-type", "web"))
+        .and(header("npm-otp", "123456"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path("/-/package/demo/dist-tags/beta"))
+        .and(header("npm-auth-type", "web"))
+        .and(header("npm-otp", "654321"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let client = client_with_public_npmjs_host(&server);
+    client
+        .put_dist_tag("demo", "beta", "1.2.3", Some("123456"))
+        .await
+        .expect("put dist-tag should succeed");
+    client
+        .delete_dist_tag("demo", "beta", Some("654321"))
+        .await
+        .expect("delete dist-tag should succeed");
+}
+
+#[tokio::test]
 async fn dist_tag_writes_send_otp_header_without_web_auth_for_custom_registry() {
     let server = MockServer::start().await;
     Mock::given(method("PUT"))
