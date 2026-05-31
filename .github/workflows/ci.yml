@@ -34,9 +34,9 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            runner: ubuntu-latest
+            runner: namespace-profile-endev-linux-amd64;overrides.cache-tag=aube-rust-linux
           - os: macos-latest
-            runner: macos-latest
+            runner: namespace-profile-endev-macos-arm64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     permissions:
@@ -47,10 +47,9 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2 # zizmor: ignore[cache-poisoning] save-if gates writes to main; PRs read-only
+      - uses: namespacelabs/nscloud-cache-action@15799a6b54e5765f85b2aac25b3f0df43ed571c0 # v1
         with:
-          shared-key: ${{ startsWith(matrix.os, 'ubuntu') && 'linux' || matrix.os }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache: rust
       - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
         with:
           cache: false
@@ -67,7 +66,7 @@ jobs:
   # lint failures don't block the BATS jobs from starting against a
   # known-good binary.
   test-linux:
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-endev-linux-amd64;overrides.cache-tag=aube-rust-linux
     timeout-minutes: 30
     permissions:
       contents: read
@@ -77,10 +76,9 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2 # zizmor: ignore[cache-poisoning] save-if gates writes to main; PRs read-only
+      - uses: namespacelabs/nscloud-cache-action@15799a6b54e5765f85b2aac25b3f0df43ed571c0 # v1
         with:
-          shared-key: linux
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache: rust
       - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
         with:
           cache: false
@@ -104,8 +102,8 @@ jobs:
 
   # BATS integration shards. Linux runs 4 shards (matches Buildkite),
   # macOS runs 2. Keep these on GitHub-hosted runners: the jail-build
-  # tests assert native OS sandbox behavior that does not match custom
-  # runner profiles.
+  # tests assert native OS sandbox behavior that does not match the
+  # Namespace runner profiles.
   # Each shard downloads the OS-matched debug binary from `build` and
   # invokes mise-task ci:bats:nonserial with its shard index.
   #
@@ -253,7 +251,7 @@ jobs:
       - bats
       - bats-serial
       - windows
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-endev-linux-amd64
     timeout-minutes: 2
     permissions: {}
     # Run on success or upstream failure but skip when the workflow is cancelled

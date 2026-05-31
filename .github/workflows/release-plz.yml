@@ -21,7 +21,7 @@ jobs:
   # no-op.
   release-plz-release:
     name: release-plz release
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-endev-linux-amd64;overrides.cache-tag=aube-rust-linux
     # Two commits landing on main in quick succession must not double-publish.
     concurrency:
       group: release-plz-release-${{ github.ref }}
@@ -138,7 +138,7 @@ jobs:
     name: Publish release
     needs: [release-plz-release, upload-assets]
     if: ${{ needs.release-plz-release.outputs.tag != '' }}
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-endev-linux-amd64
     permissions:
       contents: write
     steps:
@@ -156,7 +156,7 @@ jobs:
     name: Enhance release notes
     needs: [release-plz-release, publish-release]
     if: ${{ needs.release-plz-release.outputs.tag != '' }}
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-endev-linux-amd64
     permissions:
       contents: write
     steps:
@@ -219,7 +219,7 @@ jobs:
   # an out-of-date `aube.usage.kdl`.
   release-plz-pr:
     name: release-plz PR
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-endev-linux-amd64;overrides.cache-tag=aube-rust-linux
     permissions:
       contents: write
       pull-requests: write
@@ -233,10 +233,6 @@ jobs:
           token: ${{ secrets.AUBE_GH_TOKEN }}
           submodules: recursive
           persist-credentials: false
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2 # zizmor: ignore[cache-poisoning] save-if gates writes to main; PRs read-only
-        with:
-          shared-key: linux
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       # MISE_LOCKED=1 makes `mise install` fail if the committed
       # mise.lock doesn't already pin the current platform's URL, instead
       # of silently re-resolving `"latest"` pins and rewriting mise.lock.

@@ -75,7 +75,7 @@ jobs:
 
   generate-primer:
     needs: validate-inputs
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-endev-linux-amd64
     timeout-minutes: 15
     permissions:
       contents: read
@@ -224,7 +224,7 @@ jobs:
   # musl).
   upload-assets-musl-arm64:
     needs: generate-primer
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-endev-linux-amd64;overrides.cache-tag=aube-rust-linux
     timeout-minutes: 60
     permissions:
       contents: read
@@ -242,10 +242,6 @@ jobs:
         with:
           name: metadata-primer
           path: crates/aube-resolver/data
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2 # zizmor: ignore[cache-poisoning] save-if gates writes to main; PRs read-only
-        with:
-          shared-key: linux
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cross
         shell: bash
         run: cargo install cross --locked
@@ -299,16 +295,21 @@ jobs:
   # binary runs on the host for training (cross's older glibc is
   # forward-compatible with the runner's). Cross.toml passes RUSTFLAGS
   # through to the container so phase 1 / 3b RUSTFLAGS reach cargo
-  # inside cross. The aarch64 Linux row runs natively on GitHub-hosted
-  # `ubuntu-24.04-arm`, so we don't need QEMU to train. macOS arm64 is
-  # on GitHub's hosted Apple Silicon runner because the previous
-  # self-hosted image segfaulted the PGO-instrumented binary during
-  # training.
+  # inside cross. The aarch64 Linux row runs natively on
+  # `namespace-profile-endev-linux-arm64-large` (32 GB) so the same
+  # fat-LTO + profile-generate headroom argument from
+  # acdf415 applies, and we don't need QEMU to train. macOS arm64 is
+  # on the `-large` (12×28) variant because the previous instrumented
+  # binary segfaulted during training on the 6×14 base profile — fork
+  # pressure from `aube install` may have been racing under resource
+  # contention. Revisit moving back to base if `-large` proves stable
+  # across a few release cycles.
   upload-assets-pgo:
     needs: generate-primer
     runs-on: ${{ matrix.runner }}
-    # 180 to cover macos-latest, which has needed ~80 min for two
-    # fat-LTO compiles.
+    # 180 to cover macos-latest (3 vCPU) which needs ~80 min for two
+    # fat-LTO compiles. Linux PGO on -large runners completes in well
+    # under 75, so the extra headroom is dead slack for them.
     timeout-minutes: 180
     permissions:
       contents: read
@@ -333,17 +334,17 @@ jobs:
           # not in tree.
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            runner: ubuntu-latest
+            runner: namespace-profile-endev-linux-amd64-large;overrides.cache-tag=aube-rust-linux
             build-tool: cross
             bolt: true
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
-            runner: ubuntu-latest
+            runner: namespace-profile-endev-linux-amd64-large;overrides.cache-tag=aube-rust-linux
             build-tool: cross
             bolt: false
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            runner: ubuntu-24.04-arm
+            runner: namespace-profile-endev-linux-arm64-large;overrides.cache-tag=aube-rust-linux-arm64
             build-tool: cargo
             bolt: true
           - target: aarch64-apple-darwin
@@ -373,10 +374,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2 # zizmor: ignore[cache-poisoning] save-if gates writes to main; PRs read-only
-        with:
-          shared-key: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && 'linux-arm64' || startsWith(matrix.os, 'ubuntu') && 'linux' || matrix.os }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       # rustc 1.94.0 on aarch64-apple-darwin miscompiles the
       # PGO-instrumented binary — the resulting `aube install` SIGSEGVs
       # on its first invocation during phase 2 training. Verified
@@ -405,10 +402,11 @@ jobs:
           else
             echo "rustc $current already >= 1.95.0; no upgrade needed"
           fi
-          # GitHub-hosted macos-latest is Apple Silicon, so
-          # aarch64-apple-darwin is the native target. rustup target add
-          # is idempotent and ensures the component is present even if a
-          # prior toolchain upgrade dropped it.
+          # GH macos-latest-large defaults to an x86_64-apple-darwin
+          # host rustc (Rosetta) — `--target=aarch64-apple-darwin`
+          # from pgo.bash then triggers a cross-compile that needs the
+          # arm64 std lib explicitly installed. Idempotent on namespace
+          # runners where the target is already present.
           rustup target add aarch64-apple-darwin
           rustup show
       - name: Install rustup llvm-tools-preview
