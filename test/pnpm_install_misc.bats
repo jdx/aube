@@ -525,12 +525,11 @@ JSON
 	# Pin the failure mode to "registry fetch aborted" so the test is
 	# falsifiable against regressions that fail for the wrong reason —
 	# e.g. a clap parse error on the new flags, a missing fixture, or
-	# `aube add` bailing out before it reaches the registry. The exact
-	# reqwest error text (`error sending request for url ...`) is
-	# transport-dependent and doesn't include the word "timeout"
-	# verbatim, so we assert on the wrapper miette context aube emits
-	# from `add.rs` instead.
-	assert_output --partial "failed to fetch is-odd"
+	# `aube add` bailing out before it reaches the registry. Depending on
+	# which request hits the 1 ms deadline first, the failing packument can
+	# be the direct dep or its transitive dep.
+	assert_output --regexp \
+		"(failed to fetch is-odd|failed to resolve dependencies|registry error for is-(odd|number))"
 }
 
 @test "AUBE_LOCKFILE=false aube add: installs the dep without writing a lockfile" {

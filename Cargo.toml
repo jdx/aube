@@ -58,7 +58,7 @@ webpki-root-certs = "1"
 
 # Hashing
 sha1 = "0.11"
-sha2 = "0.10"
+sha2 = "0.11"
 blake3 = { version = "1", features = ["rayon", "mmap"] }
 hex = "0.4"
 

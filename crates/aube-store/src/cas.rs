@@ -552,6 +552,7 @@ fn try_o_tmpfile_publish(path: &Path, bytes: &[u8]) -> Result<CasWriteOutcome, O
     use std::io::Write;
     use std::os::fd::FromRawFd;
     use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::PermissionsExt;
 
     let parent = path.parent().ok_or(OTmpfileFallback::Hard(Error::Io(
         path.to_path_buf(),
@@ -598,6 +599,8 @@ fn try_o_tmpfile_publish(path: &Path, bytes: &[u8]) -> Result<CasWriteOutcome, O
         let _ = posix_fallocate(&file, bytes.len() as libc::off_t);
     }
     file.write_all(bytes)
+        .map_err(|e| OTmpfileFallback::Hard(Error::Io(path.to_path_buf(), e)))?;
+    file.set_permissions(std::fs::Permissions::from_mode(0o644))
         .map_err(|e| OTmpfileFallback::Hard(Error::Io(path.to_path_buf(), e)))?;
     // No sync_data: contradicts the no-fsync CAS policy. Crash window
     // between write and linkat is acceptable, lockfile + state hash
