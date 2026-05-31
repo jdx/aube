@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.1](https://github.com/endevco/aube/compare/aube-resolver-v1.17.0...aube-resolver-v1.17.1) - 2026-05-31
+
+### Other
+
+- *(ci)* switch back to namespace runners ([#819](https://github.com/endevco/aube/pull/819))
+
 ## [1.17.0](https://github.com/endevco/aube/compare/aube-resolver-v1.16.1...aube-resolver-v1.17.0) - 2026-05-31
 
 ### Added
