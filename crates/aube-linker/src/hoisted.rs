@@ -186,20 +186,32 @@ impl PlacementPlan {
     ) -> Result<PlaceOutcome, Error> {
         crate::validate_package_link_name(name)?;
         debug_assert!(is_ancestor_or_self(&self.nodes, floor, requester));
+        // Reuse a matching package anywhere already visible through
+        // Node's ancestor lookup, even if the hoist limit would
+        // prevent placing a new package that high.
+        let mut cursor = requester;
+        loop {
+            if let Some(&existing) = self.nodes[cursor].children.get(name)
+                && self.nodes[existing].dep_path.as_deref() == Some(dep_path)
+            {
+                return Ok(PlaceOutcome {
+                    node_idx: existing,
+                    created: false,
+                });
+            }
+            match self.nodes[cursor].parent {
+                Some(p) => cursor = p,
+                None => break,
+            }
+        }
+
         // Walk up from the requester looking for the shallowest
         // allowed ancestor that doesn't already host a different
-        // version of `name`. If any allowed ancestor has a matching
-        // entry, reuse it.
+        // version of `name`.
         let mut cursor = requester;
         let mut candidate = requester;
         loop {
-            if let Some(&existing) = self.nodes[cursor].children.get(name) {
-                if self.nodes[existing].dep_path.as_deref() == Some(dep_path) {
-                    return Ok(PlaceOutcome {
-                        node_idx: existing,
-                        created: false,
-                    });
-                }
+            if self.nodes[cursor].children.contains_key(name) {
                 // Conflict: must stay at or below `candidate`.
                 break;
             }
@@ -541,6 +553,32 @@ mod tests {
         assert_eq!(
             package_dir(&limited, "repeat@1.0.0"),
             nm.join("app/node_modules/left-pad/node_modules/repeat")
+        );
+    }
+
+    #[test]
+    fn dependencies_limit_reuses_matching_direct_dependency_above_floor() {
+        let nm = PathBuf::from("/project/node_modules");
+        let mut graph = LockfileGraph::default();
+        graph.packages.insert(
+            "app@1.0.0".into(),
+            pkg("app", "1.0.0", &[("shared", "1.0.0")]),
+        );
+        graph
+            .packages
+            .insert("shared@1.0.0".into(), pkg("shared", "1.0.0", &[]));
+        let root_deps = vec![dep("shared", "shared@1.0.0"), dep("app", "app@1.0.0")];
+
+        let limited = plan_importer(&nm, &root_deps, &graph, HoistingLimits::Dependencies).unwrap();
+
+        assert_eq!(package_dir(&limited, "shared@1.0.0"), nm.join("shared"));
+        assert_eq!(
+            limited
+                .nodes
+                .iter()
+                .filter(|node| node.dep_path.as_deref() == Some("shared@1.0.0"))
+                .count(),
+            1
         );
     }
 
