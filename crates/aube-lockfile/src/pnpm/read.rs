@@ -274,13 +274,29 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
                             _ => None,
                         })
                 }),
+                LocalSource::RemoteTarball(tarball) => {
+                    raw.packages.iter().find_map(|(key, pkg_info)| {
+                        parse_dep_path(key)
+                            .filter(|(name, _)| name == &local_pkg.name)
+                            .and(pkg_info.resolution.as_ref())
+                            .and_then(local_source_from_resolution)
+                            .and_then(|candidate| match candidate {
+                                LocalSource::RemoteTarball(candidate)
+                                    if candidate.url == tarball.url =>
+                                {
+                                    Some(pkg_info)
+                                }
+                                _ => None,
+                            })
+                    })
+                }
                 _ => None,
             });
             if let Some(pkg_info) = pkg_info
                 && let Some(ref res) = pkg_info.resolution
                 && let Some(mut ls) = local_source_from_resolution(res)
             {
-                if matches!(ls, LocalSource::Git(_)) {
+                if matches!(ls, LocalSource::Git(_) | LocalSource::RemoteTarball(_)) {
                     local_pkg.integrity = res.integrity.clone();
                 }
                 if let LocalSource::Git(ref mut g) = ls

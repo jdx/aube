@@ -2556,6 +2556,51 @@ snapshots:
 }
 
 #[test]
+fn remote_tarball_integrity_survives_lockfile_reuse_roundtrip() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pnpm-lock.yaml");
+    std::fs::write(
+        &path,
+        r#"
+lockfileVersion: '9.0'
+importers:
+  .:
+    dependencies:
+      demo:
+        specifier: https://registry.example.test/demo/-/demo-1.0.0.tgz
+        version: https://registry.example.test/demo/-/demo-1.0.0.tgz
+packages:
+  demo@https://registry.example.test/demo/-/demo-1.0.0.tgz:
+    resolution: {integrity: sha512-demo, tarball: https://registry.example.test/demo/-/demo-1.0.0.tgz}
+    version: 1.0.0
+snapshots:
+  demo@https://registry.example.test/demo/-/demo-1.0.0.tgz: {}
+"#,
+    )
+    .unwrap();
+
+    let graph = parse(&path).unwrap();
+    let pkg = graph
+        .packages
+        .values()
+        .find(|pkg| pkg.name == "demo")
+        .expect("demo package");
+    assert_eq!(pkg.integrity.as_deref(), Some("sha512-demo"));
+    let Some(LocalSource::RemoteTarball(source)) = &pkg.local_source else {
+        panic!("expected remote tarball source, got {:?}", pkg.local_source);
+    };
+    assert_eq!(source.integrity, "sha512-demo");
+
+    write(&path, &graph, &PackageJson::default()).unwrap();
+    let yaml = std::fs::read_to_string(&path).unwrap();
+    assert!(yaml.contains("integrity: sha512-demo"), "{yaml}");
+    assert!(
+        yaml.contains("tarball: https://registry.example.test/demo/-/demo-1.0.0.tgz"),
+        "{yaml}"
+    );
+}
+
+#[test]
 fn parser_rejects_remote_tarball_with_hosted_git_url_in_query() {
     for tarball in [
         "https://evil.example.com/demo.tgz?ref=://codeload.github.com/acme/demo/tar.gz/abcdef",
