@@ -57,6 +57,7 @@ pub mod run;
 pub mod run_output;
 pub mod sbom;
 pub mod security_scanner;
+pub mod sponsors;
 pub mod store;
 pub mod undeprecate;
 pub mod unlink;
