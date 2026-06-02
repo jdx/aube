@@ -1035,6 +1035,7 @@ fn build_publish_body(
     // keywords, repository, ...) reaches the registry, then bolt on the
     // `_id` and `dist` block that the publish protocol requires.
     let mut version_doc = serde_json::to_value(manifest).into_diagnostic()?;
+    normalize_publish_manifest(&mut version_doc);
     let obj = version_doc
         .as_object_mut()
         .ok_or_else(|| miette!("manifest did not serialize to a JSON object"))?;
@@ -1101,6 +1102,22 @@ fn build_publish_body(
     }
 
     Ok(body)
+}
+
+fn normalize_publish_manifest(manifest: &mut serde_json::Value) {
+    let Some(obj) = manifest.as_object_mut() else {
+        return;
+    };
+    let Some(repository) = obj.get_mut("repository") else {
+        return;
+    };
+    let Some(url) = repository.as_str().filter(|url| !url.is_empty()) else {
+        return;
+    };
+    *repository = serde_json::json!({
+        "type": "git",
+        "url": url,
+    });
 }
 
 fn archive_hashes(archive: &BuiltArchive) -> (String, String) {
@@ -1366,6 +1383,81 @@ mod tests {
         assert_eq!(
             body["versions"]["2026.5.16"]["_id"],
             "@jdxcode/mise-linux-x64@2026.5.16"
+        );
+    }
+
+    #[test]
+    fn publish_body_normalizes_string_repository() {
+        let archive = BuiltArchive {
+            name: "pkg".to_string(),
+            version: "1.0.0".to_string(),
+            filename: "pkg-1.0.0.tgz".to_string(),
+            files: vec!["package.json".to_string()],
+            unpacked_size: 42,
+            tarball: b"archive bytes".to_vec(),
+        };
+        let manifest: PackageJson = serde_json::from_value(serde_json::json!({
+            "name": "pkg",
+            "version": "1.0.0",
+            "repository": "https://codeberg.org/acme/pkg.git"
+        }))
+        .unwrap();
+
+        let body = build_publish_body(
+            &archive,
+            &manifest,
+            "https://registry.example/",
+            "latest",
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            body["versions"]["1.0.0"]["repository"],
+            serde_json::json!({
+                "type": "git",
+                "url": "https://codeberg.org/acme/pkg.git"
+            })
+        );
+    }
+
+    #[test]
+    fn publish_body_preserves_repository_object() {
+        let archive = BuiltArchive {
+            name: "pkg".to_string(),
+            version: "1.0.0".to_string(),
+            filename: "pkg-1.0.0.tgz".to_string(),
+            files: vec!["package.json".to_string()],
+            unpacked_size: 42,
+            tarball: b"archive bytes".to_vec(),
+        };
+        let manifest: PackageJson = serde_json::from_value(serde_json::json!({
+            "name": "pkg",
+            "version": "1.0.0",
+            "repository": {
+                "type": "hg",
+                "url": "https://example.com/acme/pkg"
+            }
+        }))
+        .unwrap();
+
+        let body = build_publish_body(
+            &archive,
+            &manifest,
+            "https://registry.example/",
+            "latest",
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            body["versions"]["1.0.0"]["repository"],
+            serde_json::json!({
+                "type": "hg",
+                "url": "https://example.com/acme/pkg"
+            })
         );
     }
 
