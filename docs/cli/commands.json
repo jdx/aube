@@ -9461,6 +9461,22 @@
         "hidden_aliases": [],
         "examples": []
       },
+      "sponsors": {
+        "full_cmd": [
+          "sponsors"
+        ],
+        "usage": "sponsors",
+        "subcommands": {},
+        "args": [],
+        "flags": [],
+        "mounts": [],
+        "hide": false,
+        "help": "Show the companies sponsoring aube and the en.dev project family",
+        "name": "sponsors",
+        "aliases": [],
+        "hidden_aliases": [],
+        "examples": []
+      },
       "stage": {
         "full_cmd": [
           "stage"
