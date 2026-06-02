@@ -97,7 +97,6 @@ export default defineConfig({
           { text: "For bun users", link: "/bun-users" },
           { text: "Troubleshooting", link: "/troubleshooting" },
           { text: "Error codes", link: "/error-codes" },
-          { text: "Sponsors", link: "https://en.dev/sponsors.html" },
         ],
       },
       {
