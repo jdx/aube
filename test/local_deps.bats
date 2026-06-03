@@ -183,6 +183,51 @@ EOF
 	assert_output --partial '"version":"9.9.9"'
 }
 
+@test "aube install preserves pnpm workspace link targets relative to importer" {
+	mkdir -p pkg-a gems/pkg-b-parent/pkg-b
+	cat >package.json <<'EOF'
+{"name":"root","version":"0.0.0","private":true}
+EOF
+	cat >pnpm-workspace.yaml <<'EOF'
+packages:
+  - "pkg-a"
+  - "gems/pkg-b-parent/pkg-b"
+EOF
+	cat >pkg-a/package.json <<'EOF'
+{"name":"pkg-a","version":"0.0.0","dependencies":{"pkg-b":"link:../gems/pkg-b-parent/pkg-b"}}
+EOF
+	cat >gems/pkg-b-parent/pkg-b/package.json <<'EOF'
+{"name":"pkg-b","version":"0.0.0","main":"index.js"}
+EOF
+	cat >pnpm-lock.yaml <<'EOF'
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .: {}
+
+  pkg-a:
+    dependencies:
+      pkg-b:
+        specifier: link:../gems/pkg-b-parent/pkg-b
+        version: link:../gems/pkg-b-parent/pkg-b
+
+  gems/pkg-b-parent/pkg-b: {}
+EOF
+
+	run aube install --frozen-lockfile
+	assert_success
+
+	[ -L pkg-a/node_modules/pkg-b ]
+	run readlink pkg-a/node_modules/pkg-b
+	assert_output "../../gems/pkg-b-parent/pkg-b"
+	assert_file_exists pkg-a/node_modules/pkg-b/package.json
+}
+
 @test "aube install honors link: paths in pnpm.overrides as project-root-relative" {
 	# Workspace consumer pinned `@company/bar@1.2.3` (registry version),
 	# but root `pnpm.overrides` rewrites that to `link:./libs/bar`.
