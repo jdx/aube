@@ -411,6 +411,58 @@ snapshots:
 }
 
 #[test]
+fn parse_multi_importer_local_snapshot_keys_do_not_create_orphans() {
+    let dir = tempfile::tempdir().unwrap();
+    let lockfile_path = dir.path().join("pnpm-lock.yaml");
+    std::fs::write(
+        &lockfile_path,
+        r#"
+lockfileVersion: '9.0'
+
+importers:
+  .: {}
+
+  pkg-a:
+    dependencies:
+      pkg-b:
+        specifier: link:../gems/pkg-b-parent/pkg-b
+        version: link:../gems/pkg-b-parent/pkg-b
+
+  packages/deep-app:
+    dependencies:
+      pkg-b:
+        specifier: link:../../gems/pkg-b-parent/pkg-b
+        version: link:../../gems/pkg-b-parent/pkg-b
+
+snapshots:
+  pkg-b@link:../gems/pkg-b-parent/pkg-b: {}
+  pkg-b@link:../../gems/pkg-b-parent/pkg-b: {}
+"#,
+    )
+    .unwrap();
+
+    let graph = parse(&lockfile_path).unwrap();
+    let pkg_b_entries: Vec<_> = graph
+        .packages
+        .values()
+        .filter(|pkg| pkg.name == "pkg-b")
+        .collect();
+    assert_eq!(pkg_b_entries.len(), 1);
+    assert_eq!(
+        pkg_b_entries[0].local_source,
+        Some(LocalSource::Link("gems/pkg-b-parent/pkg-b".into()))
+    );
+    assert_eq!(
+        graph.importers["pkg-a"][0].dep_path,
+        pkg_b_entries[0].dep_path
+    );
+    assert_eq!(
+        graph.importers["packages/deep-app"][0].dep_path,
+        pkg_b_entries[0].dep_path
+    );
+}
+
+#[test]
 fn parse_aube_written_workspace_local_paths_are_not_rebased_twice() {
     let dir = tempfile::tempdir().unwrap();
     let lockfile_path = dir.path().join("pnpm-lock.yaml");

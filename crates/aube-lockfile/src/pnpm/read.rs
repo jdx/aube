@@ -43,6 +43,8 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
     let mut local_packages: BTreeMap<String, LockedPackage> = BTreeMap::new();
     let mut local_importers: BTreeMap<String, String> = BTreeMap::new();
     let mut local_snapshot_keys: BTreeMap<String, String> = BTreeMap::new();
+    let mut all_local_snapshot_keys: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
     let mut skipped_optional_dependencies: BTreeMap<String, BTreeMap<String, String>> =
         BTreeMap::new();
     // pnpm v9 encodes npm-aliases implicitly: the importer key is
@@ -137,7 +139,8 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
             }
             local_snapshot_keys
                 .entry(dep_path)
-                .or_insert_with(|| snapshot_key);
+                .or_insert_with(|| snapshot_key.clone());
+            all_local_snapshot_keys.insert(snapshot_key);
         } else {
             // Detect npm-aliased deps purely from the shape of
             // `version:`. pnpm encodes aliases as
@@ -424,7 +427,7 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
                 .map(|l| format!("{}@{}", p.name, l.specifier()))
         })
         .collect();
-    local_canonical_keys.extend(local_snapshot_keys.into_values());
+    local_canonical_keys.extend(all_local_snapshot_keys);
 
     let snapshot_keys: Vec<String> = if raw.snapshots.is_empty() {
         raw.packages.keys().cloned().collect()
