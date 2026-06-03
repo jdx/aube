@@ -366,6 +366,51 @@ snapshots:
 }
 
 #[test]
+fn parse_workspace_local_snapshot_keys_do_not_duplicate_rebased_packages() {
+    let dir = tempfile::tempdir().unwrap();
+    let lockfile_path = dir.path().join("pnpm-lock.yaml");
+    std::fs::write(
+        &lockfile_path,
+        r#"
+lockfileVersion: '9.0'
+
+importers:
+  .: {}
+
+  pkg-a:
+    dependencies:
+      pkg-b:
+        specifier: link:../gems/pkg-b-parent/pkg-b
+        version: link:../gems/pkg-b-parent/pkg-b
+
+packages:
+  pkg-b@link:../gems/pkg-b-parent/pkg-b:
+    resolution: {directory: ../gems/pkg-b-parent/pkg-b, type: directory}
+
+snapshots:
+  pkg-b@link:../gems/pkg-b-parent/pkg-b: {}
+"#,
+    )
+    .unwrap();
+
+    let graph = parse(&lockfile_path).unwrap();
+    let pkg_b_entries: Vec<_> = graph
+        .packages
+        .values()
+        .filter(|pkg| pkg.name == "pkg-b")
+        .collect();
+    assert_eq!(pkg_b_entries.len(), 1);
+    assert_eq!(
+        pkg_b_entries[0].local_source,
+        Some(LocalSource::Link("gems/pkg-b-parent/pkg-b".into()))
+    );
+    assert_eq!(
+        graph.importers["pkg-a"][0].dep_path,
+        pkg_b_entries[0].dep_path
+    );
+}
+
+#[test]
 fn parse_transitive_url_entry_uses_pnpm_version_field() {
     // Regression: pnpm writes non-registry transitive entries with
     // the tarball URL in the dep-path key and the real semver in a

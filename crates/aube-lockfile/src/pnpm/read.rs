@@ -409,7 +409,7 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
     }
     // Canonical keys the main loop should ignore — those are the
     // snapshot keys we already absorbed above.
-    let local_canonical_keys: std::collections::HashSet<String> = local_packages
+    let mut local_canonical_keys: std::collections::HashSet<String> = local_packages
         .values()
         .filter_map(|p| {
             p.local_source
@@ -417,6 +417,7 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
                 .map(|l| format!("{}@{}", p.name, l.specifier()))
         })
         .collect();
+    local_canonical_keys.extend(local_snapshot_keys.into_values());
 
     let snapshot_keys: Vec<String> = if raw.snapshots.is_empty() {
         raw.packages.keys().cloned().collect()
