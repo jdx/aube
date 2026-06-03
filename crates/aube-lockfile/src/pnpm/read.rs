@@ -104,7 +104,12 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
                 other => other,
             };
             let snapshot_key = format!("{name}@{}", local.specifier());
-            let local = rebase_importer_local(local, importer_path);
+            let should_rebase = importer_path != "." && info.specifier == classify_version;
+            let local = if should_rebase {
+                rebase_importer_local(local, importer_path)
+            } else {
+                local
+            };
             let dep_path = local.dep_path(name);
             deps.push(DirectDep {
                 name: name.to_string(),
@@ -125,9 +130,11 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
                     local_source: Some(local),
                     ..Default::default()
                 });
-            local_importers
-                .entry(dep_path.clone())
-                .or_insert_with(|| importer_path.to_string());
+            if should_rebase {
+                local_importers
+                    .entry(dep_path.clone())
+                    .or_insert_with(|| importer_path.to_string());
+            }
             local_snapshot_keys
                 .entry(dep_path)
                 .or_insert_with(|| snapshot_key);

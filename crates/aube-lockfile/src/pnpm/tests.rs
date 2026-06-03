@@ -411,6 +411,59 @@ snapshots:
 }
 
 #[test]
+fn parse_aube_written_workspace_local_paths_are_not_rebased_twice() {
+    let dir = tempfile::tempdir().unwrap();
+    let lockfile_path = dir.path().join("pnpm-lock.yaml");
+    std::fs::write(
+        &lockfile_path,
+        r#"
+lockfileVersion: '9.0'
+
+importers:
+  .: {}
+
+  pkg-a:
+    dependencies:
+      pkg-b:
+        specifier: link:../gems/pkg-b-parent/pkg-b
+        version: link:gems/pkg-b-parent/pkg-b
+
+      pkg-c:
+        specifier: file:../gems/pkg-c
+        version: file:gems/pkg-c
+
+packages:
+  pkg-c@file:gems/pkg-c:
+    resolution: {directory: gems/pkg-c, type: directory}
+
+snapshots:
+  pkg-c@file:gems/pkg-c: {}
+"#,
+    )
+    .unwrap();
+
+    let graph = parse(&lockfile_path).unwrap();
+    let pkg_b = graph
+        .packages
+        .values()
+        .find(|pkg| pkg.name == "pkg-b")
+        .expect("pkg-b");
+    assert_eq!(
+        pkg_b.local_source,
+        Some(LocalSource::Link("gems/pkg-b-parent/pkg-b".into()))
+    );
+    let pkg_c = graph
+        .packages
+        .values()
+        .find(|pkg| pkg.name == "pkg-c")
+        .expect("pkg-c");
+    assert_eq!(
+        pkg_c.local_source,
+        Some(LocalSource::Directory("gems/pkg-c".into()))
+    );
+}
+
+#[test]
 fn parse_transitive_url_entry_uses_pnpm_version_field() {
     // Regression: pnpm writes non-registry transitive entries with
     // the tarball URL in the dep-path key and the real semver in a
