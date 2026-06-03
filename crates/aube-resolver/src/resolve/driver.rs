@@ -1351,7 +1351,12 @@ impl<'a> ResolveDriver<'a> {
                             format!("remote tarball {}: {e}", task.range),
                         )
                     })?;
-            let integrity = local_source_integrity(&resolved_local);
+            let integrity = match &resolved_local {
+                LocalSource::RemoteTarball(tarball) if !tarball.integrity.is_empty() => {
+                    Some(tarball.integrity.clone())
+                }
+                _ => None,
+            };
             (resolved_local, version, deps, integrity)
         } else {
             // Rewrite the path to be relative to the project root so
@@ -2017,16 +2022,6 @@ fn attach_integrity_to_git_source(local: &mut LocalSource, integrity: Option<&st
     }
 }
 
-fn local_source_integrity(local: &LocalSource) -> Option<String> {
-    match local {
-        LocalSource::Git(git) => git.integrity.clone(),
-        LocalSource::RemoteTarball(tarball) if !tarball.integrity.is_empty() => {
-            Some(tarball.integrity.clone())
-        }
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2165,30 +2160,5 @@ mod tests {
             unreachable!();
         };
         assert_eq!(git.integrity.as_deref(), Some("sha512-old"));
-    }
-
-    #[test]
-    fn local_source_integrity_reads_remote_tarball_integrity() {
-        let source = LocalSource::RemoteTarball(aube_lockfile::RemoteTarballSource {
-            url: "https://example.com/dep-1.0.0.tgz".to_string(),
-            integrity: "sha512-remote".to_string(),
-            git_hosted: false,
-        });
-
-        assert_eq!(
-            local_source_integrity(&source).as_deref(),
-            Some("sha512-remote")
-        );
-    }
-
-    #[test]
-    fn local_source_integrity_ignores_empty_remote_tarball_integrity() {
-        let source = LocalSource::RemoteTarball(aube_lockfile::RemoteTarballSource {
-            url: "https://example.com/dep-1.0.0.tgz".to_string(),
-            integrity: String::new(),
-            git_hosted: false,
-        });
-
-        assert!(local_source_integrity(&source).is_none());
     }
 }
