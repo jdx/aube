@@ -1111,13 +1111,55 @@ fn normalize_publish_manifest(manifest: &mut serde_json::Value) {
     let Some(repository) = obj.get_mut("repository") else {
         return;
     };
-    let Some(url) = repository.as_str().filter(|url| !url.is_empty()) else {
+    let Some(url) = repository.as_str().and_then(normalize_repository_url) else {
         return;
     };
     *repository = serde_json::json!({
         "type": "git",
         "url": url,
     });
+}
+
+fn normalize_repository_url(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if raw.contains("://") || raw.starts_with("git@") {
+        return Some(raw.to_string());
+    }
+    for (prefix, host) in [
+        ("github:", "github.com"),
+        ("gitlab:", "gitlab.com"),
+        ("bitbucket:", "bitbucket.org"),
+    ] {
+        if let Some(path) = raw.strip_prefix(prefix) {
+            return hosted_repository_url(host, path);
+        }
+    }
+    if raw.split('/').count() == 2 && !raw.contains(':') {
+        return hosted_repository_url("github.com", raw);
+    }
+    Some(raw.to_string())
+}
+
+fn hosted_repository_url(host: &str, path: &str) -> Option<String> {
+    let path = path.trim_matches('/');
+    if path.is_empty() {
+        return None;
+    }
+    let (path, suffix) = path.split_once('#').unwrap_or((path, ""));
+    let fragment = if suffix.is_empty() {
+        String::new()
+    } else {
+        format!("#{suffix}")
+    };
+    let git_path = if path.ends_with(".git") {
+        path.to_string()
+    } else {
+        format!("{path}.git")
+    };
+    Some(format!("https://{host}/{git_path}{fragment}"))
 }
 
 fn archive_hashes(archive: &BuiltArchive) -> (String, String) {
@@ -1458,6 +1500,38 @@ mod tests {
                 "type": "hg",
                 "url": "https://example.com/acme/pkg"
             })
+        );
+    }
+
+    #[test]
+    fn repository_url_normalizer_expands_npm_shorthands() {
+        assert_eq!(
+            normalize_repository_url("acme/pkg").as_deref(),
+            Some("https://github.com/acme/pkg.git")
+        );
+        assert_eq!(
+            normalize_repository_url("github:acme/pkg").as_deref(),
+            Some("https://github.com/acme/pkg.git")
+        );
+        assert_eq!(
+            normalize_repository_url("gitlab:platform/tools/pkg#main").as_deref(),
+            Some("https://gitlab.com/platform/tools/pkg.git#main")
+        );
+        assert_eq!(
+            normalize_repository_url("bitbucket:acme/pkg.git").as_deref(),
+            Some("https://bitbucket.org/acme/pkg.git")
+        );
+    }
+
+    #[test]
+    fn repository_url_normalizer_preserves_explicit_urls() {
+        assert_eq!(
+            normalize_repository_url("https://codeberg.org/acme/pkg.git").as_deref(),
+            Some("https://codeberg.org/acme/pkg.git")
+        );
+        assert_eq!(
+            normalize_repository_url("git@github.com:acme/pkg.git").as_deref(),
+            Some("git@github.com:acme/pkg.git")
         );
     }
 
