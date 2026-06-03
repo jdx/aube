@@ -1351,7 +1351,13 @@ impl<'a> ResolveDriver<'a> {
                             format!("remote tarball {}: {e}", task.range),
                         )
                     })?;
-            (resolved_local, version, deps, None)
+            let integrity = match &resolved_local {
+                LocalSource::RemoteTarball(tarball) if !tarball.integrity.is_empty() => {
+                    Some(tarball.integrity.clone())
+                }
+                _ => None,
+            };
+            (resolved_local, version, deps, integrity)
         } else {
             // Rewrite the path to be relative to the project root so
             // every downstream consumer can resolve it with a single
