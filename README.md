@@ -22,6 +22,10 @@
   <strong><a href="https://aube.en.dev">Read the docs</a></strong>
 </p>
 
+<p align="center">
+  Sponsored by <a href="https://37signals.com">37signals</a>.
+</p>
+
 ## Why Try It
 
 <!-- BENCH_RATIOS:START -->
