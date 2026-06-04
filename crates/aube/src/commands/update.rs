@@ -870,8 +870,9 @@ fn select_global_updates(
             .push(raw.clone());
     }
 
-    for name in &missing {
-        eprintln!("Not globally installed: {name}");
+    if !missing.is_empty() {
+        let joined = missing.join(", ");
+        return Err(miette!("not globally installed: {joined}"));
     }
     if by_hash.is_empty() {
         return Err(miette!("no matching global packages were updated"));
