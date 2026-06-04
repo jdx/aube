@@ -344,15 +344,22 @@ pub(crate) fn plan_importer(
 /// Every placed package is recorded in `placements` so the install
 /// driver can later resolve `dep_path -> on-disk dir` for bin
 /// linking and lifecycle scripts without recomputing the plan.
+pub(crate) struct HoistedImporterDirs<'a> {
+    pub(crate) root: &'a Path,
+    pub(crate) importer: &'a Path,
+}
+
 pub(crate) fn link_hoisted_importer(
     linker: &Linker,
-    importer_dir: &Path,
+    dirs: HoistedImporterDirs<'_>,
     root_deps: &[DirectDep],
     graph: &LockfileGraph,
     package_indices: &BTreeMap<String, PackageIndex>,
     stats: &mut LinkStats,
     placements: &mut HoistedPlacements,
 ) -> Result<(), Error> {
+    let root_dir = dirs.root;
+    let importer_dir = dirs.importer;
     let nm = importer_dir.join(linker.modules_dir_name());
     crate::mkdirp(&nm)?;
 
@@ -393,14 +400,14 @@ pub(crate) fn link_hoisted_importer(
         // plan above because their target owns its deps. `portal:`
         // packages stay on the materialized-package path so their
         // graph-visible deps are linked like Yarn expects.
-        // `rebase_local` in the resolver already normalized the
-        // relative path to be importer-relative.
+        // `rebase_local` in the resolver (and preserved-lockfile
+        // import) stores local paths relative to the project root.
         if let Some(LocalSource::Link(rel)) = pkg.local_source.as_ref() {
             if let Some(parent) = pkg_dir.parent() {
                 crate::mkdirp(parent)?;
             }
             crate::try_remove_entry(&pkg_dir);
-            let abs_target = importer_dir.join(rel);
+            let abs_target = root_dir.join(rel);
             let link_parent = pkg_dir.parent().unwrap_or(&nm);
             let rel_target = pathdiff::diff_paths(&abs_target, link_parent).unwrap_or(abs_target);
             crate::sys::create_dir_link(&rel_target, &pkg_dir)

@@ -6,8 +6,28 @@ use crate::{
     CatalogEntry, DepType, DirectDep, Error, LocalSource, LockedPackage, LockfileGraph,
     PeerDepMeta, git_commits_match,
 };
+use aube_util::path::normalize_lexical;
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+fn rebase_importer_local(local: LocalSource, importer_path: &str) -> LocalSource {
+    fn rebase(path: PathBuf, importer_path: &str) -> PathBuf {
+        if importer_path == "." {
+            path
+        } else {
+            normalize_lexical(&Path::new(importer_path).join(path))
+        }
+    }
+
+    match local {
+        LocalSource::Directory(path) => LocalSource::Directory(rebase(path, importer_path)),
+        LocalSource::Tarball(path) => LocalSource::Tarball(rebase(path, importer_path)),
+        LocalSource::Link(path) => LocalSource::Link(rebase(path, importer_path)),
+        LocalSource::Portal(path) => LocalSource::Portal(rebase(path, importer_path)),
+        LocalSource::Exec(path) => LocalSource::Exec(rebase(path, importer_path)),
+        LocalSource::Git(_) | LocalSource::RemoteTarball(_) => local,
+    }
+}
 
 /// Parse a pnpm-lock.yaml file into a LockfileGraph.
 pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
@@ -21,6 +41,10 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
     // them off the canonical lockfile key.
     let mut importers = BTreeMap::new();
     let mut local_packages: BTreeMap<String, LockedPackage> = BTreeMap::new();
+    let mut local_importers: BTreeMap<String, String> = BTreeMap::new();
+    let mut local_snapshot_keys: BTreeMap<String, String> = BTreeMap::new();
+    let mut all_local_snapshot_keys: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
     let mut skipped_optional_dependencies: BTreeMap<String, BTreeMap<String, String>> =
         BTreeMap::new();
     // pnpm v9 encodes npm-aliases implicitly: the importer key is
@@ -35,6 +59,7 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
 
     let mut push_direct = |deps: &mut Vec<DirectDep>,
                            alias_remaps: &mut Vec<(String, String, String, String)>,
+                           importer_path: &str,
                            name: &str,
                            info: &RawDepSpec,
                            dep_type: DepType| {
@@ -80,6 +105,14 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
                 }
                 other => other,
             };
+            let snapshot_key = format!("{name}@{}", local.specifier());
+            let should_rebase = importer_path != "."
+                && (info.specifier == classify_version || info.specifier.starts_with("workspace:"));
+            let local = if should_rebase {
+                rebase_importer_local(local, importer_path)
+            } else {
+                local
+            };
             let dep_path = local.dep_path(name);
             deps.push(DirectDep {
                 name: name.to_string(),
@@ -96,10 +129,19 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
                     dependencies: BTreeMap::new(),
                     peer_dependencies: BTreeMap::new(),
                     peer_dependencies_meta: BTreeMap::new(),
-                    dep_path,
+                    dep_path: dep_path.clone(),
                     local_source: Some(local),
                     ..Default::default()
                 });
+            if should_rebase {
+                local_importers
+                    .entry(dep_path.clone())
+                    .or_insert_with(|| importer_path.to_string());
+            }
+            local_snapshot_keys
+                .entry(dep_path)
+                .or_insert_with(|| snapshot_key.clone());
+            all_local_snapshot_keys.insert(snapshot_key);
         } else {
             // Detect npm-aliased deps purely from the shape of
             // `version:`. pnpm encodes aliases as
@@ -177,6 +219,7 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
                 push_direct(
                     &mut deps,
                     &mut alias_remaps,
+                    importer_path,
                     name,
                     info,
                     DepType::Production,
@@ -185,12 +228,26 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
         }
         if let Some(ref d) = importer.dev_dependencies {
             for (name, info) in d {
-                push_direct(&mut deps, &mut alias_remaps, name, info, DepType::Dev);
+                push_direct(
+                    &mut deps,
+                    &mut alias_remaps,
+                    importer_path,
+                    name,
+                    info,
+                    DepType::Dev,
+                );
             }
         }
         if let Some(ref d) = importer.optional_dependencies {
             for (name, info) in d {
-                push_direct(&mut deps, &mut alias_remaps, name, info, DepType::Optional);
+                push_direct(
+                    &mut deps,
+                    &mut alias_remaps,
+                    importer_path,
+                    name,
+                    info,
+                    DepType::Optional,
+                );
             }
         }
 
@@ -226,18 +283,32 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
     for local_pkg in local_packages.values_mut() {
         if let Some(ref local) = local_pkg.local_source {
             let canonical = format!("{}@{}", local_pkg.name, local.specifier());
+            let snapshot_key = local_snapshot_keys
+                .get(&local_pkg.dep_path)
+                .map(String::as_str)
+                .unwrap_or(canonical.as_str());
             // URL-based direct deps have their peer-context suffix
             // stripped (see `push_direct`), but the matching snapshot
             // entry pnpm wrote still carries the suffix. Fall back to
             // any snapshot whose peer-stripped canonical matches so
             // transitive dependency metadata still flows through.
-            let snap = raw.snapshots.get(&canonical).or_else(|| {
-                raw.snapshots.iter().find_map(|(k, v)| {
-                    parse_dep_path(k)
-                        .filter(|(n, ver)| format!("{n}@{ver}") == canonical)
-                        .map(|_| v)
+            let snap = raw
+                .snapshots
+                .get(snapshot_key)
+                .or_else(|| {
+                    if snapshot_key == canonical {
+                        None
+                    } else {
+                        raw.snapshots.get(&canonical)
+                    }
                 })
-            });
+                .or_else(|| {
+                    raw.snapshots.iter().find_map(|(k, v)| {
+                        parse_dep_path(k)
+                            .filter(|(n, ver)| format!("{n}@{ver}") == canonical)
+                            .map(|_| v)
+                    })
+                });
             if let Some(snap) = snap
                 && let Some(mut deps) = snap.dependencies.clone()
             {
@@ -296,6 +367,9 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
                 && let Some(ref res) = pkg_info.resolution
                 && let Some(mut ls) = local_source_from_resolution(res)
             {
+                if let Some(importer_path) = local_importers.get(&local_pkg.dep_path) {
+                    ls = rebase_importer_local(ls, importer_path);
+                }
                 if matches!(ls, LocalSource::Git(_) | LocalSource::RemoteTarball(_)) {
                     local_pkg.integrity = res.integrity.clone();
                 }
@@ -346,7 +420,7 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
     }
     // Canonical keys the main loop should ignore — those are the
     // snapshot keys we already absorbed above.
-    let local_canonical_keys: std::collections::HashSet<String> = local_packages
+    let mut local_canonical_keys: std::collections::HashSet<String> = local_packages
         .values()
         .filter_map(|p| {
             p.local_source
@@ -354,6 +428,7 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
                 .map(|l| format!("{}@{}", p.name, l.specifier()))
         })
         .collect();
+    local_canonical_keys.extend(all_local_snapshot_keys);
 
     let snapshot_keys: Vec<String> = if raw.snapshots.is_empty() {
         raw.packages.keys().cloned().collect()
