@@ -260,11 +260,22 @@ _setup_filter_workspace() {
 	assert_output --partial "other-ran"
 }
 
-@test "aube -F update: --global no-op still preserves workspace filter" {
+@test "aube -F update: --global uses global installs instead of workspace filter" {
 	_setup_filter_workspace
-	node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('packages/lib-a/package.json')); p.dependencies={'is-odd':'^0.1.0'}; fs.writeFileSync('packages/lib-a/package.json', JSON.stringify(p, null, 2));"
+	cat >packages/lib-a/package.json <<-'EOF'
+		{
+		  "name": "@scope/lib-a",
+		  "version": "1.0.0",
+		  "dependencies": { "is-odd": "^0.1.0" },
+		  "scripts": { "hello": "echo lib-a-ran" }
+		}
+	EOF
 
 	run aube -F @scope/lib-a update --global is-odd
+	assert_failure
+	assert_output --partial "no global packages installed"
+
+	run grep -F '"is-odd": "^0.1.0"' packages/lib-a/package.json
 	assert_success
 }
 
