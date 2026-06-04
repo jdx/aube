@@ -463,6 +463,43 @@ snapshots:
 }
 
 #[test]
+fn parse_workspace_protocol_link_versions_are_rebased_from_importer() {
+    let dir = tempfile::tempdir().unwrap();
+    let lockfile_path = dir.path().join("pnpm-lock.yaml");
+    std::fs::write(
+        &lockfile_path,
+        r#"
+lockfileVersion: '9.0'
+
+importers:
+  .: {}
+
+  pkg-a:
+    dependencies:
+      pkg-b:
+        specifier: workspace:*
+        version: link:../pkg-b
+
+  pkg-b: {}
+"#,
+    )
+    .unwrap();
+
+    let graph = parse(&lockfile_path).unwrap();
+    let pkg_b = graph
+        .packages
+        .values()
+        .find(|pkg| pkg.name == "pkg-b")
+        .expect("pkg-b");
+    assert_eq!(pkg_b.local_source, Some(LocalSource::Link("pkg-b".into())));
+    assert_eq!(graph.importers["pkg-a"][0].dep_path, pkg_b.dep_path);
+    assert_eq!(
+        graph.importers["pkg-a"][0].specifier.as_deref(),
+        Some("workspace:*")
+    );
+}
+
+#[test]
 fn parse_aube_written_workspace_local_paths_are_not_rebased_twice() {
     let dir = tempfile::tempdir().unwrap();
     let lockfile_path = dir.path().join("pnpm-lock.yaml");

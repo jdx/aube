@@ -106,7 +106,8 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
                 other => other,
             };
             let snapshot_key = format!("{name}@{}", local.specifier());
-            let should_rebase = importer_path != "." && info.specifier == classify_version;
+            let should_rebase = importer_path != "."
+                && (info.specifier == classify_version || info.specifier.starts_with("workspace:"));
             let local = if should_rebase {
                 rebase_importer_local(local, importer_path)
             } else {
