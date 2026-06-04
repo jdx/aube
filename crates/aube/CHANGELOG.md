@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.18.0](https://github.com/endevco/aube/compare/v1.17.1...v1.18.0) - 2026-06-04
+
+### Added
+
+- add sponsors command ([#824](https://github.com/endevco/aube/pull/824))
+
+### Fixed
+
+- *(publish)* normalize repository field ([#826](https://github.com/endevco/aube/pull/826))
+
+### Other
+
+- refresh benchmarks for v1.17.1 ([#820](https://github.com/endevco/aube/pull/820))
+
 ## [1.17.1](https://github.com/endevco/aube/compare/v1.17.0...v1.17.1) - 2026-05-31
 
 ### Other
