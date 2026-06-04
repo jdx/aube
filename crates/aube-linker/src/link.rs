@@ -29,6 +29,7 @@ impl Linker {
             hoisted::link_hoisted_importer(
                 self,
                 project_dir,
+                project_dir,
                 graph.root_deps(),
                 graph,
                 package_indices,
@@ -548,6 +549,7 @@ impl Linker {
                 .collect();
             hoisted::link_hoisted_importer(
                 self,
+                root_dir,
                 &importer_dir,
                 &planner_deps,
                 graph,

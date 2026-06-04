@@ -346,6 +346,7 @@ pub(crate) fn plan_importer(
 /// linking and lifecycle scripts without recomputing the plan.
 pub(crate) fn link_hoisted_importer(
     linker: &Linker,
+    root_dir: &Path,
     importer_dir: &Path,
     root_deps: &[DirectDep],
     graph: &LockfileGraph,
@@ -393,14 +394,14 @@ pub(crate) fn link_hoisted_importer(
         // plan above because their target owns its deps. `portal:`
         // packages stay on the materialized-package path so their
         // graph-visible deps are linked like Yarn expects.
-        // `rebase_local` in the resolver already normalized the
-        // relative path to be importer-relative.
+        // `rebase_local` in the resolver (and preserved-lockfile
+        // import) stores local paths relative to the project root.
         if let Some(LocalSource::Link(rel)) = pkg.local_source.as_ref() {
             if let Some(parent) = pkg_dir.parent() {
                 crate::mkdirp(parent)?;
             }
             crate::try_remove_entry(&pkg_dir);
-            let abs_target = importer_dir.join(rel);
+            let abs_target = root_dir.join(rel);
             let link_parent = pkg_dir.parent().unwrap_or(&nm);
             let rel_target = pathdiff::diff_paths(&abs_target, link_parent).unwrap_or(abs_target);
             crate::sys::create_dir_link(&rel_target, &pkg_dir)
