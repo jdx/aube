@@ -39,13 +39,13 @@ same dependency versions CI built against. The compiled binary lands in
 
 ## From Homebrew
 
-aube is published from the Endev tap until it lands in homebrew-core:
+If you use Homebrew, you can install `aube` as follows:
 
 ```sh
-brew install endevco/tap/aube
+brew install aube
 ```
 
-The tap formula builds from source and installs shell completions.
+The formula is precompiled and will install shell completions automatically.
 
 ## From npm
 
