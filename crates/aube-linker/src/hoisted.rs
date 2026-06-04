@@ -344,16 +344,22 @@ pub(crate) fn plan_importer(
 /// Every placed package is recorded in `placements` so the install
 /// driver can later resolve `dep_path -> on-disk dir` for bin
 /// linking and lifecycle scripts without recomputing the plan.
+pub(crate) struct HoistedImporterDirs<'a> {
+    pub(crate) root: &'a Path,
+    pub(crate) importer: &'a Path,
+}
+
 pub(crate) fn link_hoisted_importer(
     linker: &Linker,
-    root_dir: &Path,
-    importer_dir: &Path,
+    dirs: HoistedImporterDirs<'_>,
     root_deps: &[DirectDep],
     graph: &LockfileGraph,
     package_indices: &BTreeMap<String, PackageIndex>,
     stats: &mut LinkStats,
     placements: &mut HoistedPlacements,
 ) -> Result<(), Error> {
+    let root_dir = dirs.root;
+    let importer_dir = dirs.importer;
     let nm = importer_dir.join(linker.modules_dir_name());
     crate::mkdirp(&nm)?;
 
