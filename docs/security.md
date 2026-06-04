@@ -125,9 +125,11 @@ Full reference: [Jailed builds](/package-manager/jailed-builds).
 trust evidence than any earlier-published version of the same package. aube
 only counts the structured metadata shape npm emits after registry-side checks:
 
-1. **npm trusted-publisher** — package was published via OIDC from a trusted
+1. **npm staged publish approval** — package metadata carries an `approver`
+   field from the registry-side approval flow.
+2. **npm trusted-publisher** — package was published via OIDC from a trusted
    CI provider (`_npmUser.trustedPublisher.id`).
-2. **Sigstore provenance** — package was published with `npm publish
+3. **Sigstore provenance** — package was published with `npm publish
    --provenance` (`dist.attestations.provenance.predicateType` with an SLSA
    provenance URI).
 

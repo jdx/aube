@@ -366,6 +366,193 @@ snapshots:
 }
 
 #[test]
+fn parse_workspace_local_snapshot_keys_do_not_duplicate_rebased_packages() {
+    let dir = tempfile::tempdir().unwrap();
+    let lockfile_path = dir.path().join("pnpm-lock.yaml");
+    std::fs::write(
+        &lockfile_path,
+        r#"
+lockfileVersion: '9.0'
+
+importers:
+  .: {}
+
+  pkg-a:
+    dependencies:
+      pkg-b:
+        specifier: link:../gems/pkg-b-parent/pkg-b
+        version: link:../gems/pkg-b-parent/pkg-b
+
+packages:
+  pkg-b@link:../gems/pkg-b-parent/pkg-b:
+    resolution: {directory: ../gems/pkg-b-parent/pkg-b, type: directory}
+
+snapshots:
+  pkg-b@link:../gems/pkg-b-parent/pkg-b: {}
+"#,
+    )
+    .unwrap();
+
+    let graph = parse(&lockfile_path).unwrap();
+    let pkg_b_entries: Vec<_> = graph
+        .packages
+        .values()
+        .filter(|pkg| pkg.name == "pkg-b")
+        .collect();
+    assert_eq!(pkg_b_entries.len(), 1);
+    assert_eq!(
+        pkg_b_entries[0].local_source,
+        Some(LocalSource::Link("gems/pkg-b-parent/pkg-b".into()))
+    );
+    assert_eq!(
+        graph.importers["pkg-a"][0].dep_path,
+        pkg_b_entries[0].dep_path
+    );
+}
+
+#[test]
+fn parse_multi_importer_local_snapshot_keys_do_not_create_orphans() {
+    let dir = tempfile::tempdir().unwrap();
+    let lockfile_path = dir.path().join("pnpm-lock.yaml");
+    std::fs::write(
+        &lockfile_path,
+        r#"
+lockfileVersion: '9.0'
+
+importers:
+  .: {}
+
+  pkg-a:
+    dependencies:
+      pkg-b:
+        specifier: link:../gems/pkg-b-parent/pkg-b
+        version: link:../gems/pkg-b-parent/pkg-b
+
+  packages/deep-app:
+    dependencies:
+      pkg-b:
+        specifier: link:../../gems/pkg-b-parent/pkg-b
+        version: link:../../gems/pkg-b-parent/pkg-b
+
+snapshots:
+  pkg-b@link:../gems/pkg-b-parent/pkg-b: {}
+  pkg-b@link:../../gems/pkg-b-parent/pkg-b: {}
+"#,
+    )
+    .unwrap();
+
+    let graph = parse(&lockfile_path).unwrap();
+    let pkg_b_entries: Vec<_> = graph
+        .packages
+        .values()
+        .filter(|pkg| pkg.name == "pkg-b")
+        .collect();
+    assert_eq!(pkg_b_entries.len(), 1);
+    assert_eq!(
+        pkg_b_entries[0].local_source,
+        Some(LocalSource::Link("gems/pkg-b-parent/pkg-b".into()))
+    );
+    assert_eq!(
+        graph.importers["pkg-a"][0].dep_path,
+        pkg_b_entries[0].dep_path
+    );
+    assert_eq!(
+        graph.importers["packages/deep-app"][0].dep_path,
+        pkg_b_entries[0].dep_path
+    );
+}
+
+#[test]
+fn parse_workspace_protocol_link_versions_are_rebased_from_importer() {
+    let dir = tempfile::tempdir().unwrap();
+    let lockfile_path = dir.path().join("pnpm-lock.yaml");
+    std::fs::write(
+        &lockfile_path,
+        r#"
+lockfileVersion: '9.0'
+
+importers:
+  .: {}
+
+  pkg-a:
+    dependencies:
+      pkg-b:
+        specifier: workspace:*
+        version: link:../pkg-b
+
+  pkg-b: {}
+"#,
+    )
+    .unwrap();
+
+    let graph = parse(&lockfile_path).unwrap();
+    let pkg_b = graph
+        .packages
+        .values()
+        .find(|pkg| pkg.name == "pkg-b")
+        .expect("pkg-b");
+    assert_eq!(pkg_b.local_source, Some(LocalSource::Link("pkg-b".into())));
+    assert_eq!(graph.importers["pkg-a"][0].dep_path, pkg_b.dep_path);
+    assert_eq!(
+        graph.importers["pkg-a"][0].specifier.as_deref(),
+        Some("workspace:*")
+    );
+}
+
+#[test]
+fn parse_aube_written_workspace_local_paths_are_not_rebased_twice() {
+    let dir = tempfile::tempdir().unwrap();
+    let lockfile_path = dir.path().join("pnpm-lock.yaml");
+    std::fs::write(
+        &lockfile_path,
+        r#"
+lockfileVersion: '9.0'
+
+importers:
+  .: {}
+
+  pkg-a:
+    dependencies:
+      pkg-b:
+        specifier: link:../gems/pkg-b-parent/pkg-b
+        version: link:gems/pkg-b-parent/pkg-b
+
+      pkg-c:
+        specifier: file:../gems/pkg-c
+        version: file:gems/pkg-c
+
+packages:
+  pkg-c@file:gems/pkg-c:
+    resolution: {directory: gems/pkg-c, type: directory}
+
+snapshots:
+  pkg-c@file:gems/pkg-c: {}
+"#,
+    )
+    .unwrap();
+
+    let graph = parse(&lockfile_path).unwrap();
+    let pkg_b = graph
+        .packages
+        .values()
+        .find(|pkg| pkg.name == "pkg-b")
+        .expect("pkg-b");
+    assert_eq!(
+        pkg_b.local_source,
+        Some(LocalSource::Link("gems/pkg-b-parent/pkg-b".into()))
+    );
+    let pkg_c = graph
+        .packages
+        .values()
+        .find(|pkg| pkg.name == "pkg-c")
+        .expect("pkg-c");
+    assert_eq!(
+        pkg_c.local_source,
+        Some(LocalSource::Directory("gems/pkg-c".into()))
+    );
+}
+
+#[test]
 fn parse_transitive_url_entry_uses_pnpm_version_field() {
     // Regression: pnpm writes non-registry transitive entries with
     // the tarball URL in the dep-path key and the real semver in a
@@ -2553,6 +2740,51 @@ snapshots:
             "{scheme}: {err}"
         );
     }
+}
+
+#[test]
+fn remote_tarball_integrity_survives_lockfile_reuse_roundtrip() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pnpm-lock.yaml");
+    std::fs::write(
+        &path,
+        r#"
+lockfileVersion: '9.0'
+importers:
+  .:
+    dependencies:
+      demo:
+        specifier: https://registry.example.test/demo/-/demo-1.0.0.tgz
+        version: https://registry.example.test/demo/-/demo-1.0.0.tgz
+packages:
+  demo@https://registry.example.test/demo/-/demo-1.0.0.tgz(react@18.2.0):
+    resolution: {integrity: sha512-demo, tarball: https://registry.example.test/demo/-/demo-1.0.0.tgz}
+    version: 1.0.0
+snapshots:
+  demo@https://registry.example.test/demo/-/demo-1.0.0.tgz(react@18.2.0): {}
+"#,
+    )
+    .unwrap();
+
+    let graph = parse(&path).unwrap();
+    let pkg = graph
+        .packages
+        .values()
+        .find(|pkg| pkg.name == "demo")
+        .expect("demo package");
+    assert_eq!(pkg.integrity.as_deref(), Some("sha512-demo"));
+    let Some(LocalSource::RemoteTarball(source)) = &pkg.local_source else {
+        panic!("expected remote tarball source, got {:?}", pkg.local_source);
+    };
+    assert_eq!(source.integrity, "sha512-demo");
+
+    write(&path, &graph, &PackageJson::default()).unwrap();
+    let yaml = std::fs::read_to_string(&path).unwrap();
+    assert!(yaml.contains("integrity: sha512-demo"), "{yaml}");
+    assert!(
+        yaml.contains("tarball: https://registry.example.test/demo/-/demo-1.0.0.tgz"),
+        "{yaml}"
+    );
 }
 
 #[test]

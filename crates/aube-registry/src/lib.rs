@@ -291,6 +291,11 @@ pub struct VersionMetadata {
     /// Deprecation message from the registry, if this version is deprecated.
     #[serde(default, deserialize_with = "deprecated_string")]
     pub deprecated: Option<String>,
+    /// npm staged-publish approval metadata. When present, the
+    /// resolver treats it as the strongest trust evidence because the
+    /// publish went through a registry-side approval flow.
+    #[serde(default)]
+    pub approver: Option<serde_json::Value>,
     /// `_npmUser` block from the packument, when present. The
     /// trust-policy check reads `_npmUser.trustedPublisher` as the
     /// strongest trust-evidence signal (npm's "trusted publishers"
@@ -355,6 +360,8 @@ struct VersionMetadataRaw {
     has_install_script: bool,
     #[serde(default, deserialize_with = "deprecated_string")]
     deprecated: Option<String>,
+    #[serde(default)]
+    approver: Option<serde_json::Value>,
     #[serde(default, rename = "_npmUser", deserialize_with = "npm_user_tolerant")]
     npm_user: Option<NpmUser>,
 }
@@ -380,6 +387,7 @@ impl From<VersionMetadataRaw> for VersionMetadata {
             bin: raw.bin,
             has_install_script: raw.has_install_script,
             deprecated: raw.deprecated,
+            approver: raw.approver,
             npm_user: raw.npm_user,
         }
     }
@@ -835,6 +843,24 @@ mod tests {
     }
 
     #[test]
+    fn approver_metadata_is_extracted() {
+        let v = parse(
+            r#"{
+                "name":"x",
+                "version":"1.0.0",
+                "approver":{"name":"release-manager"}
+            }"#,
+        );
+        assert_eq!(
+            v.approver
+                .as_ref()
+                .and_then(|a| a.get("name"))
+                .and_then(serde_json::Value::as_str),
+            Some("release-manager")
+        );
+    }
+
+    #[test]
     fn bin_normalizes_packument_shapes() {
         let missing = parse(r#"{"name":"x","version":"1.0.0"}"#);
         assert!(missing.bin.is_empty(), "missing bin → empty map");
@@ -881,6 +907,7 @@ mod tests {
             bin,
             has_install_script: false,
             deprecated: None,
+            approver: None,
             npm_user: None,
         };
         let json = serde_json::to_string(&v).unwrap();

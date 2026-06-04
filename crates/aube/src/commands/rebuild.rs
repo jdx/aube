@@ -123,15 +123,23 @@ pub async fn run(
             // is parsed out of — no need for a separate fallback on the
             // typed struct field.
             let node_linker_setting = aube_settings::resolved::node_linker(&settings_ctx);
+            let hoisting_limits = crate::commands::settings_hoisting_limits_to_linker(
+                aube_settings::resolved::hoisting_limits(&settings_ctx),
+            );
             let hoisted_placements = match node_linker_setting {
                 aube_settings::resolved::NodeLinker::Pnp => {
                     return Err(miette!(
                         "node-linker=pnp is not supported by aube; use `isolated` (default) or `hoisted`"
                     ));
                 }
-                aube_settings::resolved::NodeLinker::Hoisted => Some(
-                    aube_linker::HoistedPlacements::from_graph(&cwd, &graph, &modules_dir_name)?,
-                ),
+                aube_settings::resolved::NodeLinker::Hoisted => {
+                    Some(aube_linker::HoistedPlacements::from_graph(
+                        &cwd,
+                        &graph,
+                        &modules_dir_name,
+                        hoisting_limits,
+                    )?)
+                }
                 aube_settings::resolved::NodeLinker::Isolated => None,
             };
             let side_effects_cache_root =

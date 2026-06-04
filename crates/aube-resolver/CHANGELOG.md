@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.1](https://github.com/endevco/aube/compare/aube-resolver-v1.17.0...aube-resolver-v1.17.1) - 2026-05-31
+
+### Other
+
+- *(ci)* switch back to namespace runners ([#819](https://github.com/endevco/aube/pull/819))
+
+## [1.17.0](https://github.com/endevco/aube/compare/aube-resolver-v1.16.1...aube-resolver-v1.17.0) - 2026-05-31
+
+### Added
+
+- *(resolver)* trust staged publishes ([#810](https://github.com/endevco/aube/pull/810))
+
+### Other
+
+- *(resolver)* cover alias peer cycle ([#813](https://github.com/endevco/aube/pull/813))
+- *(ci)* switch to github-hosted runners ([#814](https://github.com/endevco/aube/pull/814))
+- refresh benchmarks for v1.16.1 ([#808](https://github.com/endevco/aube/pull/808))
+
 ## [1.16.1](https://github.com/endevco/aube/compare/aube-resolver-v1.16.0...aube-resolver-v1.16.1) - 2026-05-29
 
 ### Other

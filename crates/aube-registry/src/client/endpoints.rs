@@ -175,7 +175,13 @@ impl RegistryClient {
     /// Create or update a dist-tag for a package. The npm registry
     /// expects a PUT with a JSON-string body — e.g. `"1.2.3"`, *with*
     /// the quotes — and Content-Type: application/json. Requires auth.
-    pub async fn put_dist_tag(&self, name: &str, tag: &str, version: &str) -> Result<(), Error> {
+    pub async fn put_dist_tag(
+        &self,
+        name: &str,
+        tag: &str,
+        version: &str,
+        otp: Option<&str>,
+    ) -> Result<(), Error> {
         let registry_url = self.registry_url_for(name);
         let url = dist_tag_url(registry_url, name, tag);
 
@@ -185,11 +191,19 @@ impl RegistryClient {
         // string literal like `"1.2.3"`.
         let body = serde_json::to_string(version).map_err(std::io::Error::other)?;
 
-        let req = self
+        let mut req = self
             .http_for(registry_url)
             .put(&url)
             .header("Content-Type", "application/json")
             .body(body);
+        if self.config.is_public_npmjs(name) {
+            req = req.header("npm-auth-type", "web");
+        }
+        let req = if let Some(code) = otp {
+            req.header("npm-otp", code)
+        } else {
+            req
+        };
         let resp = self.authed(req, registry_url).send().await?;
         check_dist_tag_status(&resp, name)?;
         resp.error_for_status()?;
@@ -198,10 +212,23 @@ impl RegistryClient {
 
     /// Remove a dist-tag from a package. Registry DELETE against
     /// `/-/package/<pkg>/dist-tags/<tag>`. Requires auth.
-    pub async fn delete_dist_tag(&self, name: &str, tag: &str) -> Result<(), Error> {
+    pub async fn delete_dist_tag(
+        &self,
+        name: &str,
+        tag: &str,
+        otp: Option<&str>,
+    ) -> Result<(), Error> {
         let registry_url = self.registry_url_for(name);
         let url = dist_tag_url(registry_url, name, tag);
-        let req = self.http_for(registry_url).delete(&url);
+        let mut req = self.http_for(registry_url).delete(&url);
+        if self.config.is_public_npmjs(name) {
+            req = req.header("npm-auth-type", "web");
+        }
+        let req = if let Some(code) = otp {
+            req.header("npm-otp", code)
+        } else {
+            req
+        };
         let resp = self.authed(req, registry_url).send().await?;
         // 404 here is ambiguous: package doesn't exist vs tag doesn't
         // exist on this package. Surface the `name@tag` form so the

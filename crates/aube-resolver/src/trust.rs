@@ -2,17 +2,18 @@
 //!
 //! Mirrors pnpm's `failIfTrustDowngraded`
 //! (resolving/npm-resolver/src/trustChecks.ts), verified against pnpm's
-//! own test suite. Two trust-evidence sources, ranked
-//! `TrustedPublisher (2) > Provenance (1)`. aube only accepts the
-//! structured metadata shapes npm emits after server-side checks:
-//! `_npmUser.trustedPublisher` must name a publisher id, and
-//! `dist.attestations.provenance` must name an SLSA provenance predicate.
-//! This is metadata-shape validation, not install-time cryptographic
-//! verification of the attestation bundle. The check runs immediately
-//! after a version is picked from a packument: if any strictly older
-//! version of the same package had stronger trust evidence, the install
-//! fails. Pre-2010 packuments without per-version `time` entries error
-//! when the picked version isn't excluded — same as pnpm.
+//! own test suite. Three trust-evidence sources, ranked
+//! `StagedPublish (3) > TrustedPublisher (2) > Provenance (1)`. aube
+//! only accepts the structured metadata shapes npm emits after
+//! server-side checks: `approver` must be present, `_npmUser.trustedPublisher`
+//! must name a publisher id, and `dist.attestations.provenance` must
+//! name an SLSA provenance predicate. This is metadata-shape validation,
+//! not install-time cryptographic verification of the attestation bundle.
+//! The check runs immediately after a version is picked from a packument:
+//! if any strictly older version of the same package had stronger trust
+//! evidence, the install fails. Pre-2010 packuments without per-version
+//! `time` entries error when the picked version isn't excluded — same as
+//! pnpm.
 
 use aube_registry::{Packument, VersionMetadata};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -22,6 +23,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// rank order, so callers must go through [`Self::rank`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrustEvidence {
+    StagedPublish,
     TrustedPublisher,
     Provenance,
 }
@@ -29,6 +31,7 @@ pub enum TrustEvidence {
 impl TrustEvidence {
     pub fn rank(self) -> u8 {
         match self {
+            Self::StagedPublish => 3,
             Self::TrustedPublisher => 2,
             Self::Provenance => 1,
         }
@@ -36,6 +39,7 @@ impl TrustEvidence {
 
     pub fn label(self) -> &'static str {
         match self {
+            Self::StagedPublish => "staged publish approval",
             Self::TrustedPublisher => "trusted publisher",
             Self::Provenance => "provenance attestation",
         }
@@ -43,8 +47,12 @@ impl TrustEvidence {
 }
 
 /// Strongest trust evidence carried by a single version's metadata.
-/// `_npmUser.trustedPublisher` outranks `dist.attestations.provenance`.
+/// `approver` outranks `_npmUser.trustedPublisher`, which outranks
+/// `dist.attestations.provenance`.
 pub fn evidence_for(meta: &VersionMetadata) -> Option<TrustEvidence> {
+    if meta.approver.as_ref().is_some_and(is_approver) {
+        return Some(TrustEvidence::StagedPublish);
+    }
     if meta
         .npm_user
         .as_ref()
@@ -63,6 +71,21 @@ pub fn evidence_for(meta: &VersionMetadata) -> Option<TrustEvidence> {
         return Some(TrustEvidence::Provenance);
     }
     None
+}
+
+fn is_approver(v: &serde_json::Value) -> bool {
+    match v {
+        serde_json::Value::Null => false,
+        serde_json::Value::String(s) => !s.is_empty(),
+        serde_json::Value::Array(a) => a.iter().any(is_approver),
+        serde_json::Value::Object(o) => o.values().any(is_approver),
+        serde_json::Value::Bool(b) => *b,
+        serde_json::Value::Number(n) => {
+            n.as_i64().is_some_and(|i| i != 0)
+                || n.as_u64().is_some_and(|u| u != 0)
+                || n.as_f64().is_some_and(|f| f != 0.0)
+        }
+    }
 }
 
 fn is_trusted_publisher(v: &serde_json::Value) -> bool {
@@ -194,7 +217,7 @@ pub fn check_no_downgrade(
             }
             _ => {}
         }
-        if matches!(best, Some((TrustEvidence::TrustedPublisher, _))) {
+        if matches!(best, Some((TrustEvidence::StagedPublish, _))) {
             break;
         }
     }
@@ -513,6 +536,7 @@ mod tests {
             bin: BTreeMap::new(),
             has_install_script: false,
             deprecated: None,
+            approver: None,
             npm_user: None,
         }
     }
@@ -531,6 +555,11 @@ mod tests {
         v.npm_user = Some(NpmUser {
             trusted_publisher: Some(serde_json::json!({"id": "gh"})),
         });
+        v
+    }
+
+    fn with_staged_publish(mut v: VersionMetadata) -> VersionMetadata {
+        v.approver = Some(serde_json::json!({"name": "release-manager"}));
         v
     }
 
@@ -553,6 +582,14 @@ mod tests {
     fn evidence_trusted_publisher_outranks_provenance() {
         let v = with_trusted_publisher(with_provenance(version("foo", "1.0.0")));
         assert_eq!(evidence_for(&v), Some(TrustEvidence::TrustedPublisher));
+    }
+
+    #[test]
+    fn evidence_staged_publish_outranks_trusted_publisher() {
+        let v = with_staged_publish(with_trusted_publisher(with_provenance(version(
+            "foo", "1.0.0",
+        ))));
+        assert_eq!(evidence_for(&v), Some(TrustEvidence::StagedPublish));
     }
 
     #[test]
@@ -590,6 +627,54 @@ mod tests {
                 evidence_for(&v),
                 None,
                 "{malformed:?} should not count as trusted-publisher evidence"
+            );
+        }
+    }
+
+    #[test]
+    fn evidence_empty_approver_is_none() {
+        let mut v = version("foo", "1.0.0");
+        for malformed in [
+            serde_json::Value::Bool(false),
+            serde_json::Value::Null,
+            serde_json::json!(0),
+            serde_json::json!(0.0),
+            serde_json::json!(""),
+            serde_json::json!([]),
+            serde_json::json!([null]),
+            serde_json::json!([false]),
+            serde_json::json!([""]),
+            serde_json::json!([[], {}]),
+            serde_json::json!({}),
+            serde_json::json!({"name": null}),
+            serde_json::json!({"name": null, "email": null}),
+            serde_json::json!({"name": ""}),
+            serde_json::json!({"nested": {}}),
+        ] {
+            v.approver = Some(malformed.clone());
+            assert_eq!(
+                evidence_for(&v),
+                None,
+                "{malformed:?} should not count as staged-publish evidence"
+            );
+        }
+    }
+
+    #[test]
+    fn evidence_truthy_scalar_approver_counts() {
+        let mut v = version("foo", "1.0.0");
+        for approver in [
+            serde_json::Value::Bool(true),
+            serde_json::json!(1),
+            serde_json::json!("release-manager"),
+            serde_json::json!(["release-manager"]),
+            serde_json::json!({"name": "release-manager"}),
+        ] {
+            v.approver = Some(approver.clone());
+            assert_eq!(
+                evidence_for(&v),
+                Some(TrustEvidence::StagedPublish),
+                "{approver:?} should count as staged-publish evidence"
             );
         }
     }
@@ -729,6 +814,59 @@ mod tests {
             }
             _ => panic!("expected Downgrade"),
         }
+    }
+
+    #[test]
+    fn downgrade_staged_publish_to_trusted_publisher_fails() {
+        let p = packument(
+            "foo",
+            vec![
+                ("1.0.0", "2025-01-01T00:00:00.000Z", version("foo", "1.0.0")),
+                (
+                    "2.0.0",
+                    "2025-02-01T00:00:00.000Z",
+                    with_staged_publish(version("foo", "2.0.0")),
+                ),
+                (
+                    "3.0.0",
+                    "2025-03-01T00:00:00.000Z",
+                    with_trusted_publisher(version("foo", "3.0.0")),
+                ),
+            ],
+        );
+        let picked = p.versions.get("3.0.0").unwrap();
+        let err = check_no_downgrade(&p, "3.0.0", picked, &TrustExcludeRules::default(), None)
+            .expect_err("staged publish → trusted publisher is a downgrade");
+        match err {
+            TrustCheckError::Downgrade(d) => {
+                assert_eq!(d.prior_evidence, TrustEvidence::StagedPublish);
+                assert_eq!(d.prior_version, "2.0.0");
+                assert_eq!(d.current_evidence, Some(TrustEvidence::TrustedPublisher));
+            }
+            _ => panic!("expected Downgrade"),
+        }
+    }
+
+    #[test]
+    fn staged_publish_after_trusted_publisher_passes() {
+        let p = packument(
+            "foo",
+            vec![
+                (
+                    "1.0.0",
+                    "2025-01-01T00:00:00.000Z",
+                    with_trusted_publisher(version("foo", "1.0.0")),
+                ),
+                (
+                    "2.0.0",
+                    "2025-02-01T00:00:00.000Z",
+                    with_staged_publish(version("foo", "2.0.0")),
+                ),
+            ],
+        );
+        let picked = p.versions.get("2.0.0").unwrap();
+        let result = check_no_downgrade(&p, "2.0.0", picked, &TrustExcludeRules::default(), None);
+        assert!(result.is_ok());
     }
 
     #[test]

@@ -688,10 +688,12 @@ mod tests {
             name: "any".to_string(),
             version: "1".to_string(),
         }];
-        let err = run_scanner(scanner_path.to_str().unwrap(), tmp.path(), &pkgs)
+        let advisories = invoke(scanner_path.to_str().unwrap(), tmp.path(), &pkgs)
             .await
-            .unwrap_err();
-        assert!(format!("{err:?}").contains("wrapped"));
+            .unwrap();
+        assert_eq!(advisories.len(), 1);
+        assert_eq!(advisories[0].package, "any");
+        assert_eq!(advisories[0].description, "wrapped");
     }
 
     /// Bun-compat test: a scanner that does `import Bun from 'bun'`

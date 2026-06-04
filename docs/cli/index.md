@@ -3,7 +3,7 @@
 
 **Usage**: `aube [FLAGS] <SUBCOMMAND>`
 
-**Version**: 1.16.1
+**Version**: 1.17.1
 
 - **Usage**: `aube [FLAGS] <SUBCOMMAND>`
 
@@ -144,9 +144,9 @@ Run from the workspace root regardless of the current package
 - [`aube diag analyze <PATH>`](/cli/diag/analyze.md)
 - [`aube diag compare [--min-delta-ms <MIN_DELTA_MS>] [--min-pct <MIN_PCT>] <A> <B>`](/cli/diag/compare.md)
 - [`aube dist-tag [FLAGS] <SUBCOMMAND>`](/cli/dist-tag.md)
-- [`aube dist-tag add <SPEC> [TAG]`](/cli/dist-tag/add.md)
+- [`aube dist-tag add [--otp <OTP>] <SPEC> [TAG]`](/cli/dist-tag/add.md)
 - [`aube dist-tag ls [PACKAGE]`](/cli/dist-tag/ls.md)
-- [`aube dist-tag rm <PACKAGE> <TAG>`](/cli/dist-tag/rm.md)
+- [`aube dist-tag rm [--otp <OTP>] <PACKAGE> <TAG>`](/cli/dist-tag/rm.md)
 - [`aube dlx [FLAGS] [PARAMS]…`](/cli/dlx.md)
 - [`aube doctor [-J --json]`](/cli/doctor.md)
 - [`aube exec [FLAGS] <BIN> [ARGS]…`](/cli/exec.md)
@@ -179,6 +179,7 @@ Run from the workspace root regardless of the current package
 - [`aube root [-g --global]`](/cli/root.md)
 - [`aube run [FLAGS] [SCRIPT] [ARGS]…`](/cli/run.md)
 - [`aube sbom [FLAGS]`](/cli/sbom.md)
+- [`aube sponsors`](/cli/sponsors.md)
 - [`aube stage [FLAGS]`](/cli/stage.md)
 - [`aube start [FLAGS] [ARGS]…`](/cli/start.md)
 - [`aube stop [FLAGS] [ARGS]…`](/cli/stop.md)

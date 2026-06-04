@@ -3085,7 +3085,7 @@
               "dist-tag",
               "add"
             ],
-            "usage": "dist-tag add <SPEC> [TAG]",
+            "usage": "dist-tag add [--otp <OTP>] <SPEC> [TAG]",
             "subcommands": {},
             "args": [
               {
@@ -3107,7 +3107,27 @@
                 "hide": false
               }
             ],
-            "flags": [],
+            "flags": [
+              {
+                "name": "otp",
+                "usage": "--otp <OTP>",
+                "help": "One-time password from a 2FA authenticator; sent as `npm-otp`",
+                "help_first_line": "One-time password from a 2FA authenticator; sent as `npm-otp`",
+                "short": [],
+                "long": [
+                  "otp"
+                ],
+                "hide": false,
+                "global": false,
+                "arg": {
+                  "name": "OTP",
+                  "usage": "<OTP>",
+                  "required": true,
+                  "double_dash": "Optional",
+                  "hide": false
+                }
+              }
+            ],
             "mounts": [],
             "hide": false,
             "help": "Add or update a dist-tag on a package",
@@ -3151,7 +3171,7 @@
               "dist-tag",
               "rm"
             ],
-            "usage": "dist-tag rm <PACKAGE> <TAG>",
+            "usage": "dist-tag rm [--otp <OTP>] <PACKAGE> <TAG>",
             "subcommands": {},
             "args": [
               {
@@ -3173,7 +3193,27 @@
                 "hide": false
               }
             ],
-            "flags": [],
+            "flags": [
+              {
+                "name": "otp",
+                "usage": "--otp <OTP>",
+                "help": "One-time password from a 2FA authenticator; sent as `npm-otp`",
+                "help_first_line": "One-time password from a 2FA authenticator; sent as `npm-otp`",
+                "short": [],
+                "long": [
+                  "otp"
+                ],
+                "hide": false,
+                "global": false,
+                "arg": {
+                  "name": "OTP",
+                  "usage": "<OTP>",
+                  "required": true,
+                  "double_dash": "Optional",
+                  "hide": false
+                }
+              }
+            ],
             "mounts": [],
             "hide": false,
             "help": "Remove a dist-tag from a package",
@@ -9421,6 +9461,22 @@
         "hidden_aliases": [],
         "examples": []
       },
+      "sponsors": {
+        "full_cmd": [
+          "sponsors"
+        ],
+        "usage": "sponsors",
+        "subcommands": {},
+        "args": [],
+        "flags": [],
+        "mounts": [],
+        "hide": false,
+        "help": "Show the companies sponsoring aube and the en.dev project family",
+        "name": "sponsors",
+        "aliases": [],
+        "hidden_aliases": [],
+        "examples": []
+      },
       "stage": {
         "full_cmd": [
           "stage"
@@ -12324,7 +12380,7 @@
   "config": {
     "props": {}
   },
-  "version": "1.16.1",
+  "version": "1.17.1",
   "usage": "Usage: aube [OPTIONS] [COMMAND]",
   "complete": {},
   "about": "A fast Node.js package manager"

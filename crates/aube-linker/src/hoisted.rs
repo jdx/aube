@@ -41,7 +41,7 @@
 //! dependency lifecycle scripts can locate a package's on-disk
 //! directory without recomputing the tree.
 
-use crate::{Error, LinkStats, Linker, apply_multi_file_patch};
+use crate::{Error, HoistingLimits, LinkStats, Linker, apply_multi_file_patch};
 use aube_lockfile::{DirectDep, LocalSource, LockfileGraph};
 use aube_store::PackageIndex;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -68,6 +68,7 @@ impl HoistedPlacements {
         root_dir: &Path,
         graph: &LockfileGraph,
         modules_dir_name: &str,
+        hoisting_limits: HoistingLimits,
     ) -> Result<Self, Error> {
         let mut placements = Self::default();
         for (importer_path, deps) in &graph.importers {
@@ -80,7 +81,7 @@ impl HoistedPlacements {
                 root_dir.join(importer_path)
             };
             let nm = importer_dir.join(modules_dir_name);
-            let plan = plan_importer(&nm, deps, graph)?;
+            let plan = plan_importer(&nm, deps, graph, hoisting_limits)?;
             for node in &plan.nodes {
                 let (Some(dep_path), Some(pkg_dir)) = (&node.dep_path, &node.pkg_dir) else {
                     continue;
@@ -179,15 +180,16 @@ impl PlacementPlan {
     fn place(
         &mut self,
         requester: usize,
+        floor: usize,
         name: &str,
         dep_path: &str,
     ) -> Result<PlaceOutcome, Error> {
         crate::validate_package_link_name(name)?;
-        // Walk up from the requester looking for the shallowest
-        // ancestor that doesn't already host a different version of
-        // `name`. If any ancestor has a matching entry, reuse it.
+        debug_assert!(is_ancestor_or_self(&self.nodes, floor, requester));
+        // Reuse a matching package anywhere already visible through
+        // Node's ancestor lookup, even if the hoist limit would
+        // prevent placing a new package that high.
         let mut cursor = requester;
-        let mut candidate = requester;
         loop {
             if let Some(&existing) = self.nodes[cursor].children.get(name) {
                 if self.nodes[existing].dep_path.as_deref() == Some(dep_path) {
@@ -196,10 +198,30 @@ impl PlacementPlan {
                         created: false,
                     });
                 }
+                // A nearer same-name package blocks Node from
+                // resolving to any matching package above it.
+                break;
+            }
+            match self.nodes[cursor].parent {
+                Some(p) => cursor = p,
+                None => break,
+            }
+        }
+
+        // Walk up from the requester looking for the shallowest
+        // allowed ancestor that doesn't already host a different
+        // version of `name`.
+        let mut cursor = requester;
+        let mut candidate = requester;
+        loop {
+            if self.nodes[cursor].children.contains_key(name) {
                 // Conflict: must stay at or below `candidate`.
                 break;
             }
             candidate = cursor;
+            if cursor == floor {
+                break;
+            }
             match self.nodes[cursor].parent {
                 Some(p) => cursor = p,
                 None => break,
@@ -236,14 +258,27 @@ impl PlacementPlan {
     }
 }
 
+fn is_ancestor_or_self(nodes: &[TreeNode], ancestor: usize, mut node: usize) -> bool {
+    loop {
+        if node == ancestor {
+            return true;
+        }
+        let Some(parent) = nodes[node].parent else {
+            return false;
+        };
+        node = parent;
+    }
+}
+
 /// Build a placement plan for a single importer.
 pub(crate) fn plan_importer(
     importer_nm: &Path,
     root_deps: &[DirectDep],
     graph: &LockfileGraph,
+    hoisting_limits: HoistingLimits,
 ) -> Result<PlacementPlan, Error> {
     let mut plan = PlacementPlan::new(importer_nm.to_path_buf());
-    let mut queue: VecDeque<(usize, String, String)> = VecDeque::new();
+    let mut queue: VecDeque<(usize, usize, String, String)> = VecDeque::new();
 
     // Seed the queue with the importer's direct deps in declaration
     // order. BFS makes shallower deps win placement ties over
@@ -252,11 +287,16 @@ pub(crate) fn plan_importer(
         if !graph.packages.contains_key(&dep.dep_path) {
             continue;
         }
-        queue.push_back((plan.root_idx, dep.name.clone(), dep.dep_path.clone()));
+        queue.push_back((
+            plan.root_idx,
+            plan.root_idx,
+            dep.name.clone(),
+            dep.dep_path.clone(),
+        ));
     }
 
-    while let Some((requester, name, dep_path)) = queue.pop_front() {
-        let outcome = plan.place(requester, &name, &dep_path)?;
+    while let Some((requester, floor, name, dep_path)) = queue.pop_front() {
+        let outcome = plan.place(requester, floor, &name, &dep_path)?;
         if !outcome.created {
             continue;
         }
@@ -270,12 +310,21 @@ pub(crate) fn plan_importer(
         if matches!(pkg.local_source.as_ref(), Some(LocalSource::Link(_))) {
             continue;
         }
+        let child_floor = match hoisting_limits {
+            HoistingLimits::None | HoistingLimits::Workspaces => plan.root_idx,
+            HoistingLimits::Dependencies => outcome.node_idx,
+        };
         for (dep_name, dep_tail) in &pkg.dependencies {
             let child_dep_path = format!("{dep_name}@{dep_tail}");
             if !graph.packages.contains_key(&child_dep_path) {
                 continue;
             }
-            queue.push_back((outcome.node_idx, dep_name.clone(), child_dep_path));
+            queue.push_back((
+                outcome.node_idx,
+                child_floor,
+                dep_name.clone(),
+                child_dep_path,
+            ));
         }
     }
 
@@ -295,19 +344,26 @@ pub(crate) fn plan_importer(
 /// Every placed package is recorded in `placements` so the install
 /// driver can later resolve `dep_path -> on-disk dir` for bin
 /// linking and lifecycle scripts without recomputing the plan.
+pub(crate) struct HoistedImporterDirs<'a> {
+    pub(crate) root: &'a Path,
+    pub(crate) importer: &'a Path,
+}
+
 pub(crate) fn link_hoisted_importer(
     linker: &Linker,
-    importer_dir: &Path,
+    dirs: HoistedImporterDirs<'_>,
     root_deps: &[DirectDep],
     graph: &LockfileGraph,
     package_indices: &BTreeMap<String, PackageIndex>,
     stats: &mut LinkStats,
     placements: &mut HoistedPlacements,
 ) -> Result<(), Error> {
+    let root_dir = dirs.root;
+    let importer_dir = dirs.importer;
     let nm = importer_dir.join(linker.modules_dir_name());
     crate::mkdirp(&nm)?;
 
-    let plan = plan_importer(&nm, root_deps, graph)?;
+    let plan = plan_importer(&nm, root_deps, graph, linker.hoisting_limits)?;
 
     // Sweep any top-level entries that are no longer claimed by the
     // plan. Dotfiles (`.aube`, `.bin`, …) are preserved — .aube in
@@ -344,14 +400,14 @@ pub(crate) fn link_hoisted_importer(
         // plan above because their target owns its deps. `portal:`
         // packages stay on the materialized-package path so their
         // graph-visible deps are linked like Yarn expects.
-        // `rebase_local` in the resolver already normalized the
-        // relative path to be importer-relative.
+        // `rebase_local` in the resolver (and preserved-lockfile
+        // import) stores local paths relative to the project root.
         if let Some(LocalSource::Link(rel)) = pkg.local_source.as_ref() {
             if let Some(parent) = pkg_dir.parent() {
                 crate::mkdirp(parent)?;
             }
             crate::try_remove_entry(&pkg_dir);
-            let abs_target = importer_dir.join(rel);
+            let abs_target = root_dir.join(rel);
             let link_parent = pkg_dir.parent().unwrap_or(&nm);
             let rel_target = pathdiff::diff_paths(&abs_target, link_parent).unwrap_or(abs_target);
             crate::sys::create_dir_link(&rel_target, &pkg_dir)
@@ -438,4 +494,168 @@ pub(crate) fn link_hoisted_importer(
 
     stats.top_level_linked += plan.nodes[plan.root_idx].children.len();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aube_lockfile::{DepType, LockedPackage};
+
+    fn dep(name: &str, dep_path: &str) -> DirectDep {
+        DirectDep {
+            name: name.to_string(),
+            dep_path: dep_path.to_string(),
+            dep_type: DepType::Production,
+            specifier: None,
+        }
+    }
+
+    fn pkg(name: &str, version: &str, deps: &[(&str, &str)]) -> LockedPackage {
+        LockedPackage {
+            name: name.to_string(),
+            version: version.to_string(),
+            dep_path: format!("{name}@{version}"),
+            dependencies: deps
+                .iter()
+                .map(|(dep_name, tail)| ((*dep_name).to_string(), (*tail).to_string()))
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn package_dir(plan: &PlacementPlan, dep_path: &str) -> PathBuf {
+        plan.nodes
+            .iter()
+            .find(|node| node.dep_path.as_deref() == Some(dep_path))
+            .and_then(|node| node.pkg_dir.clone())
+            .unwrap_or_else(|| panic!("{dep_path} was not placed"))
+    }
+
+    #[test]
+    fn dependencies_limit_keeps_transitives_under_their_direct_dep() {
+        let nm = PathBuf::from("/project/node_modules");
+        let mut graph = LockfileGraph::default();
+        graph.packages.insert(
+            "app@1.0.0".into(),
+            pkg("app", "1.0.0", &[("left-pad", "1.0.0")]),
+        );
+        graph.packages.insert(
+            "left-pad@1.0.0".into(),
+            pkg("left-pad", "1.0.0", &[("repeat", "1.0.0")]),
+        );
+        graph
+            .packages
+            .insert("repeat@1.0.0".into(), pkg("repeat", "1.0.0", &[]));
+        let root_deps = vec![dep("app", "app@1.0.0")];
+
+        let unlimited = plan_importer(&nm, &root_deps, &graph, HoistingLimits::None).unwrap();
+        assert_eq!(
+            package_dir(&unlimited, "left-pad@1.0.0"),
+            nm.join("left-pad")
+        );
+        assert_eq!(package_dir(&unlimited, "repeat@1.0.0"), nm.join("repeat"));
+
+        let limited = plan_importer(&nm, &root_deps, &graph, HoistingLimits::Dependencies).unwrap();
+        assert_eq!(
+            package_dir(&limited, "left-pad@1.0.0"),
+            nm.join("app/node_modules/left-pad")
+        );
+        assert_eq!(
+            package_dir(&limited, "repeat@1.0.0"),
+            nm.join("app/node_modules/left-pad/node_modules/repeat")
+        );
+    }
+
+    #[test]
+    fn dependencies_limit_reuses_matching_direct_dependency_above_floor() {
+        let nm = PathBuf::from("/project/node_modules");
+        let mut graph = LockfileGraph::default();
+        graph.packages.insert(
+            "app@1.0.0".into(),
+            pkg("app", "1.0.0", &[("shared", "1.0.0")]),
+        );
+        graph
+            .packages
+            .insert("shared@1.0.0".into(), pkg("shared", "1.0.0", &[]));
+        let root_deps = vec![dep("shared", "shared@1.0.0"), dep("app", "app@1.0.0")];
+
+        let limited = plan_importer(&nm, &root_deps, &graph, HoistingLimits::Dependencies).unwrap();
+
+        assert_eq!(package_dir(&limited, "shared@1.0.0"), nm.join("shared"));
+        assert_eq!(
+            limited
+                .nodes
+                .iter()
+                .filter(|node| node.dep_path.as_deref() == Some("shared@1.0.0"))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn dependencies_limit_does_not_reuse_above_version_blocker() {
+        let nm = PathBuf::from("/project/node_modules");
+        let mut graph = LockfileGraph::default();
+        graph.packages.insert(
+            "app@1.0.0".into(),
+            pkg("app", "1.0.0", &[("shared", "2.0.0"), ("tool", "1.0.0")]),
+        );
+        graph.packages.insert(
+            "tool@1.0.0".into(),
+            pkg("tool", "1.0.0", &[("shared", "1.0.0")]),
+        );
+        graph
+            .packages
+            .insert("shared@1.0.0".into(), pkg("shared", "1.0.0", &[]));
+        graph
+            .packages
+            .insert("shared@2.0.0".into(), pkg("shared", "2.0.0", &[]));
+        let root_deps = vec![dep("shared", "shared@1.0.0"), dep("app", "app@1.0.0")];
+
+        let limited = plan_importer(&nm, &root_deps, &graph, HoistingLimits::Dependencies).unwrap();
+
+        let shared_v1_dirs: Vec<_> = limited
+            .nodes
+            .iter()
+            .filter(|node| node.dep_path.as_deref() == Some("shared@1.0.0"))
+            .filter_map(|node| node.pkg_dir.as_ref())
+            .collect();
+        assert_eq!(shared_v1_dirs.len(), 2);
+        assert!(shared_v1_dirs.contains(&&nm.join("shared")));
+        assert!(shared_v1_dirs.contains(&&nm.join("app/node_modules/tool/node_modules/shared")));
+    }
+
+    #[test]
+    fn from_graph_respects_dependencies_limit() {
+        let root = tempfile::tempdir().unwrap();
+        let nm = root.path().join("node_modules");
+        let app_dir = nm.join("app");
+        let left_pad_dir = app_dir.join("node_modules/left-pad");
+        std::fs::create_dir_all(&left_pad_dir).unwrap();
+
+        let mut graph = LockfileGraph::default();
+        graph
+            .importers
+            .insert(".".into(), vec![dep("app", "app@1.0.0")]);
+        graph.packages.insert(
+            "app@1.0.0".into(),
+            pkg("app", "1.0.0", &[("left-pad", "1.0.0")]),
+        );
+        graph
+            .packages
+            .insert("left-pad@1.0.0".into(), pkg("left-pad", "1.0.0", &[]));
+
+        let placements = HoistedPlacements::from_graph(
+            root.path(),
+            &graph,
+            "node_modules",
+            HoistingLimits::Dependencies,
+        )
+        .unwrap();
+
+        assert_eq!(
+            placements.package_dir("left-pad@1.0.0"),
+            Some(left_pad_dir.as_path())
+        );
+    }
 }

@@ -16,8 +16,9 @@ jobs:
   # On every push to main: run `release-plz release`. If the current
   # workspace version has no tag yet (because the release PR was just
   # merged), this tags `aube` as `v<version>`, opens a draft GitHub
-  # release, and publishes every workspace crate to crates.io in
-  # dependency order. Otherwise it's a no-op.
+  # release, and publishes every workspace crate to crates.io using
+  # crates.io trusted publishing in dependency order. Otherwise it's a
+  # no-op.
   release-plz-release:
     name: release-plz release
     runs-on: namespace-profile-endev-linux-amd64;overrides.cache-tag=aube-rust-linux
@@ -27,6 +28,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write
+      id-token: write
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
@@ -43,7 +45,6 @@ jobs:
           command: release
         env:
           GITHUB_TOKEN: ${{ secrets.AUBE_GH_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       # The `releases` output is an array of every crate that was
       # published, in dependency order. Since aube depends on all
       # 9 other internal crates, it is the LAST entry — and only it
@@ -164,7 +165,7 @@ jobs:
           ref: refs/tags/${{ needs.release-plz-release.outputs.tag }}
           submodules: recursive
           persist-credentials: false
-      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
         with:
           install_args: communique
       - name: Enhance GitHub release with communique
@@ -237,10 +238,10 @@ jobs:
       # of silently re-resolving `"latest"` pins and rewriting mise.lock.
       # release-plz refuses to run against a dirty tree, and intentional
       # lockfile bumps should land via their own PR.
-      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
         env:
           MISE_LOCKED: "1"
-      - uses: taiki-e/install-action@213ccc1a076163c093f914550b94feb90fab916d # v2.79.2
+      - uses: taiki-e/install-action@6ed6112eb9893c58dd600eebccdf6e77ab7bfa9c # v2.79.12
         with:
           tool: release-plz
       - name: Configure git identity

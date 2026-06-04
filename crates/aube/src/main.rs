@@ -465,6 +465,8 @@ enum Commands {
     /// Set a `package.json` script (not implemented — use `npm set-script`)
     #[command(hide = true, name = "set-script")]
     SetScript(commands::npm_fallback::FallbackArgs),
+    /// Show the companies sponsoring aube and the en.dev project family
+    Sponsors(commands::sponsors::SponsorsArgs),
     /// Stage packages for publishing (not implemented — use `npm stage`)
     Stage(commands::npm_fallback::FallbackArgs),
     /// Start a package (shortcut for `run start`)
@@ -917,6 +919,7 @@ async fn async_main(cli: Cli) -> miette::Result<Option<i32>> {
         Some(Commands::SetScript(args)) => {
             return Ok(Some(commands::npm_fallback::run("set-script", &args)?));
         }
+        Some(Commands::Sponsors(args)) => commands::sponsors::run(args).await?,
         Some(Commands::Stage(args)) => {
             return Ok(Some(commands::npm_fallback::run("stage", &args)?));
         }

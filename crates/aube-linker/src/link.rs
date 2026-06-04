@@ -28,7 +28,10 @@ impl Linker {
             let mut placements = HoistedPlacements::default();
             hoisted::link_hoisted_importer(
                 self,
-                project_dir,
+                hoisted::HoistedImporterDirs {
+                    root: project_dir,
+                    importer: project_dir,
+                },
                 graph.root_deps(),
                 graph,
                 package_indices,
@@ -548,7 +551,10 @@ impl Linker {
                 .collect();
             hoisted::link_hoisted_importer(
                 self,
-                &importer_dir,
+                hoisted::HoistedImporterDirs {
+                    root: root_dir,
+                    importer: &importer_dir,
+                },
                 &planner_deps,
                 graph,
                 package_indices,
