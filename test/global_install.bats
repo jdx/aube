@@ -64,6 +64,23 @@ teardown() {
 	assert_output --partial '"version": "7.7.4"'
 }
 
+@test "aube update -g updates global packages outside a project" {
+	run aube add -g is-positive@1.0.0
+	assert_success
+
+	mkdir -p "$TEST_TEMP_DIR/no-project"
+	cd "$TEST_TEMP_DIR/no-project"
+
+	run aube update -g
+	assert_success
+	refute_output --partial "no package.json found"
+	assert_output --partial "is-positive: 1.0.0 -> 3.1.0"
+
+	run aube list -g
+	assert_success
+	assert_output --partial "is-positive 3.1.0"
+}
+
 @test "aube add -g creates a hash pointer in the pkg dir" {
 	run aube add -g semver@7.7.4
 	assert_success

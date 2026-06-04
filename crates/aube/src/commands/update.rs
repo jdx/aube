@@ -116,7 +116,6 @@ pub async fn run(
     args.lockfile.install_overrides();
     args.virtual_store.install_overrides();
     let _ = args.ignore_scripts; // parity no-op: dep scripts already gated by allowBuilds
-    let _ = args.global;
     if let Some(depth) = args.depth.as_deref() {
         // pnpm's `--depth Infinity` is the only useful value; the
         // intermediate ones (`--depth 1`, `--depth 2`) have semantics
@@ -127,6 +126,9 @@ pub async fn run(
             "warn: --depth {depth} is ignored; aube only refreshes direct deps. \
              For a full refresh, run `rm aube-lock.yaml && aube install`."
         );
+    }
+    if args.global {
+        return run_global(args).await;
     }
     if !filter.is_empty() {
         // Discussion #602: `aube update -r` is expected to bump the
@@ -769,6 +771,112 @@ pub async fn run(
     install::run(chained).await?;
 
     Ok(())
+}
+
+async fn run_global(args: UpdateArgs) -> miette::Result<()> {
+    reject_unsupported_pkg_specs(&args.packages)?;
+
+    let layout = super::global::GlobalLayout::resolve()?;
+    let packages = super::global::scan_packages(&layout.pkg_dir);
+    if packages.is_empty() {
+        return Err(miette!("no global packages installed"));
+    }
+
+    let selected = select_global_updates(&args.packages, packages)?;
+    let original_cwd = crate::dirs::cwd()?;
+    let result = async {
+        for (info, package_args) in selected {
+            let old_bins = super::global::bin_names_for(&info.install_dir, &info.aliases);
+            super::retarget_cwd(&info.install_dir)?;
+
+            let mut inner = args.clone();
+            inner.global = false;
+            inner.packages = package_args;
+            inner.depth = None;
+            inner.latest = true;
+            inner.exact = true;
+            inner.no_save = false;
+            inner.workspace = false;
+
+            Box::pin(run(
+                inner,
+                aube_workspace::selector::EffectiveFilter::default(),
+            ))
+            .await?;
+
+            let shim_opts = crate::commands::with_settings_ctx(&info.install_dir, |ctx| {
+                aube_linker::BinShimOptions {
+                    extend_node_path: aube_settings::resolved::extend_node_path(ctx),
+                    prefer_symlinked_executables:
+                        aube_settings::resolved::prefer_symlinked_executables(ctx),
+                    hidden_modules_dir: None,
+                }
+            });
+            let linked = super::global::link_bins(
+                &info.install_dir,
+                &layout.bin_dir,
+                &info.aliases,
+                shim_opts,
+            )?;
+            let linked_set: std::collections::BTreeSet<&str> =
+                linked.iter().map(String::as_str).collect();
+            let stale_bins: Vec<String> = old_bins
+                .into_iter()
+                .filter(|name| !linked_set.contains(name.as_str()))
+                .collect();
+            super::global::unlink_bins(&info.install_dir, &layout.bin_dir, &stale_bins);
+            if !linked.is_empty() {
+                eprintln!(
+                    "Linked {} into {}",
+                    pluralizer::pluralize("bin", linked.len() as isize, true),
+                    layout.bin_dir.display()
+                );
+            }
+        }
+        Ok(())
+    }
+    .await;
+    super::finish_filtered_workspace(&original_cwd, result)
+}
+
+fn select_global_updates(
+    requested: &[String],
+    packages: Vec<super::global::GlobalPackageInfo>,
+) -> miette::Result<Vec<(super::global::GlobalPackageInfo, Vec<String>)>> {
+    if requested.is_empty() {
+        return Ok(packages
+            .into_iter()
+            .map(|info| (info, Vec::new()))
+            .collect());
+    }
+
+    let mut by_hash: BTreeMap<String, (super::global::GlobalPackageInfo, Vec<String>)> =
+        BTreeMap::new();
+    let mut missing = Vec::new();
+    for raw in requested {
+        let (name, _) = split_pkg_arg(raw);
+        let Some(info) = packages
+            .iter()
+            .find(|info| info.aliases.iter().any(|alias| alias == name))
+            .cloned()
+        else {
+            missing.push(name.to_string());
+            continue;
+        };
+        by_hash
+            .entry(info.hash.clone())
+            .or_insert_with(|| (info, Vec::new()))
+            .1
+            .push(raw.clone());
+    }
+
+    for name in &missing {
+        eprintln!("Not globally installed: {name}");
+    }
+    if by_hash.is_empty() {
+        return Err(miette!("no matching global packages were updated"));
+    }
+    Ok(by_hash.into_values().collect())
 }
 
 fn workspace_package_versions(cwd: &std::path::Path) -> miette::Result<HashMap<String, String>> {
