@@ -989,7 +989,7 @@ async fn verify_lockfile_tarball_url(
         .map_err(|e| {
             miette!(
                 code = aube_codes::errors::ERR_AUBE_TARBALL_URL_MISMATCH,
-                "{}@{}: failed to verify lockfile tarball URL against registry metadata: {}",
+                "{}@{}: failed to fetch registry metadata to verify lockfile tarball URL: {}",
                 registry_name,
                 version,
                 e

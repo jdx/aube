@@ -221,16 +221,16 @@ pub const ALL: &[CodeMeta] = &[
         exit_code: Some(32),
     },
     CodeMeta {
-        name: ERR_AUBE_TARBALL_URL_MISMATCH,
-        category: category::TARBALL_STORE,
-        description: "A registry lockfile entry's explicit tarball URL didn't match the registry metadata for that `(name, version)`.",
-        exit_code: Some(34),
-    },
-    CodeMeta {
         name: ERR_AUBE_GIT_ERROR,
         category: category::TARBALL_STORE,
         description: "Git operation failed during a `git:` dep prepare or checkout.",
         exit_code: Some(33),
+    },
+    CodeMeta {
+        name: ERR_AUBE_TARBALL_URL_MISMATCH,
+        category: category::TARBALL_STORE,
+        description: "A registry lockfile entry's explicit tarball URL didn't match the registry metadata for that `(name, version)`.",
+        exit_code: Some(34),
     },
     CodeMeta {
         name: ERR_AUBE_NO_HOME,
