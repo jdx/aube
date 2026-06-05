@@ -103,6 +103,12 @@
       "exit_code": 32
     },
     {
+      "name": "ERR_AUBE_TARBALL_URL_MISMATCH",
+      "category": "Tarball / store",
+      "description": "A registry lockfile entry's explicit tarball URL didn't match the registry metadata for that `(name, version)`.",
+      "exit_code": 34
+    },
+    {
       "name": "ERR_AUBE_GIT_ERROR",
       "category": "Tarball / store",
       "description": "Git operation failed during a `git:` dep prepare or checkout.",

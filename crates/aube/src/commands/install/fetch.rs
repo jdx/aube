@@ -787,6 +787,10 @@ where
                 let url = tarball_url_override
                     .clone()
                     .unwrap_or_else(|| client.tarball_url(&registry_name, &version));
+                if let Some(lockfile_url) = tarball_url_override.as_deref() {
+                    verify_lockfile_tarball_url(&client, &registry_name, &version, lockfile_url)
+                        .await?;
+                }
 
                 let dl_start = std::time::Instant::now();
 
@@ -971,6 +975,46 @@ where
     }
 
     Ok((indices, cached_count, fetch_count))
+}
+
+async fn verify_lockfile_tarball_url(
+    client: &aube_registry::client::RegistryClient,
+    registry_name: &str,
+    version: &str,
+    lockfile_url: &str,
+) -> miette::Result<()> {
+    let meta = client
+        .fetch_single_version_metadata(registry_name, version)
+        .await
+        .map_err(|e| {
+            miette!(
+                code = aube_codes::errors::ERR_AUBE_TARBALL_URL_MISMATCH,
+                "{}@{}: failed to verify lockfile tarball URL against registry metadata: {}",
+                registry_name,
+                version,
+                e
+            )
+        })?;
+    let Some(expected_url) = meta.dist.as_ref().map(|dist| dist.tarball.as_str()) else {
+        return Err(miette!(
+            code = aube_codes::errors::ERR_AUBE_TARBALL_URL_MISMATCH,
+            "{}@{}: registry metadata did not include dist.tarball while lockfile pinned {}",
+            registry_name,
+            version,
+            aube_util::url::redact_url(lockfile_url)
+        ));
+    };
+    if lockfile_url != expected_url {
+        return Err(miette!(
+            code = aube_codes::errors::ERR_AUBE_TARBALL_URL_MISMATCH,
+            "{}@{}: lockfile tarball URL {} does not match registry metadata {}",
+            registry_name,
+            version,
+            aube_util::url::redact_url(lockfile_url),
+            aube_util::url::redact_url(expected_url)
+        ));
+    }
+    Ok(())
 }
 
 /// Pull the canonical version off a dep_path for display purposes. The

@@ -128,6 +128,30 @@ teardown() {
 	assert_success
 }
 
+@test "lockfile tarball URLs are verified against registry metadata before fetch" {
+	cat >package.json <<-'EOF'
+		{
+		  "name": "test-tarball-url-mismatch",
+		  "version": "1.0.0",
+		  "dependencies": { "is-odd": "3.0.1" }
+		}
+	EOF
+	cat >>.npmrc <<-'EOF'
+
+		lockfile-include-tarball-url=true
+	EOF
+	run aube install --no-frozen-lockfile
+	assert_success
+
+	perl -0pi -e 's#tarball: .*/is-odd/-/is-odd-3\.0\.1\.tgz#tarball: https://example.com/not-is-odd.tgz#' aube-lock.yaml
+	rm -rf node_modules "$XDG_DATA_HOME/aube/store"
+
+	run aube install --frozen-lockfile
+	assert_failure
+	assert_output --partial "ERR_AUBE_TARBALL_URL_MISMATCH"
+	assert_output --partial "not match registry metadata"
+}
+
 @test "lockfileIncludeTarballUrl=false (default) omits tarball URLs" {
 	cat >package.json <<-'EOF'
 		{
