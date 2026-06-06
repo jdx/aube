@@ -1004,7 +1004,7 @@ async fn verify_lockfile_tarball_url(
             aube_util::url::redact_url(lockfile_url)
         ));
     };
-    if lockfile_url != expected_url {
+    if !lockfile_tarball_url_matches_metadata(lockfile_url, expected_url) {
         return Err(miette!(
             code = aube_codes::errors::ERR_AUBE_TARBALL_URL_MISMATCH,
             "{}@{}: lockfile tarball URL {} does not match registry metadata {}",
@@ -1015,6 +1015,29 @@ async fn verify_lockfile_tarball_url(
         ));
     }
     Ok(())
+}
+
+fn lockfile_tarball_url_matches_metadata(lockfile_url: &str, expected_url: &str) -> bool {
+    lockfile_url == expected_url
+        || (is_public_npm_registry_tarball(lockfile_url)
+            && tarball_url_path(lockfile_url)
+                .zip(tarball_url_path(expected_url))
+                .is_some_and(|(lockfile_path, expected_path)| lockfile_path == expected_path))
+}
+
+fn is_public_npm_registry_tarball(url: &str) -> bool {
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+        .as_deref()
+        == Some("registry.npmjs.org")
+}
+
+fn tarball_url_path(url: &str) -> Option<String> {
+    let url = reqwest::Url::parse(url).ok()?;
+    let path = url.path();
+    path.contains("/-/")
+        .then_some(path.trim_start_matches('/').to_string())
 }
 
 /// Pull the canonical version off a dep_path for display purposes. The
@@ -1047,4 +1070,48 @@ pub(super) fn remap_indices_to_contextualized(
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lockfile_tarball_url_matches_metadata;
+
+    #[test]
+    fn tarball_url_match_accepts_exact_url() {
+        let url = "https://private.example.com/is-odd/-/is-odd-3.0.1.tgz";
+
+        assert!(lockfile_tarball_url_matches_metadata(url, url));
+    }
+
+    #[test]
+    fn tarball_url_match_accepts_public_npm_lockfile_against_mirror() {
+        assert!(lockfile_tarball_url_matches_metadata(
+            "https://registry.npmjs.org/is-odd/-/is-odd-3.0.1.tgz",
+            "http://localhost:4873/is-odd/-/is-odd-3.0.1.tgz",
+        ));
+    }
+
+    #[test]
+    fn tarball_url_match_accepts_scoped_public_npm_lockfile_against_mirror() {
+        assert!(lockfile_tarball_url_matches_metadata(
+            "https://registry.npmjs.org/@isaacs/fs-minipass/-/fs-minipass-4.0.1.tgz",
+            "http://localhost:4873/@isaacs/fs-minipass/-/fs-minipass-4.0.1.tgz",
+        ));
+    }
+
+    #[test]
+    fn tarball_url_match_rejects_tampered_path() {
+        assert!(!lockfile_tarball_url_matches_metadata(
+            "https://registry.npmjs.org/not-is-odd/-/not-is-odd-3.0.1.tgz",
+            "http://localhost:4873/is-odd/-/is-odd-3.0.1.tgz",
+        ));
+    }
+
+    #[test]
+    fn tarball_url_match_rejects_mirror_match_from_arbitrary_host() {
+        assert!(!lockfile_tarball_url_matches_metadata(
+            "https://example.com/is-odd/-/is-odd-3.0.1.tgz",
+            "http://localhost:4873/is-odd/-/is-odd-3.0.1.tgz",
+        ));
+    }
 }
