@@ -109,6 +109,12 @@
       "exit_code": 33
     },
     {
+      "name": "ERR_AUBE_TARBALL_URL_MISMATCH",
+      "category": "Tarball / store",
+      "description": "A registry lockfile entry's explicit tarball URL didn't match the registry metadata for that `(name, version)`.",
+      "exit_code": 34
+    },
+    {
       "name": "ERR_AUBE_NO_HOME",
       "category": "Tarball / store",
       "description": "`HOME` (or platform equivalent) is unset, so aube can't locate its store.",

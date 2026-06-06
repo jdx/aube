@@ -49,6 +49,7 @@ pub const ERR_AUBE_SECURITY_SCANNER_FAILED: &str = "ERR_AUBE_SECURITY_SCANNER_FA
 pub const ERR_AUBE_TARBALL_INTEGRITY: &str = "ERR_AUBE_TARBALL_INTEGRITY";
 pub const ERR_AUBE_TARBALL_EXTRACT: &str = "ERR_AUBE_TARBALL_EXTRACT";
 pub const ERR_AUBE_PKG_CONTENT_MISMATCH: &str = "ERR_AUBE_PKG_CONTENT_MISMATCH";
+pub const ERR_AUBE_TARBALL_URL_MISMATCH: &str = "ERR_AUBE_TARBALL_URL_MISMATCH";
 pub const ERR_AUBE_NO_HOME: &str = "ERR_AUBE_NO_HOME";
 pub const ERR_AUBE_GIT_ERROR: &str = "ERR_AUBE_GIT_ERROR";
 
@@ -224,6 +225,12 @@ pub const ALL: &[CodeMeta] = &[
         category: category::TARBALL_STORE,
         description: "Git operation failed during a `git:` dep prepare or checkout.",
         exit_code: Some(33),
+    },
+    CodeMeta {
+        name: ERR_AUBE_TARBALL_URL_MISMATCH,
+        category: category::TARBALL_STORE,
+        description: "A registry lockfile entry's explicit tarball URL didn't match the registry metadata for that `(name, version)`.",
+        exit_code: Some(34),
     },
     CodeMeta {
         name: ERR_AUBE_NO_HOME,
