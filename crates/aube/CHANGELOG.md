@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.18.1](https://github.com/endevco/aube/compare/v1.18.0...v1.18.1) - 2026-06-07
+
+### Fixed
+
+- *(install)* regenerate conflicted lockfiles ([#843](https://github.com/endevco/aube/pull/843))
+- *(update)* support global updates ([#840](https://github.com/endevco/aube/pull/840))
+
+### Other
+
+- refresh benchmarks for v1.18.0 ([#841](https://github.com/endevco/aube/pull/841))
+
+### Security
+
+- *(install)* verify lockfile tarball URLs ([#842](https://github.com/endevco/aube/pull/842))
+
 ## [1.18.0](https://github.com/endevco/aube/compare/v1.17.1...v1.18.0) - 2026-06-04
 
 ### Added

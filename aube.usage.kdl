@@ -1,6 +1,6 @@
 name aube
 bin aube
-version "1.18.0"
+version "1.18.1"
 about "A fast Node.js package manager"
 usage "Usage: aube [OPTIONS] [COMMAND]"
 flag "-C --dir --cd --prefix" help="Change to directory before running (like `make -C` or `mise --cd`)" global=#true {
