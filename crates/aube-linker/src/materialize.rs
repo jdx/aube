@@ -708,6 +708,23 @@ pub(crate) fn validate_package_link_name(name: &str) -> Result<(), Error> {
     }
 }
 
+fn is_safe_package_component(component: &str) -> bool {
+    if component.is_empty() || matches!(component, "." | "..") {
+        return false;
+    }
+    if component.len() >= 2 && component.as_bytes()[1] == b':' {
+        return false;
+    }
+    !std::path::Path::new(component).components().any(|c| {
+        matches!(
+            c,
+            std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_)
+        )
+    })
+}
+
 #[cfg(test)]
 mod package_name_tests {
     use super::*;
@@ -741,21 +758,4 @@ mod package_name_tests {
             );
         }
     }
-}
-
-fn is_safe_package_component(component: &str) -> bool {
-    if component.is_empty() || matches!(component, "." | "..") {
-        return false;
-    }
-    if component.len() >= 2 && component.as_bytes()[1] == b':' {
-        return false;
-    }
-    !std::path::Path::new(component).components().any(|c| {
-        matches!(
-            c,
-            std::path::Component::ParentDir
-                | std::path::Component::RootDir
-                | std::path::Component::Prefix(_)
-        )
-    })
 }

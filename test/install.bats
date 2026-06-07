@@ -9,6 +9,28 @@ teardown() {
 	_common_teardown
 }
 
+_write_conflicted_basic_lockfile() {
+	cat >aube-lock.yaml <<'YAML'
+<<<<<<< HEAD
+lockfileVersion: '9.0'
+importers:
+  .:
+    dependencies:
+      is-odd:
+        specifier: 3.0.1
+        version: 3.0.1
+=======
+lockfileVersion: '9.0'
+importers:
+  .:
+    dependencies:
+      is-odd:
+        specifier: 3.0.1
+        version: 3.0.1
+>>>>>>> main
+YAML
+}
+
 @test "aube install creates node_modules" {
 	_setup_basic_fixture
 	run aube install
@@ -28,6 +50,37 @@ teardown() {
 	run aube install
 	assert_success
 	assert_output --partial "Already up to date"
+}
+
+@test "aube install regenerates lockfile with merge conflict markers" {
+	_setup_basic_fixture
+	run aube install
+	assert_success
+
+	_write_conflicted_basic_lockfile
+
+	run aube install
+	assert_success
+	assert_output --partial "conflict markers"
+	run grep -E '^(<<<<<<<|=======|>>>>>>>)' aube-lock.yaml
+	assert_failure
+	run grep 'is-odd@3.0.1' aube-lock.yaml
+	assert_success
+}
+
+@test "aube install --lockfile-only warns once for merge conflict markers" {
+	_setup_basic_fixture
+	run aube install
+	assert_success
+
+	_write_conflicted_basic_lockfile
+
+	run aube install --lockfile-only
+	assert_success
+	count="$(printf '%s\n' "$output" | grep -c 'conflict markers')"
+	assert_equal "$count" 1
+	run grep -E '^(<<<<<<<|=======|>>>>>>>)' aube-lock.yaml
+	assert_failure
 }
 
 @test "aube install warm path works in CI frozen mode" {

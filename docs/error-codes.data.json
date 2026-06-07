@@ -669,6 +669,12 @@
       "exit_code": null
     },
     {
+      "name": "WARN_AUBE_LOCKFILE_CONFLICT_MARKERS",
+      "category": "Lockfile",
+      "description": "The active lockfile contains Git conflict markers; aube is regenerating it from package.json.",
+      "exit_code": null
+    },
+    {
       "name": "WARN_AUBE_YARN_BERRY_UNSUPPORTED",
       "category": "Lockfile",
       "description": "A Yarn Berry `patch:` / `portal:` / `exec:` protocol — or any unrecognized protocol — was found in `yarn.lock`. Entry was skipped.",

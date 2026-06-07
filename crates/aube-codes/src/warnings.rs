@@ -82,6 +82,7 @@ pub const WARN_AUBE_PEER_DEDUPE_COLLISION: &str = "WARN_AUBE_PEER_DEDUPE_COLLISI
 // ── lockfile ────────────────────────────────────────────────────────
 pub const WARN_AUBE_LOCKFILE_MERGE_CONFLICT: &str = "WARN_AUBE_LOCKFILE_MERGE_CONFLICT";
 pub const WARN_AUBE_LOCKFILE_MERGE_CLEANUP_FAILED: &str = "WARN_AUBE_LOCKFILE_MERGE_CLEANUP_FAILED";
+pub const WARN_AUBE_LOCKFILE_CONFLICT_MARKERS: &str = "WARN_AUBE_LOCKFILE_CONFLICT_MARKERS";
 pub const WARN_AUBE_YARN_BERRY_UNSUPPORTED: &str = "WARN_AUBE_YARN_BERRY_UNSUPPORTED";
 
 // ── progress UI ─────────────────────────────────────────────────────
@@ -447,6 +448,12 @@ pub const ALL: &[CodeMeta] = &[
         name: WARN_AUBE_LOCKFILE_MERGE_CLEANUP_FAILED,
         category: category::LOCKFILE,
         description: "After a successful merge, removing one of the merged branch lockfiles failed.",
+        exit_code: None,
+    },
+    CodeMeta {
+        name: WARN_AUBE_LOCKFILE_CONFLICT_MARKERS,
+        category: category::LOCKFILE,
+        description: "The active lockfile contains Git conflict markers; aube is regenerating it from package.json.",
         exit_code: None,
     },
     CodeMeta {

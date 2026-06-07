@@ -147,6 +147,32 @@ pub fn detect_existing_lockfile_kind(project_dir: &Path) -> Option<LockfileKind>
     None
 }
 
+/// Return true when the active lockfile contains Git conflict markers.
+///
+/// Used by install's prefer-frozen path to distinguish a merge/rebase
+/// artifact from an arbitrary parse error: conflict markers can be
+/// repaired by regenerating from the already-resolved `package.json`,
+/// while other parse failures should stay loud.
+pub fn active_lockfile_has_conflict_markers(project_dir: &Path) -> bool {
+    for (path, _) in lockfile_candidates(project_dir, /*include_aube=*/ true) {
+        if !path.exists() {
+            continue;
+        }
+        return read_lockfile(&path)
+            .map(|content| has_conflict_markers(&content))
+            .unwrap_or(false);
+    }
+    false
+}
+
+fn has_conflict_markers(content: &str) -> bool {
+    content.lines().any(|line| {
+        line.starts_with("<<<<<<< ")
+            || line.trim_end_matches('\r') == "======="
+            || line.starts_with(">>>>>>> ")
+    })
+}
+
 /// Resolve the canonical lockfile filename for `project_dir` (aube's own).
 ///
 /// Returns `aube-lock.<branch>.yaml` when `gitBranchLockfile: true` is

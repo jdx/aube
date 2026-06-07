@@ -24,6 +24,10 @@ pub(super) fn pre_parse_lockfile(
     match parse_lockfile_dir_remapped_with_kind(lockfile_dir, lockfile_importer_key, manifest) {
         Ok(parsed) => Ok(Some(parsed)),
         Err(aube_lockfile::Error::NotFound(_)) => Ok(None),
+        Err(e) if active_lockfile_has_conflict_markers(lockfile_dir) => {
+            warn_lockfile_conflict_markers(lockfile_dir, &e);
+            Ok(None)
+        }
         Err(e) => Err(miette::Report::new(e)).wrap_err("failed to parse lockfile"),
     }
 }
@@ -39,6 +43,7 @@ pub(super) struct LockfileOnlyInput<'a> {
     pub workspace_catalogs: &'a crate::commands::CatalogMap,
     pub settings_ctx: &'a aube_settings::ResolveCtx<'a>,
     pub lockfile_pre_parse: Option<&'a (LockfileGraph, LockfileKind)>,
+    pub lockfile_conflict_marker_warning_emitted: bool,
     pub existing_for_resolver: Option<&'a LockfileGraph>,
     pub source_kind_before: Option<LockfileKind>,
     pub lockfile_enabled: bool,
@@ -68,6 +73,7 @@ pub(super) async fn run_lockfile_only(input: LockfileOnlyInput<'_>) -> miette::R
         workspace_catalogs,
         settings_ctx,
         lockfile_pre_parse,
+        lockfile_conflict_marker_warning_emitted,
         existing_for_resolver,
         source_kind_before,
         lockfile_enabled,
@@ -113,22 +119,32 @@ pub(super) async fn run_lockfile_only(input: LockfileOnlyInput<'_>) -> miette::R
     if let Err(e) = parsed
         && !matches!(e, aube_lockfile::Error::NotFound(_))
     {
-        // Can't hand &Error to miette::Report since Diagnostic
-        // is only implemented on owned Error. Re-parse once to
-        // get an owned Error value for the Diagnostic path.
-        // Slightly wasteful on the error branch, install is
-        // about to abort anyway so speed does not matter here.
-        // What matters: keeping the source span and miette help
-        // text instead of flattening to one line via `{e}`.
-        match parse_lockfile_dir_remapped_with_kind(lockfile_dir, lockfile_importer_key, manifest) {
-            Ok(_) => {
-                // Race: second parse succeeded while first failed.
-                // Surface the observed error text as a best
-                // effort flat message. Extremely unlikely.
-                return Err(miette!("failed to parse lockfile: {e}"));
+        if active_lockfile_has_conflict_markers(lockfile_dir) {
+            if !lockfile_conflict_marker_warning_emitted {
+                warn_lockfile_conflict_markers(lockfile_dir, e);
             }
-            Err(owned) => {
-                return Err(miette::Report::new(owned)).wrap_err("failed to parse lockfile");
+        } else {
+            // Can't hand &Error to miette::Report since Diagnostic
+            // is only implemented on owned Error. Re-parse once to
+            // get an owned Error value for the Diagnostic path.
+            // Slightly wasteful on the error branch, install is
+            // about to abort anyway so speed does not matter here.
+            // What matters: keeping the source span and miette help
+            // text instead of flattening to one line via `{e}`.
+            match parse_lockfile_dir_remapped_with_kind(
+                lockfile_dir,
+                lockfile_importer_key,
+                manifest,
+            ) {
+                Ok(_) => {
+                    // Race: second parse succeeded while first failed.
+                    // Surface the observed error text as a best
+                    // effort flat message. Extremely unlikely.
+                    return Err(miette!("failed to parse lockfile: {e}"));
+                }
+                Err(owned) => {
+                    return Err(miette::Report::new(owned)).wrap_err("failed to parse lockfile");
+                }
             }
         }
     }
@@ -390,6 +406,18 @@ pub(super) fn select_lockfile_result(
             }
         }
     }
+}
+
+fn active_lockfile_has_conflict_markers(lockfile_dir: &Path) -> bool {
+    aube_lockfile::active_lockfile_has_conflict_markers(lockfile_dir)
+}
+
+fn warn_lockfile_conflict_markers(lockfile_dir: &Path, err: &aube_lockfile::Error) {
+    tracing::warn!(
+        code = aube_codes::warnings::WARN_AUBE_LOCKFILE_CONFLICT_MARKERS,
+        "lockfile in {} contains Git conflict markers; regenerating from package.json ({err})",
+        lockfile_dir.display()
+    );
 }
 
 pub(super) fn apply_lockfile_graph_platform_rules(

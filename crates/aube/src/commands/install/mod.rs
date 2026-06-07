@@ -381,6 +381,10 @@ pub async fn run(opts: InstallOptions) -> miette::Result<()> {
         &lockfile_importer_key,
         &manifest,
     )?;
+    let lockfile_conflict_marker_warning_emitted = lockfile_pre_parse.is_none()
+        && lockfile_enabled
+        && matches!(mode, FrozenMode::Fix | FrozenMode::Prefer)
+        && aube_lockfile::active_lockfile_has_conflict_markers(&lockfile_dir);
     let existing_for_resolver: Option<&aube_lockfile::LockfileGraph> =
         lockfile_pre_parse.as_ref().map(|(g, _)| g);
 
@@ -405,6 +409,7 @@ pub async fn run(opts: InstallOptions) -> miette::Result<()> {
             workspace_catalogs: &workspace_catalogs,
             settings_ctx: &settings_ctx,
             lockfile_pre_parse: lockfile_pre_parse.as_ref(),
+            lockfile_conflict_marker_warning_emitted,
             existing_for_resolver,
             source_kind_before,
             lockfile_enabled,
