@@ -41,12 +41,16 @@ pub struct DlxArgs {
     /// Overrides inferring from the command.
     #[arg(short = 'p', long = "package")]
     pub package: Vec<String>,
-    /// Allow named packages to run postinstall scripts during the
-    /// transient install.
+    /// Allow named packages to run lifecycle scripts during the
+    /// transient install. Use `--allow-build=<pkg>`.
     ///
-    /// Repeatable — pass once per package. Mirrors pnpm's
-    /// `pnpm dlx --allow-build=<pkg>` compatibility surface while
-    /// keeping dlx scripts skipped unless explicitly approved.
+    /// Repeatable — pass once per package. The named package's
+    /// `preinstall` / `install` / `postinstall` scripts execute during
+    /// the transient install. Requires the equals form
+    /// (`--allow-build=<pkg>`); space-separated forms are rejected.
+    /// Mirrors pnpm's `pnpm dlx --allow-build=<pkg>` compatibility
+    /// surface while keeping dlx scripts skipped unless explicitly
+    /// approved.
     #[arg(
         long = "allow-build",
         value_name = "PKG",
