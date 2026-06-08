@@ -39,21 +39,21 @@ same dependency versions CI built against. The compiled binary lands in
 
 ## From Homebrew
 
-aube is published from the Endev tap until it lands in homebrew-core:
+aube is published from the jdx tap until it lands in homebrew-core:
 
 ```sh
-brew install endevco/tap/aube
+brew install jdx/tap/aube
 ```
 
 The tap formula builds from source and installs shell completions.
 
 ## From npm
 
-aube is also published on npm as `@endevco/aube`:
+aube is also published on npm as `@jdx/aube`:
 
 ```sh
-npm install -g --ignore-scripts=false @endevco/aube
-npx --ignore-scripts=false @endevco/aube --version
+npm install -g --ignore-scripts=false @jdx/aube
+npx --ignore-scripts=false @jdx/aube --version
 ```
 
 ::: warning
@@ -115,7 +115,7 @@ If you want to build the current checkout yourself, use the standard source
 build flow:
 
 ```sh
-git clone https://github.com/endevco/aube
+git clone https://github.com/jdx/aube
 cd aube
 cargo install --path crates/aube
 ```
@@ -125,14 +125,14 @@ This installs the `aube` binary into `~/.cargo/bin`.
 ## GitHub Actions
 
 For CI workflows, use the
-[`endevco/aube-action`](https://github.com/endevco/aube-action) Action.
+[`jdx/aube-action`](https://github.com/jdx/aube-action) Action.
 It downloads the prebuilt aube binary that matches the runner's OS and
 architecture, adds it to `PATH`, and (optionally) installs Node.js
 inline via [mise](https://mise.jdx.dev) so a single step covers both
 the package manager and the runtime:
 
 ```yaml
-- uses: endevco/aube-action@v1
+- uses: jdx/aube-action@v1
 - run: aube install
 ```
 
@@ -140,7 +140,7 @@ Pin a specific aube version, install Node, and run `aube install` in
 one go:
 
 ```yaml
-- uses: endevco/aube-action@v1
+- uses: jdx/aube-action@v1
   with:
     version: 1.5.1         # or "latest"
     node-version: "22"     # or "auto" to read mise.toml / .tool-versions / .nvmrc
@@ -154,7 +154,7 @@ against the workspace, so any of `mise.toml`, `.tool-versions`,
 honored — no separate `actions/setup-node` step required.
 :::
 
-See the [`aube-action` README](https://github.com/endevco/aube-action#readme)
+See the [`aube-action` README](https://github.com/jdx/aube-action#readme)
 for the full input/output reference.
 
 ## Verify

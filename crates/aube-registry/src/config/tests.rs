@@ -120,7 +120,7 @@ fn parse_npmrc_strips_surrounding_quotes() {
 
 #[test]
 fn parse_npmrc_expands_env_in_keys_for_per_uri_auth() {
-    // Regression for endevco/aube#519. Nexus / Artifactory setups
+    // Regression for jdx/aube#519. Nexus / Artifactory setups
     // commonly template the registry-prefix portion of per-URI
     // auth keys via env vars injected by sops/CI:
     //

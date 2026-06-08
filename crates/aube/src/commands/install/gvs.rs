@@ -29,7 +29,7 @@ pub(super) fn resolve_global_virtual_store_override(
                  enableGlobalVirtualStore false --location project` — or set \
                  `disableGlobalVirtualStoreForPackages=[]` to opt out of this \
                  auto-detection entirely. \
-                 Details: https://aube.en.dev/package-manager/global-virtual-store"
+                 Details: https://aube.jdx.dev/package-manager/global-virtual-store"
             );
             Some(false)
         } else {

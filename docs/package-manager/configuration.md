@@ -36,7 +36,7 @@ the same value. Aube-only and pnpm-only settings land in
 `~/.config/aube/config.toml` instead, so unknown-to-npm keys don't trigger
 warnings from sibling tools.
 
-[settings-toml]: https://github.com/endevco/aube/blob/main/crates/aube-settings/settings.toml
+[settings-toml]: https://github.com/jdx/aube/blob/main/crates/aube-settings/settings.toml
 
 ## .npmrc
 

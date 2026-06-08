@@ -1,6 +1,6 @@
 name: publish-homebrew
 
-# Releases are published to the Endev tap until aube is submitted to and
+# Releases are published to the jdx tap until aube is submitted to and
 # accepted by homebrew-core.
 
 on:
@@ -25,7 +25,7 @@ jobs:
     permissions:
       contents: read
     env:
-      TAP_REPO: endevco/homebrew-tap
+      TAP_REPO: jdx/homebrew-tap
     steps:
       - name: Resolve tag
         id: tag
@@ -68,7 +68,7 @@ jobs:
         env:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          curl -fsSL "https://github.com/endevco/aube/archive/refs/tags/${TAG}.tar.gz" -o source.tar.gz
+          curl -fsSL "https://github.com/jdx/aube/archive/refs/tags/${TAG}.tar.gz" -o source.tar.gz
           echo "sha256=$(sha256sum source.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
       - name: Render formula
@@ -100,7 +100,7 @@ jobs:
           fi
 
           git config user.name "aube Release Bot"
-          git config user.email "noreply@aube.en.dev"
+          git config user.email "noreply@aube.jdx.dev"
           git add Formula/aube.rb
           git commit -m "aube: update to ${VERSION}"
           git push

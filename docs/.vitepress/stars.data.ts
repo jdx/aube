@@ -19,7 +19,7 @@ export default {
         };
         if (token) headers.Authorization = `Bearer ${token}`;
 
-        const response = await fetch("https://api.github.com/repos/endevco/aube", {
+        const response = await fetch("https://api.github.com/repos/jdx/aube", {
           headers,
         });
         if (response.ok) {

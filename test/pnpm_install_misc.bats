@@ -778,7 +778,7 @@ JSON
 	# mismatches on every install of a project that pins a pnpm
 	# version. Projects that genuinely want to gate on the running
 	# tool can use engines.aube instead. Regression for
-	# github.com/endevco/aube/discussions/626.
+	# github.com/jdx/aube/discussions/626.
 	#
 	# This is a deliberate divergence from pnpm/test/install/misc.ts:303
 	# ('recursive install should fail if the used pnpm version does

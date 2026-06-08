@@ -81,7 +81,7 @@ export default defineConfig({
       { text: "Benchmarks", link: "/benchmarks" },
       { text: "CLI Reference", link: "/cli/" },
       { text: "Settings", link: "/settings/" },
-      { text: "Releases", link: "https://github.com/endevco/aube/releases" },
+      { text: "Releases", link: "https://github.com/jdx/aube/releases" },
     ],
 
     sidebar: [
@@ -149,7 +149,7 @@ export default defineConfig({
     footer: false,
 
     editLink: {
-      pattern: "https://github.com/endevco/aube/edit/main/docs/:path",
+      pattern: "https://github.com/jdx/aube/edit/main/docs/:path",
       text: "Edit this page on GitHub",
     },
 

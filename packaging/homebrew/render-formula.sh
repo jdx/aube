@@ -5,12 +5,12 @@ set -euo pipefail
 TAG="${TAG:?TAG is required, e.g. v1.0.0-beta.4}"
 SOURCE_SHA256="${SOURCE_SHA256:?SOURCE_SHA256 is required}"
 
-SOURCE_URL="https://github.com/endevco/aube/archive/refs/tags/${TAG}.tar.gz"
+SOURCE_URL="https://github.com/jdx/aube/archive/refs/tags/${TAG}.tar.gz"
 
 cat <<FORMULA
 class Aube < Formula
   desc "Fast Node.js package manager that drops into existing projects"
-  homepage "https://aube.en.dev"
+  homepage "https://aube.jdx.dev"
   url "${SOURCE_URL}"
   sha256 "${SOURCE_SHA256}"
   license "MIT"

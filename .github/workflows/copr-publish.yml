@@ -108,7 +108,7 @@ jobs:
             echo "CHROOTS=${CHROOTS}"
             echo "PACKAGE_NAME=${PACKAGE_NAME}"
             echo "MAINTAINER_NAME=${MAINTAINER_NAME_VAR:-aube Release Bot}"
-            echo "MAINTAINER_EMAIL=${MAINTAINER_EMAIL_VAR:-noreply@aube.en.dev}"
+            echo "MAINTAINER_EMAIL=${MAINTAINER_EMAIL_VAR:-noreply@aube.jdx.dev}"
             echo "COPR_OWNER=${COPR_OWNER_VAR:-jdxcode}"
             echo "COPR_PROJECT=${COPR_PROJECT_VAR:-aube}"
             echo "BUILD_PROFILE=release"

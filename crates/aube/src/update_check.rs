@@ -1,7 +1,7 @@
 //! Update notifier.
 //!
 //! Invoked from `aube doctor` and the `aube --version` / `-V` flag —
-//! the version-asking commands. Fetches `https://aube.en.dev/VERSION`
+//! the version-asking commands. Fetches `https://aube.jdx.dev/VERSION`
 //! and prints a one-line notice on stderr if the advertised version is
 //! newer than the running binary. The result is cached under
 //! `<cacheDir>/update-check.json` so only the first run in any 24h
@@ -15,7 +15,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-const VERSION_URL: &str = "https://aube.en.dev/VERSION";
+const VERSION_URL: &str = "https://aube.jdx.dev/VERSION";
 const CHECK_INTERVAL_SECS: u64 = 24 * 60 * 60;
 const FETCH_TIMEOUT: Duration = Duration::from_millis(1500);
 /// Hard cap on the bytes we'll read from the VERSION endpoint. The
@@ -48,7 +48,7 @@ pub async fn check_and_notify(cwd: &Path) {
     }
     eprintln!();
     eprintln!("  aube {latest} is available (current: {current})");
-    eprintln!("  upgrade: https://aube.en.dev");
+    eprintln!("  upgrade: https://aube.jdx.dev");
 }
 
 fn should_check() -> bool {

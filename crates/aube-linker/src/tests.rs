@@ -201,7 +201,7 @@ fn test_link_all_creates_pnpm_virtual_store() {
 
 #[test]
 fn test_link_file_fresh_reports_missing_cas_shard_and_invalidates_cache() {
-    // Reproduces endevco/aube#393: a partially corrupt CAS leaves the
+    // Reproduces jdx/aube#393: a partially corrupt CAS leaves the
     // cached package index pointing at a missing shard. Materialize
     // must distinguish "source CAS file missing" from a generic ENOENT
     // and drop the stale index JSON so the next install re-imports

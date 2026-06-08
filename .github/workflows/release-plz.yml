@@ -175,7 +175,7 @@ jobs:
           TAG: ${{ needs.release-plz-release.outputs.tag }}
         run: |
           communique generate "$TAG" --github-release
-      - name: Append en.dev sponsor blurb
+      - name: Append jdx.dev sponsor blurb
         env:
           GITHUB_TOKEN: ${{ secrets.AUBE_GH_TOKEN }}
           TAG: ${{ needs.release-plz-release.outputs.tag }}
@@ -197,9 +197,9 @@ jobs:
 
           ## 💚 Sponsor aube
 
-          aube is part of [**en.dev**](https://en.dev) — an independent developer-tooling studio run by [@jdx](https://github.com/jdx), also behind [mise](https://mise.jdx.dev/). Work on aube is funded entirely by sponsors.
+          aube is part of [**jdx.dev**](https://jdx.dev) — an independent developer-tooling studio run by [@jdx](https://github.com/jdx), also behind [mise](https://mise.jdx.dev/). Work on aube is funded entirely by sponsors.
 
-          If aube is saving your team install time or CI minutes, please consider [sponsoring at en.dev](https://en.dev). Individual and company sponsorships are what keep the project fast, free, and independent.
+          If aube is saving your team install time or CI minutes, please consider [sponsoring at jdx.dev](https://jdx.dev). Individual and company sponsorships are what keep the project fast, free, and independent.
           EOF
           } > /tmp/release-notes.md
           gh release edit "$TAG" --notes-file /tmp/release-notes.md
@@ -352,7 +352,7 @@ jobs:
             const pr = match?.[4];
             const [, items] = sections.get(type) || sections.get('default');
             const scoped = scope ? `*(${scope})* ${desc}` : desc;
-            const linked = pr ? `${scoped} ([#${pr}](https://github.com/endevco/aube/pull/${pr}))` : scoped;
+            const linked = pr ? `${scoped} ([#${pr}](https://github.com/jdx/aube/pull/${pr}))` : scoped;
             items.push(`- ${linked}`);
           }
 
@@ -362,7 +362,7 @@ jobs:
             body.push(`### ${heading}`, '', ...items, '');
           }
           const changelogEntry = [
-            `## [${newVersion}](https://github.com/endevco/aube/compare/${latestTag}...v${newVersion}) - ${today}`,
+            `## [${newVersion}](https://github.com/jdx/aube/compare/${latestTag}...v${newVersion}) - ${today}`,
             '',
             ...body,
           ].join('\n').trimEnd();

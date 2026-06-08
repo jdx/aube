@@ -1856,7 +1856,7 @@ fn test_parse_funding_all_shapes() {
 /// object / array-of-objects shapes for `license:` (npm copies
 /// whatever's in the package's `package.json` verbatim, and older
 /// packages like `tv4` still ship the deprecated forms). Regression
-/// guard for https://github.com/endevco/aube/discussions/510.
+/// guard for https://github.com/jdx/aube/discussions/510.
 #[test]
 fn test_parse_license_all_shapes() {
     let tmp = tempfile::NamedTempFile::new().unwrap();

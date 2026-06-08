@@ -196,13 +196,13 @@ impl CiState {
 
     /// Render the one-line header banner that prints once above the
     /// first heartbeat-emitted progress line. Plain whitespace
-    /// alignment, no frame: `aube VERSION by en.dev`.
+    /// alignment, no frame: `aube VERSION by jdx.dev`.
     fn render_header() -> String {
         format!(
             "{} {} {}",
             style::emagenta("aube").bold(),
             style::edim(crate::version::VERSION.as_str()),
-            style::edim("by en.dev"),
+            style::edim("by jdx.dev"),
         )
     }
 
@@ -248,7 +248,7 @@ impl CiState {
                 *last = line.clone();
                 drop(last);
                 // First time we actually print, emit the unframed
-                // `aube VERSION by en.dev` header above the bar so
+                // `aube VERSION by jdx.dev` header above the bar so
                 // the CI log shows the aube banner. Only printed
                 // once per install — `shown` flips true here.
                 if !state.shown.swap(true, Ordering::Relaxed) {

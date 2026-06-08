@@ -7,318 +7,318 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.18.1](https://github.com/endevco/aube/compare/aube-linker-v1.18.0...aube-linker-v1.18.1) - 2026-06-07
+## [1.18.1](https://github.com/jdx/aube/compare/aube-linker-v1.18.0...aube-linker-v1.18.1) - 2026-06-07
 
 ### Fixed
 
-- *(install)* regenerate conflicted lockfiles ([#843](https://github.com/endevco/aube/pull/843))
+- *(install)* regenerate conflicted lockfiles ([#843](https://github.com/jdx/aube/pull/843))
 
 ### Other
 
-- refresh benchmarks for v1.18.0 ([#841](https://github.com/endevco/aube/pull/841))
+- refresh benchmarks for v1.18.0 ([#841](https://github.com/jdx/aube/pull/841))
 
-## [1.18.0](https://github.com/endevco/aube/compare/aube-linker-v1.17.1...aube-linker-v1.18.0) - 2026-06-04
+## [1.18.0](https://github.com/jdx/aube/compare/aube-linker-v1.17.1...aube-linker-v1.18.0) - 2026-06-04
 
 ### Added
 
-- add sponsors command ([#824](https://github.com/endevco/aube/pull/824))
+- add sponsors command ([#824](https://github.com/jdx/aube/pull/824))
 
 ### Fixed
 
-- *(lockfile)* rebase pnpm workspace link paths ([#827](https://github.com/endevco/aube/pull/827))
+- *(lockfile)* rebase pnpm workspace link paths ([#827](https://github.com/jdx/aube/pull/827))
 
 ### Other
 
-- refresh benchmarks for v1.17.1 ([#820](https://github.com/endevco/aube/pull/820))
+- refresh benchmarks for v1.17.1 ([#820](https://github.com/jdx/aube/pull/820))
 
-## [1.17.1](https://github.com/endevco/aube/compare/aube-linker-v1.17.0...aube-linker-v1.17.1) - 2026-05-31
+## [1.17.1](https://github.com/jdx/aube/compare/aube-linker-v1.17.0...aube-linker-v1.17.1) - 2026-05-31
 
 ### Other
 
-- *(ci)* switch back to namespace runners ([#819](https://github.com/endevco/aube/pull/819))
+- *(ci)* switch back to namespace runners ([#819](https://github.com/jdx/aube/pull/819))
 
-## [1.17.0](https://github.com/endevco/aube/compare/aube-linker-v1.16.1...aube-linker-v1.17.0) - 2026-05-31
+## [1.17.0](https://github.com/jdx/aube/compare/aube-linker-v1.16.1...aube-linker-v1.17.0) - 2026-05-31
 
 ### Added
 
-- *(linker)* add hoisting limits ([#809](https://github.com/endevco/aube/pull/809))
+- *(linker)* add hoisting limits ([#809](https://github.com/jdx/aube/pull/809))
 
 ### Other
 
-- *(ci)* switch to github-hosted runners ([#814](https://github.com/endevco/aube/pull/814))
-- refresh benchmarks for v1.16.1 ([#808](https://github.com/endevco/aube/pull/808))
+- *(ci)* switch to github-hosted runners ([#814](https://github.com/jdx/aube/pull/814))
+- refresh benchmarks for v1.16.1 ([#808](https://github.com/jdx/aube/pull/808))
 
-## [1.16.1](https://github.com/endevco/aube/compare/aube-linker-v1.16.0...aube-linker-v1.16.1) - 2026-05-29
+## [1.16.1](https://github.com/jdx/aube/compare/aube-linker-v1.16.0...aube-linker-v1.16.1) - 2026-05-29
 
 ### Other
 
-- refresh benchmarks for v1.16.0 ([#787](https://github.com/endevco/aube/pull/787))
+- refresh benchmarks for v1.16.0 ([#787](https://github.com/jdx/aube/pull/787))
 
 ### Security
 
-- *(linker)* reject unsafe package aliases ([#800](https://github.com/endevco/aube/pull/800))
+- *(linker)* reject unsafe package aliases ([#800](https://github.com/jdx/aube/pull/800))
 
-## [1.16.0](https://github.com/endevco/aube/compare/aube-linker-v1.15.0...aube-linker-v1.16.0) - 2026-05-25
+## [1.16.0](https://github.com/jdx/aube/compare/aube-linker-v1.15.0...aube-linker-v1.16.0) - 2026-05-25
 
 ### Other
 
-- refresh benchmarks for v1.15.0 ([#750](https://github.com/endevco/aube/pull/750))
+- refresh benchmarks for v1.15.0 ([#750](https://github.com/jdx/aube/pull/750))
 
-## [1.15.0](https://github.com/endevco/aube/compare/aube-linker-v1.14.1...aube-linker-v1.15.0) - 2026-05-17
+## [1.15.0](https://github.com/jdx/aube/compare/aube-linker-v1.14.1...aube-linker-v1.15.0) - 2026-05-17
 
 ### Added
 
-- *(yarn)* support berry portal and exec protocols ([#729](https://github.com/endevco/aube/pull/729))
+- *(yarn)* support berry portal and exec protocols ([#729](https://github.com/jdx/aube/pull/729))
 
 ### Other
 
-- refresh benchmarks for v1.14.1 ([#721](https://github.com/endevco/aube/pull/721))
-- *(linker)* split impl Linker into per-concern files ([#707](https://github.com/endevco/aube/pull/707))
+- refresh benchmarks for v1.14.1 ([#721](https://github.com/jdx/aube/pull/721))
+- *(linker)* split impl Linker into per-concern files ([#707](https://github.com/jdx/aube/pull/707))
 
-## [1.14.1](https://github.com/endevco/aube/compare/aube-linker-v1.14.0...aube-linker-v1.14.1) - 2026-05-15
-
-### Other
-
-- *(linker)* split lib.rs into focused submodules ([#703](https://github.com/endevco/aube/pull/703))
-
-## [1.14.0](https://github.com/endevco/aube/compare/aube-linker-v1.13.1...aube-linker-v1.14.0) - 2026-05-14
+## [1.14.1](https://github.com/jdx/aube/compare/aube-linker-v1.14.0...aube-linker-v1.14.1) - 2026-05-15
 
 ### Other
 
-- refresh benchmarks for v1.13.1 ([#687](https://github.com/endevco/aube/pull/687))
+- *(linker)* split lib.rs into focused submodules ([#703](https://github.com/jdx/aube/pull/703))
 
-## [1.13.0](https://github.com/endevco/aube/compare/aube-linker-v1.12.0...aube-linker-v1.13.0) - 2026-05-13
+## [1.14.0](https://github.com/jdx/aube/compare/aube-linker-v1.13.1...aube-linker-v1.14.0) - 2026-05-14
 
 ### Other
 
-- refresh benchmarks for v1.12.0 ([#625](https://github.com/endevco/aube/pull/625))
+- refresh benchmarks for v1.13.1 ([#687](https://github.com/jdx/aube/pull/687))
 
-## [1.12.0](https://github.com/endevco/aube/compare/aube-linker-v1.11.0...aube-linker-v1.12.0) - 2026-05-12
+## [1.13.0](https://github.com/jdx/aube/compare/aube-linker-v1.12.0...aube-linker-v1.13.0) - 2026-05-13
+
+### Other
+
+- refresh benchmarks for v1.12.0 ([#625](https://github.com/jdx/aube/pull/625))
+
+## [1.12.0](https://github.com/jdx/aube/compare/aube-linker-v1.11.0...aube-linker-v1.12.0) - 2026-05-12
 
 ### Fixed
 
-- *(install)* co-locate cached indexes with CAS + verified probe self-heal ([#635](https://github.com/endevco/aube/pull/635))
+- *(install)* co-locate cached indexes with CAS + verified probe self-heal ([#635](https://github.com/jdx/aube/pull/635))
 
 ### Other
 
-- refresh benchmarks for v1.11.0 ([#622](https://github.com/endevco/aube/pull/622))
+- refresh benchmarks for v1.11.0 ([#622](https://github.com/jdx/aube/pull/622))
 
-## [1.11.0](https://github.com/endevco/aube/compare/aube-linker-v1.10.4...aube-linker-v1.11.0) - 2026-05-11
+## [1.11.0](https://github.com/jdx/aube/compare/aube-linker-v1.10.4...aube-linker-v1.11.0) - 2026-05-11
 
 ### Added
 
-- *(linker)* pick hardlink in `auto`, skip reflink probe ([#599](https://github.com/endevco/aube/pull/599))
+- *(linker)* pick hardlink in `auto`, skip reflink probe ([#599](https://github.com/jdx/aube/pull/599))
 
 ### Fixed
 
-- *(linker)* point bin shim NODE_PATH at the hidden modules dir ([#613](https://github.com/endevco/aube/pull/613))
+- *(linker)* point bin shim NODE_PATH at the hidden modules dir ([#613](https://github.com/jdx/aube/pull/613))
 
 ### Other
 
-- refresh benchmarks for v1.10.4 ([#600](https://github.com/endevco/aube/pull/600))
+- refresh benchmarks for v1.10.4 ([#600](https://github.com/jdx/aube/pull/600))
 
-## [1.10.1](https://github.com/endevco/aube/compare/aube-linker-v1.10.0...aube-linker-v1.10.1) - 2026-05-10
+## [1.10.1](https://github.com/jdx/aube/compare/aube-linker-v1.10.0...aube-linker-v1.10.1) - 2026-05-10
 
 ### Other
 
-- refresh benchmarks for v1.10.0 ([#571](https://github.com/endevco/aube/pull/571))
-- refresh benchmarks for v1.10.0 ([#566](https://github.com/endevco/aube/pull/566))
+- refresh benchmarks for v1.10.0 ([#571](https://github.com/jdx/aube/pull/571))
+- refresh benchmarks for v1.10.0 ([#566](https://github.com/jdx/aube/pull/566))
 
-## [1.10.0](https://github.com/endevco/aube/compare/aube-linker-v1.9.1...aube-linker-v1.10.0) - 2026-05-10
+## [1.10.0](https://github.com/jdx/aube/compare/aube-linker-v1.9.1...aube-linker-v1.10.0) - 2026-05-10
 
 ### Added
 
-- *(diag)* instrument install and add aube diag subcommand ([#547](https://github.com/endevco/aube/pull/547))
+- *(diag)* instrument install and add aube diag subcommand ([#547](https://github.com/jdx/aube/pull/547))
 
 ### Fixed
 
-- *(workspace)* three workspace install correctness fixes from pnpm test port ([#564](https://github.com/endevco/aube/pull/564))
+- *(workspace)* three workspace install correctness fixes from pnpm test port ([#564](https://github.com/jdx/aube/pull/564))
 
 ### Other
 
-- refresh benchmarks for v1.9.1 ([#555](https://github.com/endevco/aube/pull/555))
-- lead hero with auto-install promise over speed ([#557](https://github.com/endevco/aube/pull/557))
-- refresh benchmarks for v1.9.1 ([#534](https://github.com/endevco/aube/pull/534))
-- refresh benchmarks for v1.9.0 ([#532](https://github.com/endevco/aube/pull/532))
+- refresh benchmarks for v1.9.1 ([#555](https://github.com/jdx/aube/pull/555))
+- lead hero with auto-install promise over speed ([#557](https://github.com/jdx/aube/pull/557))
+- refresh benchmarks for v1.9.1 ([#534](https://github.com/jdx/aube/pull/534))
+- refresh benchmarks for v1.9.0 ([#532](https://github.com/jdx/aube/pull/532))
 
-## [1.9.1](https://github.com/endevco/aube/compare/aube-linker-v1.9.0...aube-linker-v1.9.1) - 2026-05-06
-
-### Other
-
-- *(install)* pipeline per-project materialize into fetch phase ([#527](https://github.com/endevco/aube/pull/527))
-- refresh benchmarks for v1.9.0 ([#525](https://github.com/endevco/aube/pull/525))
-
-## [1.9.0](https://github.com/endevco/aube/compare/aube-linker-v1.8.0...aube-linker-v1.9.0) - 2026-05-05
+## [1.9.1](https://github.com/jdx/aube/compare/aube-linker-v1.9.0...aube-linker-v1.9.1) - 2026-05-06
 
 ### Other
 
-- refresh benchmarks for v1.8.0 ([#508](https://github.com/endevco/aube/pull/508))
+- *(install)* pipeline per-project materialize into fetch phase ([#527](https://github.com/jdx/aube/pull/527))
+- refresh benchmarks for v1.9.0 ([#525](https://github.com/jdx/aube/pull/525))
 
-## [1.8.0](https://github.com/endevco/aube/compare/aube-linker-v1.7.0...aube-linker-v1.8.0) - 2026-05-03
+## [1.9.0](https://github.com/jdx/aube/compare/aube-linker-v1.8.0...aube-linker-v1.9.0) - 2026-05-05
+
+### Other
+
+- refresh benchmarks for v1.8.0 ([#508](https://github.com/jdx/aube/pull/508))
+
+## [1.8.0](https://github.com/jdx/aube/compare/aube-linker-v1.7.0...aube-linker-v1.8.0) - 2026-05-03
 
 ### Added
 
-- *(run)* prefer local bins for run and dlx ([#502](https://github.com/endevco/aube/pull/502))
-- *(codes)* introduce ERR_AUBE_/WARN_AUBE_ codes, exit codes, dep chains ([#492](https://github.com/endevco/aube/pull/492))
+- *(run)* prefer local bins for run and dlx ([#502](https://github.com/jdx/aube/pull/502))
+- *(codes)* introduce ERR_AUBE_/WARN_AUBE_ codes, exit codes, dep chains ([#492](https://github.com/jdx/aube/pull/492))
 
 ### Other
 
-- refresh benchmarks for v1.7.0 ([#490](https://github.com/endevco/aube/pull/490))
+- refresh benchmarks for v1.7.0 ([#490](https://github.com/jdx/aube/pull/490))
 
-## [1.7.0](https://github.com/endevco/aube/compare/aube-linker-v1.6.2...aube-linker-v1.7.0) - 2026-05-03
+## [1.7.0](https://github.com/jdx/aube/compare/aube-linker-v1.6.2...aube-linker-v1.7.0) - 2026-05-03
 
 ### Fixed
 
-- *(resolver)* resolve nested link:/file: deps from local parents and overrides ([#470](https://github.com/endevco/aube/pull/470))
+- *(resolver)* resolve nested link:/file: deps from local parents and overrides ([#470](https://github.com/jdx/aube/pull/470))
 
 ### Other
 
-- refresh benchmarks for v1.6.2 ([#474](https://github.com/endevco/aube/pull/474))
-- streaming sha512, parallel cas, tls prewarm, fetch reorder ([#469](https://github.com/endevco/aube/pull/469))
-- refresh benchmarks for v1.6.2 ([#467](https://github.com/endevco/aube/pull/467))
+- refresh benchmarks for v1.6.2 ([#474](https://github.com/jdx/aube/pull/474))
+- streaming sha512, parallel cas, tls prewarm, fetch reorder ([#469](https://github.com/jdx/aube/pull/469))
+- refresh benchmarks for v1.6.2 ([#467](https://github.com/jdx/aube/pull/467))
 
-## [1.6.1](https://github.com/endevco/aube/compare/aube-linker-v1.6.0...aube-linker-v1.6.1) - 2026-05-01
-
-### Other
-
-- refresh benchmarks for v1.5.2 ([#459](https://github.com/endevco/aube/pull/459))
-
-## [1.6.0](https://github.com/endevco/aube/compare/aube-linker-v1.5.2...aube-linker-v1.6.0) - 2026-05-01
+## [1.6.1](https://github.com/jdx/aube/compare/aube-linker-v1.6.0...aube-linker-v1.6.1) - 2026-05-01
 
 ### Other
 
-- cache hot-path work across install, resolver, and registry ([#453](https://github.com/endevco/aube/pull/453))
-- refresh benchmarks for v1.5.2 ([#452](https://github.com/endevco/aube/pull/452))
-- refresh benchmarks for v1.5.2 ([#448](https://github.com/endevco/aube/pull/448))
-- refresh benchmarks for v1.5.1 ([#426](https://github.com/endevco/aube/pull/426))
+- refresh benchmarks for v1.5.2 ([#459](https://github.com/jdx/aube/pull/459))
 
-## [1.5.2](https://github.com/endevco/aube/compare/aube-linker-v1.5.1...aube-linker-v1.5.2) - 2026-04-30
-
-### Fixed
-
-- *(linker)* retry transient Windows junction errors ([#406](https://github.com/endevco/aube/pull/406))
-- *(linker,store)* self-heal install on missing CAS shard ([#395](https://github.com/endevco/aube/pull/395))
+## [1.6.0](https://github.com/jdx/aube/compare/aube-linker-v1.5.2...aube-linker-v1.6.0) - 2026-05-01
 
 ### Other
 
-- thank Namespace for GitHub Actions runner support ([#412](https://github.com/endevco/aube/pull/412))
-- refresh benchmarks for v1.5.1 ([#392](https://github.com/endevco/aube/pull/392))
+- cache hot-path work across install, resolver, and registry ([#453](https://github.com/jdx/aube/pull/453))
+- refresh benchmarks for v1.5.2 ([#452](https://github.com/jdx/aube/pull/452))
+- refresh benchmarks for v1.5.2 ([#448](https://github.com/jdx/aube/pull/448))
+- refresh benchmarks for v1.5.1 ([#426](https://github.com/jdx/aube/pull/426))
 
-## [1.5.1](https://github.com/endevco/aube/compare/aube-linker-v1.5.0...aube-linker-v1.5.1) - 2026-04-29
-
-### Fixed
-
-- *(install)* allow POSIX colon tarball filenames ([#386](https://github.com/endevco/aube/pull/386))
-
-## [1.5.0](https://github.com/endevco/aube/compare/aube-linker-v1.4.0...aube-linker-v1.5.0) - 2026-04-29
+## [1.5.2](https://github.com/jdx/aube/compare/aube-linker-v1.5.1...aube-linker-v1.5.2) - 2026-04-30
 
 ### Fixed
 
-- *(cli,linker,lockfile)* patch-commit destination, CRLF patches, npm-alias catalog ([#384](https://github.com/endevco/aube/pull/384))
-
-## [1.4.0](https://github.com/endevco/aube/compare/aube-linker-v1.3.0...aube-linker-v1.4.0) - 2026-04-28
-
-### Fixed
-
-- *(linker)* expose hidden hoist from global store ([#358](https://github.com/endevco/aube/pull/358))
-- *(packaging)* include README on published aube crate ([#349](https://github.com/endevco/aube/pull/349))
+- *(linker)* retry transient Windows junction errors ([#406](https://github.com/jdx/aube/pull/406))
+- *(linker,store)* self-heal install on missing CAS shard ([#395](https://github.com/jdx/aube/pull/395))
 
 ### Other
 
-- warn about npm install caveats ([#368](https://github.com/endevco/aube/pull/368))
+- thank Namespace for GitHub Actions runner support ([#412](https://github.com/jdx/aube/pull/412))
+- refresh benchmarks for v1.5.1 ([#392](https://github.com/jdx/aube/pull/392))
 
-## [1.2.1](https://github.com/endevco/aube/compare/aube-linker-v1.2.0...aube-linker-v1.2.1) - 2026-04-26
-
-### Fixed
-
-- *(linker)* skip self-named deps regardless of version ([#321](https://github.com/endevco/aube/pull/321))
-
-## [1.2.0](https://github.com/endevco/aube/compare/aube-linker-v1.1.0...aube-linker-v1.2.0) - 2026-04-25
+## [1.5.1](https://github.com/jdx/aube/compare/aube-linker-v1.5.0...aube-linker-v1.5.1) - 2026-04-29
 
 ### Fixed
 
-- cross-platform install correctness pass ([#293](https://github.com/endevco/aube/pull/293))
+- *(install)* allow POSIX colon tarball filenames ([#386](https://github.com/jdx/aube/pull/386))
+
+## [1.5.0](https://github.com/jdx/aube/compare/aube-linker-v1.4.0...aube-linker-v1.5.0) - 2026-04-29
+
+### Fixed
+
+- *(cli,linker,lockfile)* patch-commit destination, CRLF patches, npm-alias catalog ([#384](https://github.com/jdx/aube/pull/384))
+
+## [1.4.0](https://github.com/jdx/aube/compare/aube-linker-v1.3.0...aube-linker-v1.4.0) - 2026-04-28
+
+### Fixed
+
+- *(linker)* expose hidden hoist from global store ([#358](https://github.com/jdx/aube/pull/358))
+- *(packaging)* include README on published aube crate ([#349](https://github.com/jdx/aube/pull/349))
+
+### Other
+
+- warn about npm install caveats ([#368](https://github.com/jdx/aube/pull/368))
+
+## [1.2.1](https://github.com/jdx/aube/compare/aube-linker-v1.2.0...aube-linker-v1.2.1) - 2026-04-26
+
+### Fixed
+
+- *(linker)* skip self-named deps regardless of version ([#321](https://github.com/jdx/aube/pull/321))
+
+## [1.2.0](https://github.com/jdx/aube/compare/aube-linker-v1.1.0...aube-linker-v1.2.0) - 2026-04-25
+
+### Fixed
+
+- cross-platform install correctness pass ([#293](https://github.com/jdx/aube/pull/293))
 
 ### Security
 
-- cve-class hardening across linker, registry, resolver, install ([#296](https://github.com/endevco/aube/pull/296))
+- cve-class hardening across linker, registry, resolver, install ([#296](https://github.com/jdx/aube/pull/296))
 
-## [1.1.0](https://github.com/endevco/aube/compare/aube-linker-v1.0.0...aube-linker-v1.1.0) - 2026-04-24
-
-### Fixed
-
-- *(store)* speed up cold installs ([#267](https://github.com/endevco/aube/pull/267))
-- *(linker)* strip windows verbatim prefix before diffing bin-shim paths ([#275](https://github.com/endevco/aube/pull/275))
-
-### Other
-
-- dedup pass + registry/store perf wave ([#254](https://github.com/endevco/aube/pull/254))
-- copy small files instead of reflinking ([#251](https://github.com/endevco/aube/pull/251))
-- shared helpers + migrate hardcoded sites ([#245](https://github.com/endevco/aube/pull/245))
-
-## [1.0.0](https://github.com/endevco/aube/compare/aube-linker-v1.0.0-beta.12...aube-linker-v1.0.0) - 2026-04-23
-
-### Other
-
-- windows install correctness + workspace filter fixes ([#229](https://github.com/endevco/aube/pull/229))
-- speed up babylon warm reinstalls ([#224](https://github.com/endevco/aube/pull/224))
-
-## [1.0.0-beta.12](https://github.com/endevco/aube/compare/aube-linker-v1.0.0-beta.11...aube-linker-v1.0.0-beta.12) - 2026-04-22
-
-### Other
-
-- include integrity in package index cache key ([#209](https://github.com/endevco/aube/pull/209))
-- cross-crate dedup pass ([#208](https://github.com/endevco/aube/pull/208))
-- cross-crate security hardening ([#202](https://github.com/endevco/aube/pull/202))
-- cross-crate correctness and security fixes ([#196](https://github.com/endevco/aube/pull/196))
-
-## [1.0.0-beta.11](https://github.com/endevco/aube/compare/aube-linker-v1.0.0-beta.10...aube-linker-v1.0.0-beta.11) - 2026-04-21
-
-### Other
-
-- skip pnpm v9 virtual importers in workspace link passes ([#190](https://github.com/endevco/aube/pull/190))
-
-## [1.0.0-beta.10](https://github.com/endevco/aube/compare/aube-linker-v1.0.0-beta.9...aube-linker-v1.0.0-beta.10) - 2026-04-21
+## [1.1.0](https://github.com/jdx/aube/compare/aube-linker-v1.0.0...aube-linker-v1.1.0) - 2026-04-24
 
 ### Fixed
 
-- close remaining audit findings across registry, store, and linker ([#164](https://github.com/endevco/aube/pull/164))
-
-## [1.0.0-beta.9](https://github.com/endevco/aube/compare/aube-linker-v1.0.0-beta.8...aube-linker-v1.0.0-beta.9) - 2026-04-20
-
-### Other
-
-- reject path-traversing bin names and targets ([#162](https://github.com/endevco/aube/pull/162))
-- create scoped bin shim parents ([#149](https://github.com/endevco/aube/pull/149))
-
-## [1.0.0-beta.7](https://github.com/endevco/aube/compare/aube-linker-v1.0.0-beta.6...aube-linker-v1.0.0-beta.7) - 2026-04-19
+- *(store)* speed up cold installs ([#267](https://github.com/jdx/aube/pull/267))
+- *(linker)* strip windows verbatim prefix before diffing bin-shim paths ([#275](https://github.com/jdx/aube/pull/275))
 
 ### Other
 
-- make workspace warm installs incremental ([#110](https://github.com/endevco/aube/pull/110))
+- dedup pass + registry/store perf wave ([#254](https://github.com/jdx/aube/pull/254))
+- copy small files instead of reflinking ([#251](https://github.com/jdx/aube/pull/251))
+- shared helpers + migrate hardcoded sites ([#245](https://github.com/jdx/aube/pull/245))
 
-## [1.0.0-beta.6](https://github.com/endevco/aube/compare/aube-linker-v1.0.0-beta.5...aube-linker-v1.0.0-beta.6) - 2026-04-19
-
-### Other
-
-- reject traversing and non-regular tar entries on import ([#85](https://github.com/endevco/aube/pull/85))
-- sanitize shebang interpreter before shim interpolation ([#84](https://github.com/endevco/aube/pull/84))
-
-## [1.0.0-beta.5](https://github.com/endevco/aube/compare/aube-linker-v1.0.0-beta.4...aube-linker-v1.0.0-beta.5) - 2026-04-19
+## [1.0.0](https://github.com/jdx/aube/compare/aube-linker-v1.0.0-beta.12...aube-linker-v1.0.0) - 2026-04-23
 
 ### Other
 
-- use strum derives for Severity and NodeLinker ([#69](https://github.com/endevco/aube/pull/69))
+- windows install correctness + workspace filter fixes ([#229](https://github.com/jdx/aube/pull/229))
+- speed up babylon warm reinstalls ([#224](https://github.com/jdx/aube/pull/224))
 
-## [1.0.0-beta.3](https://github.com/endevco/aube/compare/aube-linker-v1.0.0-beta.2...aube-linker-v1.0.0-beta.3) - 2026-04-19
-
-### Other
-
-- auto-disable global virtual store for packages known to break on it ([#32](https://github.com/endevco/aube/pull/32))
-- *(npm)* support npm:<real>@<ver> aliases + fix dep_path tail ([#30](https://github.com/endevco/aube/pull/30))
-
-## [1.0.0-beta.2](https://github.com/endevco/aube/compare/aube-linker-v1.0.0-beta.1...aube-linker-v1.0.0-beta.2) - 2026-04-18
+## [1.0.0-beta.12](https://github.com/jdx/aube/compare/aube-linker-v1.0.0-beta.11...aube-linker-v1.0.0-beta.12) - 2026-04-22
 
 ### Other
 
-- aube-cli crate -> aube ([#7](https://github.com/endevco/aube/pull/7))
+- include integrity in package index cache key ([#209](https://github.com/jdx/aube/pull/209))
+- cross-crate dedup pass ([#208](https://github.com/jdx/aube/pull/208))
+- cross-crate security hardening ([#202](https://github.com/jdx/aube/pull/202))
+- cross-crate correctness and security fixes ([#196](https://github.com/jdx/aube/pull/196))
+
+## [1.0.0-beta.11](https://github.com/jdx/aube/compare/aube-linker-v1.0.0-beta.10...aube-linker-v1.0.0-beta.11) - 2026-04-21
+
+### Other
+
+- skip pnpm v9 virtual importers in workspace link passes ([#190](https://github.com/jdx/aube/pull/190))
+
+## [1.0.0-beta.10](https://github.com/jdx/aube/compare/aube-linker-v1.0.0-beta.9...aube-linker-v1.0.0-beta.10) - 2026-04-21
+
+### Fixed
+
+- close remaining audit findings across registry, store, and linker ([#164](https://github.com/jdx/aube/pull/164))
+
+## [1.0.0-beta.9](https://github.com/jdx/aube/compare/aube-linker-v1.0.0-beta.8...aube-linker-v1.0.0-beta.9) - 2026-04-20
+
+### Other
+
+- reject path-traversing bin names and targets ([#162](https://github.com/jdx/aube/pull/162))
+- create scoped bin shim parents ([#149](https://github.com/jdx/aube/pull/149))
+
+## [1.0.0-beta.7](https://github.com/jdx/aube/compare/aube-linker-v1.0.0-beta.6...aube-linker-v1.0.0-beta.7) - 2026-04-19
+
+### Other
+
+- make workspace warm installs incremental ([#110](https://github.com/jdx/aube/pull/110))
+
+## [1.0.0-beta.6](https://github.com/jdx/aube/compare/aube-linker-v1.0.0-beta.5...aube-linker-v1.0.0-beta.6) - 2026-04-19
+
+### Other
+
+- reject traversing and non-regular tar entries on import ([#85](https://github.com/jdx/aube/pull/85))
+- sanitize shebang interpreter before shim interpolation ([#84](https://github.com/jdx/aube/pull/84))
+
+## [1.0.0-beta.5](https://github.com/jdx/aube/compare/aube-linker-v1.0.0-beta.4...aube-linker-v1.0.0-beta.5) - 2026-04-19
+
+### Other
+
+- use strum derives for Severity and NodeLinker ([#69](https://github.com/jdx/aube/pull/69))
+
+## [1.0.0-beta.3](https://github.com/jdx/aube/compare/aube-linker-v1.0.0-beta.2...aube-linker-v1.0.0-beta.3) - 2026-04-19
+
+### Other
+
+- auto-disable global virtual store for packages known to break on it ([#32](https://github.com/jdx/aube/pull/32))
+- *(npm)* support npm:<real>@<ver> aliases + fix dep_path tail ([#30](https://github.com/jdx/aube/pull/30))
+
+## [1.0.0-beta.2](https://github.com/jdx/aube/compare/aube-linker-v1.0.0-beta.1...aube-linker-v1.0.0-beta.2) - 2026-04-18
+
+### Other
+
+- aube-cli crate -> aube ([#7](https://github.com/jdx/aube/pull/7))

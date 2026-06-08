@@ -23,7 +23,7 @@
           <img :alt="sponsor.name" :src="sponsor.logo" loading="lazy" decoding="async" />
         </a>
       </div>
-      <a class="EndevSponsorsCta" href="https://en.dev/sponsors.html">
+      <a class="EndevSponsorsCta" href="https://jdx.dev/sponsors.html">
         View all sponsors
       </a>
     </div>
@@ -61,7 +61,7 @@ onMounted(async () => {
   const timeout = window.setTimeout(() => controller.abort(), sponsorFeedTimeoutMs);
 
   try {
-    const res = await fetch("https://en.dev/sponsors.json", {
+    const res = await fetch("https://jdx.dev/sponsors.json", {
       headers: { Accept: "application/json" },
       signal: controller.signal,
     });

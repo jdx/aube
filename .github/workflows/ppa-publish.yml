@@ -129,7 +129,7 @@ jobs:
             echo "BUILD_REVISION=${BUILD_REVISION}"
             echo "PACKAGE_NAME=aube"
             echo "MAINTAINER_NAME=${MAINTAINER_NAME_VAR:-aube Release Bot}"
-            echo "MAINTAINER_EMAIL=${MAINTAINER_EMAIL_VAR:-noreply@aube.en.dev}"
+            echo "MAINTAINER_EMAIL=${MAINTAINER_EMAIL_VAR:-noreply@aube.jdx.dev}"
             echo "PPA_NAME=${PPA_NAME_VAR:-ppa:jdxcode/aube}"
             echo "BUILD_PROFILE=release"
           } >> "$GITHUB_ENV"
@@ -224,9 +224,9 @@ jobs:
           Maintainer: ${MAINTAINER_NAME} <${MAINTAINER_EMAIL}>
           Build-Depends: debhelper-compat (= 13), rustc (>= 1.93), cargo, libssl-dev, pkgconf, cmake
           Standards-Version: 4.6.2
-          Homepage: https://aube.en.dev
-          Vcs-Git: https://github.com/endevco/aube.git
-          Vcs-Browser: https://github.com/endevco/aube
+          Homepage: https://aube.jdx.dev
+          Vcs-Git: https://github.com/jdx/aube.git
+          Vcs-Browser: https://github.com/jdx/aube
 
           Package: ${PACKAGE_NAME}
           Architecture: any
@@ -276,7 +276,7 @@ jobs:
           cat > debian/copyright << EOF
           Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
           Upstream-Name: ${PACKAGE_NAME}
-          Source: https://github.com/endevco/aube
+          Source: https://github.com/jdx/aube
 
           Files: *
           Copyright: 2025-2026 Jeff Dickey

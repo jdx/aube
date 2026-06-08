@@ -2,17 +2,17 @@
   <footer class="AubeEndevFooter">
     <span>MIT License</span>
     <span aria-hidden="true">·</span>
-    <a class="AubeEndevFooterLink" href="https://en.dev">
+    <a class="AubeEndevFooterLink" href="https://jdx.dev">
       <img
         alt=""
         class="AubeEndevFooterLogo"
         height="28"
-        src="https://github.com/endevco.png?size=96"
+        src="https://github.com/jdx.png?size=96"
         width="28"
       />
-      <span>en.dev</span>
+      <span>jdx</span>
     </a>
     <span aria-hidden="true">·</span>
-    <span>Copyright © 2026 en.dev</span>
+    <span>Copyright © 2026 jdx.dev</span>
   </footer>
 </template>

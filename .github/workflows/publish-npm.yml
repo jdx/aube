@@ -4,8 +4,8 @@ name: publish-npm
 # release-plz flow flips the draft to non-draft and all prebuilt
 # binaries are already attached to the release). Downloads the
 # per-target archives that `release.yml` produced, then publishes
-# each `@endevco/aube-<os>-<arch>` followed by the root
-# `@endevco/aube`.
+# each `@jdx/aube-<os>-<arch>` followed by the root
+# `@jdx/aube`.
 #
 # Decoupled from `release-plz.yml` on purpose: a failed npm publish
 # doesn't block crates.io or the GitHub release, and re-runs can be
@@ -40,7 +40,7 @@ jobs:
       # Required for npm Trusted Publishing (OIDC). GitHub mints a
       # short-lived OIDC token that npm exchanges for a one-shot
       # publish token — no NPM_TOKEN secret to rotate or leak.
-      # Each @endevco/aube* package must have this repo + workflow
+      # Each @jdx/aube* package must have this repo + workflow
       # configured as a Trusted Publisher on npmjs.com (org level
       # default covers new packages under the scope).
       id-token: write
@@ -66,7 +66,7 @@ jobs:
           # Manual dispatch path: id-token: write on this workflow means npm
           # Trusted Publishing will accept whatever the checked-out tag's
           # publish.mjs does. Require the tag to be reachable from main so
-          # an unreviewed ref can't push an @endevco/aube* package.
+          # an unreviewed ref can't push an @jdx/aube* package.
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             STATUS=$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${TAG}" --jq '.status' 2>/dev/null || echo "missing")
             if [ "$STATUS" != "identical" ] && [ "$STATUS" != "behind" ]; then
@@ -89,7 +89,7 @@ jobs:
       # workflow doesn't break if Node's bundled npm drifts behind.
       - name: Ensure npm supports Trusted Publishing
         run: npm install -g npm@latest
-      - name: Publish @endevco/aube and platform packages
+      - name: Publish @jdx/aube and platform packages
         env:
           TAG: ${{ steps.tag.outputs.tag }}
         run: node npm/scripts/publish.mjs

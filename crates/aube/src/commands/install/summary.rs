@@ -6,7 +6,7 @@ pub(super) fn print_already_up_to_date() {
     use std::io::Write;
     // Routed through the shared `aube_prefix_line` helper so this
     // site and `print_install_summary`'s no-op branch can't drift —
-    // both produce `aube VERSION by en.dev · ✓ Already up to date`.
+    // both produce `aube VERSION by jdx.dev · ✓ Already up to date`.
     let msg = format!(
         "{} {}",
         style::egreen("✓").bold(),

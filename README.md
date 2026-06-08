@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://aube.en.dev">
+  <a href="https://aube.jdx.dev">
     <img src="assets/logo.svg" alt="aube logo" width="140" height="140">
   </a>
 </p>
@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <strong><a href="https://aube.en.dev">Read the docs</a></strong>
+  <strong><a href="https://aube.jdx.dev">Read the docs</a></strong>
 </p>
 
 <p align="center">
@@ -29,16 +29,16 @@
 ## Why Try It
 
 <!-- BENCH_RATIOS:START -->
-**[Fast installs](https://aube.en.dev/benchmarks).** Warm installs are about 9x faster than pnpm and about 7x faster than Bun in the current benchmarks. Repeat test commands run up to 37x faster than pnpm and up to 5x faster than Bun.
+**[Fast installs](https://aube.jdx.dev/benchmarks).** Warm installs are about 9x faster than pnpm and about 7x faster than Bun in the current benchmarks. Repeat test commands run up to 37x faster than pnpm and up to 5x faster than Bun.
 <!-- BENCH_RATIOS:END -->
 
-**[Existing lockfiles](https://aube.en.dev/package-manager/lockfiles).** Reads and writes `pnpm-lock.yaml`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, and `bun.lock` in place.
+**[Existing lockfiles](https://aube.jdx.dev/package-manager/lockfiles).** Reads and writes `pnpm-lock.yaml`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, and `bun.lock` in place.
 
-**[Cheap repeat commands](https://aube.en.dev/package-manager/scripts).** `aubr test`, `aube test`, and `aube exec vitest` auto-install when dependencies are stale, then skip that work when nothing changed. `aubx` uses a local binary when one is installed, or a throwaway environment for one-off tools.
+**[Cheap repeat commands](https://aube.jdx.dev/package-manager/scripts).** `aubr test`, `aube test`, and `aube exec vitest` auto-install when dependencies are stale, then skip that work when nothing changed. `aubx` uses a local binary when one is installed, or a throwaway environment for one-off tools.
 
-**[Less disk use](https://aube.en.dev/package-manager/node-modules).** A global content-addressable store lets projects share package files instead of keeping a full copy of the same dependencies in every checkout.
+**[Less disk use](https://aube.jdx.dev/package-manager/node-modules).** A global content-addressable store lets projects share package files instead of keeping a full copy of the same dependencies in every checkout.
 
-**[Secure defaults](https://aube.en.dev/security).** Out of the box, exotic transitive deps are blocked, lifecycle scripts wait for approval, trust downgrades fail at resolve, and brand-new releases sit in a 24h cooling window. One `paranoid: true` line adds the build jail and turns the soft gates into hard fails.
+**[Secure defaults](https://aube.jdx.dev/security).** Out of the box, exotic transitive deps are blocked, lifecycle scripts wait for approval, trust downgrades fail at resolve, and brand-new releases sit in a 24h cooling window. One `paranoid: true` line adds the build jail and turns the soft gates into hard fails.
 
 ## Install
 
@@ -72,8 +72,8 @@ mise use aube
 aube is also published on npm:
 
 ```sh
-npm install -g --ignore-scripts=false @endevco/aube
-npx --ignore-scripts=false @endevco/aube --version
+npm install -g --ignore-scripts=false @jdx/aube
+npx --ignore-scripts=false @jdx/aube --version
 ```
 
 The npm package uses an install script to fetch native binaries for
@@ -81,13 +81,13 @@ performance. The npm commands above include the flag that keeps that
 working even if your npm config disables scripts. We still recommend mise
 for the smoothest install and runtime management path.
 
-Homebrew installs come from the Endev tap:
+Homebrew installs come from the jdx tap:
 
 ```sh
-brew install endevco/tap/aube
+brew install jdx/tap/aube
 ```
 
-See [other install methods](https://aube.en.dev/installation).
+See [other install methods](https://aube.jdx.dev/installation).
 
 ## First Run
 
@@ -263,10 +263,10 @@ Some pnpm commands are intentionally out of scope. Runtime-management commands s
 
 ## Learn More
 
-- [Documentation](https://aube.en.dev)
-- [Benchmarks](https://aube.en.dev/benchmarks)
-- [Lockfile compatibility](https://aube.en.dev/package-manager/lockfiles)
-- [Run scripts and binaries](https://aube.en.dev/package-manager/scripts)
+- [Documentation](https://aube.jdx.dev)
+- [Benchmarks](https://aube.jdx.dev/benchmarks)
+- [Lockfile compatibility](https://aube.jdx.dev/package-manager/lockfiles)
+- [Run scripts and binaries](https://aube.jdx.dev/package-manager/scripts)
 
 ## CI
 
@@ -280,23 +280,23 @@ Thanks to [Namespace](https://namespace.so) for providing CI for aube.
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=endevco%2Faube&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=jdx%2Faube&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=endevco/aube&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=endevco/aube&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=endevco/aube&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=jdx/aube&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=jdx/aube&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=jdx/aube&type=date&legend=top-left" />
  </picture>
 </a>
 
 ## Contributors
 
-[![Contributors](https://contrib.rocks/image?repo=endevco/aube)](https://github.com/endevco/aube/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=jdx/aube)](https://github.com/jdx/aube/graphs/contributors)
 
 <p>
-  <a href="https://en.dev">
-    <img src="https://github.com/endevco.png?size=96" alt="en.dev" width="42" height="42" align="left">
+  <a href="https://jdx.dev">
+    <img src="https://github.com/jdx.png?size=96" alt="jdx" width="42" height="42" align="left">
   </a>
-  Built by <a href="https://en.dev">en.dev</a>.
+  Built by <a href="https://jdx.dev">jdx</a>.
 </p>
 
 <br clear="left">

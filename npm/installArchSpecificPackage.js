@@ -1,4 +1,4 @@
-// Fetch the platform-matching @endevco/aube-<os>-<arch> sub-package at
+// Fetch the platform-matching @jdx/aube-<os>-<arch> sub-package at
 // install time and hardlink (or copy) its three binaries into ./bin so
 // npm's `bin` wrapper resolves directly to the native executable. The root
 // package's bin targets are stable `./bin/<name>` paths so npm/npx can create
@@ -21,7 +21,7 @@ function main() {
     var version = pjson.version;
 
     // Nested `npm install` must stay local; otherwise it'd try to write
-    // into the global prefix when the user ran `npm i -g @endevco/aube`.
+    // into the global prefix when the user ran `npm i -g @jdx/aube`.
     process.env.npm_config_global = 'false';
 
     var platform = process.platform; // darwin | linux | win32
@@ -35,12 +35,12 @@ function main() {
         try { glibc = process.report.getReport().header.glibcVersionRuntime || ''; } catch (_) {}
         if (!glibc) suffix = '-musl';
     }
-    var subpkgName = '@endevco/aube-' + platform + '-' + arch + suffix;
+    var subpkgName = '@jdx/aube-' + platform + '-' + arch + suffix;
 
     var npmCmd = platform === 'win32' ? 'npm.cmd' : 'npm';
     // --ignore-scripts: platform packages are passive binary carriers;
     // a compromised mirror/registry must not get RCE via lifecycle hooks
-    // when the user installs the trusted root @endevco/aube.
+    // when the user installs the trusted root @jdx/aube.
     var args = ['install', '--no-save', '--no-package-lock', '--ignore-scripts', subpkgName + '@' + version];
 
     var cp = spawn(npmCmd, args, { stdio: 'inherit', shell: true });
@@ -49,7 +49,7 @@ function main() {
         // OOM). `process.exit(null)` coerces to 0, which would tell
         // npm the preinstall succeeded — surface it as failure.
         if (signal || code === null) {
-            console.error('[@endevco/aube] preinstall: `npm install ' + subpkgName + '` killed by ' + (signal || 'signal'));
+            console.error('[@jdx/aube] preinstall: `npm install ' + subpkgName + '` killed by ' + (signal || 'signal'));
             process.exit(1);
             return;
         }
@@ -61,7 +61,7 @@ function main() {
             linkSubpkgBins(subpkgName, platform);
             process.exit(0);
         } catch (e) {
-            console.error('[@endevco/aube] preinstall failed: ' + (e && e.message ? e.message : e));
+            console.error('[@jdx/aube] preinstall failed: ' + (e && e.message ? e.message : e));
             process.exit(1);
         }
     });

@@ -344,7 +344,7 @@ pub(crate) fn format_registry_help(name: &str, msg: &str) -> String {
             "pnpmfile `readPackage` hook returned an error — check the hook's stack trace above for the underlying cause"
         }
         RegistryErrorKind::ResolverBug => {
-            "internal resolver invariant violated — please report at https://github.com/endevco/aube/discussions with the lockfile and command that reproduced this"
+            "internal resolver invariant violated — please report at https://github.com/jdx/aube/discussions with the lockfile and command that reproduced this"
         }
         RegistryErrorKind::Generic => {
             "registry operation failed — see the message above for the underlying cause"

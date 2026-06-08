@@ -225,7 +225,7 @@ fn render_spdx(
     // requires.
     let (created, nanos) = now_iso8601_with_nanos();
     let namespace = format!(
-        "https://aube.en.dev/spdx/{}-{}-{}.{:09}",
+        "https://aube.jdx.dev/spdx/{}-{}-{}.{:09}",
         root_name.replace('/', "_"),
         if root_version.is_empty() {
             "0.0.0"

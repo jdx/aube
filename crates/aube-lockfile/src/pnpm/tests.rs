@@ -2242,7 +2242,7 @@ fn parse_synthesizes_npm_alias_from_pnpm_lockfile_catalog_specifier() {
     // — gating on `specifier.starts_with("npm:")` would silently
     // drop the dep and leave node_modules empty.
     // Repro:
-    //   https://github.com/endevco/aube/discussions/383#discussioncomment-16759640
+    //   https://github.com/jdx/aube/discussions/383#discussioncomment-16759640
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("pnpm-lock.yaml");
     std::fs::write(

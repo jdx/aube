@@ -1654,7 +1654,7 @@ cmd set-script hide=#true help="Set a `package.json` script (not implemented —
     }
     arg "[ARGS]…" help="Unused; captured so `aube <cmd> foo bar` parses instead of erroring on unexpected args before the fallback message prints" required=#false double_dash=automatic var=#true hide=#true
 }
-cmd sponsors help="Show the companies sponsoring aube and the en.dev project family"
+cmd sponsors help="Show the companies sponsoring aube and the jdx.dev project family"
 cmd stage help="Stage packages for publishing (not implemented — use `npm stage`)" {
     flag --fetch-retries help="Number of retry attempts for failed registry fetches" {
         long_help "Number of retry attempts for failed registry fetches.\n\nOverrides `fetchRetries` / `fetch-retries` from `.npmrc` / `aube-workspace.yaml` when set. Pair with `--fetch-timeout` to fail fast in scripted test runs."

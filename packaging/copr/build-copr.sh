@@ -6,7 +6,7 @@ PACKAGE_NAME="${PACKAGE_NAME:-aube}"
 CHROOTS="${CHROOTS:-fedora-rawhide-aarch64 fedora-rawhide-x86_64 fedora-44-aarch64 fedora-44-x86_64 fedora-43-aarch64 fedora-43-x86_64 fedora-42-aarch64 fedora-42-x86_64 epel-10-aarch64 epel-10-x86_64}"
 BUILD_PROFILE="${BUILD_PROFILE:-release}"
 MAINTAINER_NAME="${MAINTAINER_NAME:-aube Release Bot}"
-MAINTAINER_EMAIL="${MAINTAINER_EMAIL:-noreply@aube.en.dev}"
+MAINTAINER_EMAIL="${MAINTAINER_EMAIL:-noreply@aube.jdx.dev}"
 COPR_OWNER="${COPR_OWNER:-jdxcode}"
 COPR_PROJECT="${COPR_PROJECT:-aube}"
 DRY_RUN="${DRY_RUN:-false}"
@@ -24,7 +24,7 @@ usage() {
 	echo "  -j, --project PROJECT        COPR project (default: aube)"
 	echo "  -n, --name NAME              Package name (default: aube)"
 	echo "  -m, --maintainer-name NAME   Maintainer name (default: aube Release Bot)"
-	echo "  -e, --maintainer-email EMAIL Maintainer email (default: noreply@aube.en.dev)"
+	echo "  -e, --maintainer-email EMAIL Maintainer email (default: noreply@aube.jdx.dev)"
 	echo "  -d, --dry-run                Build SRPM only, don't submit to COPR"
 	echo "  -h, --help                   Show this help"
 	echo ""
@@ -193,8 +193,8 @@ Release:        1%{?dist}
 Summary:        A fast Node.js package manager
 
 License:        MIT
-URL:            https://aube.en.dev
-Source0:        https://github.com/endevco/aube/archive/v%{tarball_version}/%{name}-%{tarball_version}.tar.gz
+URL:            https://aube.jdx.dev
+Source0:        https://github.com/jdx/aube/archive/v%{tarball_version}/%{name}-%{tarball_version}.tar.gz
 Source1:        %{name}-vendor-%{tarball_version}.tar.gz
 
 BuildRequires:  rust >= 1.93

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Build and publish the @endevco/aube npm packages for a given tag.
+// Build and publish the @jdx/aube npm packages for a given tag.
 //
 // For each release target this:
 //   1. downloads `aube-<tag>-<target>.{tar.gz,zip}` directly from the
@@ -7,15 +7,15 @@
 //   2. extracts the three binary entries (aube, aubr, aubx) into a
 //      staging dir,
 //   3. generates a platform-scoped package.json and publishes it as
-//      `@endevco/aube-<os>-<arch>`.
+//      `@jdx/aube-<os>-<arch>`.
 // Then rewrites the root `npm/package.json` version and publishes
-// `@endevco/aube` last, so the preinstall script can resolve every
+// `@jdx/aube` last, so the preinstall script can resolve every
 // sub-package it might want to install.
 //
 // Env:
 //   TAG           — release tag, with leading `v` (e.g. v1.0.0-beta.1)
 //   REPO          — owner/repo for the release assets (optional;
-//                   defaults to $GITHUB_REPOSITORY or `endevco/aube`)
+//                   defaults to $GITHUB_REPOSITORY or `jdx/aube`)
 //   NPM_TAG       — npm dist-tag (optional; defaults to `next` for
 //                   pre-releases, `latest` otherwise)
 //   DRY_RUN=1     — stage + `npm pack` but don't publish
@@ -57,11 +57,11 @@ function run(cmd, args, opts = {}) {
     }
 }
 
-// musl gets a `-musl` name suffix; glibc keeps the historical name
-// so existing installers upgrade in place without a rename.
+// musl gets a `-musl` name suffix; glibc keeps the plain platform
+// package name.
 function platformPkgName(target) {
     const suffix = target.libc === 'musl' ? '-musl' : '';
-    return `@endevco/aube-${target.os}-${target.cpu}${suffix}`;
+    return `@jdx/aube-${target.os}-${target.cpu}${suffix}`;
 }
 
 // Returns true when <pkg>@<version> is already on the registry, so a
@@ -161,9 +161,9 @@ async function buildPlatformPackage(repo, tag, version, target) {
     const pkgJson = {
         name: pkgName,
         version,
-        description: 'Platform binaries for aube — do not install directly, see @endevco/aube.',
-        homepage: 'https://aube.en.dev',
-        repository: { type: 'git', url: 'https://github.com/endevco/aube' },
+        description: 'Platform binaries for aube — do not install directly, see @jdx/aube.',
+        homepage: 'https://aube.jdx.dev',
+        repository: { type: 'git', url: 'https://github.com/jdx/aube' },
         license: 'MIT',
         bin: bins,
         files: ['bin', 'README.md'],
@@ -191,7 +191,7 @@ function npmPublish(stageDir, npmTag, dryRun) {
 async function main() {
     const tag = assertEnv('TAG');
     const version = versionFromTag(tag);
-    const repo = process.env.REPO || process.env.GITHUB_REPOSITORY || 'endevco/aube';
+    const repo = process.env.REPO || process.env.GITHUB_REPOSITORY || 'jdx/aube';
     const npmTag = process.env.NPM_TAG || defaultNpmTag(version);
     const dryRun = process.env.DRY_RUN === '1';
     const skipPlatforms = process.env.SKIP_PLATFORMS === '1';
@@ -214,7 +214,7 @@ async function main() {
     }
 
     if (!skipRoot) {
-        console.log(`\n[publish] --- @endevco/aube (root) ---`);
+        console.log(`\n[publish] --- @jdx/aube (root) ---`);
         const rootPkgPath = resolve(npmDir, 'package.json');
         const rootPkg = JSON.parse(readFileSync(rootPkgPath, 'utf8'));
         rootPkg.version = version;

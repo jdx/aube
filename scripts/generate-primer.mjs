@@ -20,7 +20,7 @@ const versionsArg = args.get('versions') ?? '100'
 const versions = versionsArg === 'all' ? Infinity : Number(versionsArg)
 const out = resolve(args.get('out') ?? `crates/aube-resolver/data/primer-top${top}.json`)
 const namesFile = args.get('names')
-const namesUrl = args.get('names-url') ?? 'https://raw.githubusercontent.com/endevco/aube-primer-packages/main/data/packages.json'
+const namesUrl = args.get('names-url') ?? 'https://raw.githubusercontent.com/jdx/aube-primer-packages/main/data/packages.json'
 
 if (!Number.isInteger(top) || top < 1) throw new Error('--top must be a positive integer')
 if (versions !== Infinity && (!Number.isInteger(versions) || versions < 1)) {

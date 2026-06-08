@@ -1,11 +1,11 @@
 {
-  "name": "@endevco/aube",
+  "name": "@jdx/aube",
   "version": "0.0.0-placeholder",
   "description": "A fast Node.js package manager that drops into existing projects.",
-  "homepage": "https://aube.en.dev",
+  "homepage": "https://aube.jdx.dev",
   "repository": {
     "type": "git",
-    "url": "https://github.com/endevco/aube"
+    "url": "https://github.com/jdx/aube"
   },
   "license": "MIT",
   "files": [

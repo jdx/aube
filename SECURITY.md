@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please report security issues privately via GitHub's security advisory form:
-**[github.com/endevco/aube/security/advisories/new](https://github.com/endevco/aube/security/advisories/new)**
+**[github.com/jdx/aube/security/advisories/new](https://github.com/jdx/aube/security/advisories/new)**
 
 Do not file a public discussion for vulnerabilities. We will acknowledge
 receipt within a few business days, work with you on a fix, and credit you in
@@ -13,7 +13,7 @@ the release notes unless you prefer otherwise.
 
 aube ships with several supply-chain protections enabled by default and
 several more available as one-line opt-ins. Full reference:
-**[aube.en.dev/security](https://aube.en.dev/security)**.
+**[aube.jdx.dev/security](https://aube.jdx.dev/security)**.
 
 | Setting | Default | What it protects against |
 | --- | --- | --- |

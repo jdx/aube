@@ -84,7 +84,7 @@ const spinner = computed(() => spinners[spinnerIndex.value]);
 const aubeVersion = __AUBE_VERSION__;
 const releasedAt = __AUBE_RELEASED_AT__;
 const terminalVersion = aubeVersion.split("-")[0] || aubeVersion;
-const releaseNotesUrl = `https://github.com/endevco/aube/releases/tag/v${aubeVersion}`;
+const releaseNotesUrl = `https://github.com/jdx/aube/releases/tag/v${aubeVersion}`;
 function formatReleasePhrase() {
   if (!releasedAt) {
     releasePhrase.value = "release date pending";
@@ -288,7 +288,7 @@ watch(progressBarEl, (el, previousEl) => {
               <div class="aube-progress-root">
                 <span class="aube-name">aube</span>
                 <span class="aube-version">{{ terminalVersion }}</span>
-                <span class="aube-byline">by en.dev</span>
+                <span class="aube-byline">by jdx.dev</span>
                 <span class="aube-phase">fetching</span>
                 <span ref="progressBarEl" class="aube-progress-bar">{{ progressBar }}</span>
                 <span class="aube-progress-count">{{ installed }}/{{ installedPackageTotal }} pkgs</span>
@@ -307,7 +307,7 @@ watch(progressBarEl, (el, previousEl) => {
               <div class="aube-install-summary">
                 <span class="aube-name">aube</span>
                 <span>{{ aubeVersion }}</span>
-                <span class="aube-byline">by en.dev ·</span>
+                <span class="aube-byline">by jdx.dev ·</span>
                 <span class="aube-done-check">✓</span>
                 <span>installed {{ installedPackageTotal }} packages in 3.7s</span>
               </div>

@@ -5,10 +5,10 @@ name: publish-smoke
 # release packages or downstream users depend on aube publish.
 #
 # npm setup required:
-# - @endevco/aube-publish-oidc-smoke must have this workflow configured
+# - @jdx/aube-publish-oidc-smoke must have this workflow configured
 #   as a Trusted Publisher on npmjs.com:
-#   endevco/aube / .github/workflows/publish-smoke.yml
-# - @endevco/aube-publish-otp-smoke must be owned by the same npm account
+#   jdx/aube / .github/workflows/publish-smoke.yml
+# - @jdx/aube-publish-otp-smoke must be owned by the same npm account
 #   as the NPM_TOKEN repository secret. If that account requires 2FA for
 #   writes, provide the current one-time password with the otp dispatch input.
 
@@ -42,8 +42,8 @@ jobs:
     env:
       DIST_TAG: smoke
       MODE: ${{ inputs.mode }}
-      OIDC_PACKAGE: "@endevco/aube-publish-oidc-smoke"
-      OTP_PACKAGE: "@endevco/aube-publish-otp-smoke"
+      OIDC_PACKAGE: "@jdx/aube-publish-oidc-smoke"
+      OTP_PACKAGE: "@jdx/aube-publish-otp-smoke"
     steps:
       - name: Validate mode
         run: |

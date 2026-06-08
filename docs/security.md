@@ -3,7 +3,7 @@
 This page lists every security-relevant feature in aube, its default, and the
 one-line config to turn it on or off.
 
-To report a vulnerability, see the [security policy](https://github.com/endevco/aube/security/policy).
+To report a vulnerability, see the [security policy](https://github.com/jdx/aube/security/policy).
 
 ## The `paranoid` switch
 

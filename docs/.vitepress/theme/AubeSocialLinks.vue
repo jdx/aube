@@ -6,7 +6,7 @@ import { data as starsData } from "../stars.data";
   <div class="AubeSocialLinks" aria-label="Social links">
     <a
       class="AubeSocialLink AubeSocialLinkGitHub"
-      href="https://github.com/endevco/aube"
+      href="https://github.com/jdx/aube"
       target="_blank"
       rel="noreferrer"
       aria-label="Aube on GitHub"

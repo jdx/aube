@@ -338,7 +338,7 @@ EOF
 	skip "aube divergence: aube does not run readPackage on the root project's manifest, so deps added by the hook are not installed. pnpm does. File a Discussion before un-skipping."
 	# Ported from pnpm/test/install/hooks.ts:551 ('readPackage hook
 	# overrides project package'). Skipped pending
-	# https://github.com/endevco/aube/discussions
+	# https://github.com/jdx/aube/discussions
 	cat >package.json <<'JSON'
 {
   "name": "test-read-package-hook",

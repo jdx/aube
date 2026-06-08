@@ -81,7 +81,7 @@ fn env_truthy(name: &str) -> bool {
     })
 }
 
-/// Build the standard `aube VERSION by en.dev · <msg>` one-line
+/// Build the standard `aube VERSION by jdx.dev · <msg>` one-line
 /// header used by the no-op and fast-mode summaries. Centralizes the
 /// header shape so the install-finished, already-up-to-date, and
 /// fast-mode-summary paths all read consistently.
@@ -90,7 +90,7 @@ pub(crate) fn aube_prefix_line(msg: &str) -> String {
         "{} {} {} {} {msg}",
         style::emagenta("aube").bold(),
         style::edim(crate::version::VERSION.as_str()),
-        style::edim("by en.dev"),
+        style::edim("by jdx.dev"),
         style::edim("·"),
     )
 }
@@ -216,14 +216,14 @@ impl InstallProgress {
     }
 
     fn new_tty() -> Self {
-        // Colored header: magenta bold "aube", dim version, dim "by en.dev".
+        // Colored header: magenta bold "aube", dim version, dim "by jdx.dev".
         // Mirrors the `mise VERSION by @jdx` / `hk VERSION by @jdx` convention
         // for visual parity across the trio.
         let header = format!(
             "{} {} {}",
             style::emagenta("aube").bold(),
             style::edim(crate::version::VERSION.as_str()),
-            style::edim("by en.dev"),
+            style::edim("by jdx.dev"),
         );
         // Layout: header, animated bar, count segment, optional bytes
         // segment (running download, with `/ ~estimated` when
@@ -873,7 +873,7 @@ impl InstallProgress {
     /// Emit the post-install summary line after the progress display has
     /// been torn down. Two shapes:
     ///
-    /// * `linked > 0` — `aube VERSION by en.dev · ✓ installed N packages
+    /// * `linked > 0` — `aube VERSION by jdx.dev · ✓ installed N packages
     ///   in Xs`, TTY-only (CI mode prints its own framed `✓` summary
     ///   from the heartbeat's final tick).
     /// * `linked == 0 && top_level_linked == 0` — `Already up to date`
@@ -910,7 +910,7 @@ impl InstallProgress {
             };
             // Only the check mark is green so it stays the visual
             // success cue without the whole message bleeding green.
-            // Same single-line `aube VERSION by en.dev · ✓ msg` shape
+            // Same single-line `aube VERSION by jdx.dev · ✓ msg` shape
             // for both TTY and CI modes; CI mode's heartbeat may have
             // emitted intermediate progress lines above this.
             let msg = format!("{} {}", style::egreen("✓").bold(), style::ebold(&body));
