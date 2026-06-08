@@ -1127,6 +1127,32 @@ mod cli_spec_tests {
     }
 
     #[test]
+    fn dlx_accepts_allow_build_before_command() {
+        let cli =
+            Cli::try_parse_from(["aube", "dlx", "--allow-build=esbuild", "vite", "--version"])
+                .expect("dlx --allow-build should parse");
+
+        let Some(Commands::Dlx(dlx_args)) = cli.command else {
+            panic!("expected dlx subcommand");
+        };
+        assert_eq!(dlx_args.allow_build, ["esbuild"]);
+        assert_eq!(dlx_args.params, ["vite", "--version"]);
+    }
+
+    #[test]
+    fn dlx_rejects_empty_allow_build_value() {
+        let err = match Cli::try_parse_from(["aube", "dlx", "--allow-build=", "vite"]) {
+            Ok(_) => panic!("empty --allow-build should fail"),
+            Err(err) => err,
+        };
+        assert!(
+            err.to_string()
+                .contains("The --allow-build flag is missing a package name"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn lifter_does_not_eat_lifted_flag_as_kept_flag_value() {
         // Regression: `aube --dir /tmp --frozen-lockfile install` would
         // previously lose `--frozen-lockfile` if `--dir`'s value was

@@ -12,7 +12,7 @@ use std::path::Path;
 /// Wording must stay byte-identical to pnpm's: scripts that grep
 /// pnpm's stderr for this exact line continue to work after a swap
 /// to aube.
-pub(super) fn parse_allow_build_value(s: &str) -> Result<String, String> {
+pub(crate) fn parse_allow_build_value(s: &str) -> Result<String, String> {
     if s.is_empty() {
         Err("The --allow-build flag is missing a package name. \
              Please specify the package name(s) that are allowed to run installation scripts."

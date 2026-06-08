@@ -1,4 +1,4 @@
-mod build_flags;
+pub(crate) mod build_flags;
 mod filtered;
 mod global;
 mod manifest;
