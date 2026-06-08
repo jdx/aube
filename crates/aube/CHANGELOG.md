@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.18.2](https://github.com/jdx/aube/compare/v1.18.1...v1.18.2) - 2026-06-08
+
+### Other
+
+- migrate project links to jdx ([#845](https://github.com/jdx/aube/pull/845))
+
 ## [1.18.1](https://github.com/jdx/aube/compare/v1.18.0...v1.18.1) - 2026-06-07
 
 ### Fixed
