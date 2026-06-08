@@ -1,7 +1,10 @@
 use super::install::{FrozenMode, InstallOptions};
 use crate::commands::add::build_flags::parse_allow_build_value;
+use aube_manifest::AllowBuildRaw;
 use clap::{Args, CommandFactory};
 use miette::{Context, IntoDiagnostic, miette};
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 #[derive(Debug, Args)]
 // dlx forwards everything after `<command>` to the bin it runs, including
@@ -331,8 +334,20 @@ fn dlx_install_options(allow_build: &[String]) -> InstallOptions {
         opts.ignore_scripts = true;
         opts.cli_flags
             .push(("ignore-scripts".to_string(), "true".to_string()));
+    } else {
+        opts.build_policy_override = Some(Arc::new(dlx_build_policy(allow_build)));
     }
     opts
+}
+
+fn dlx_build_policy(allow_build: &[String]) -> aube_scripts::BuildPolicy {
+    let allow_builds = BTreeMap::from_iter(
+        allow_build
+            .iter()
+            .map(|name| (name.clone(), AllowBuildRaw::Bool(true))),
+    );
+    let (policy, _) = aube_scripts::BuildPolicy::from_config(&allow_builds, &[], &[], false);
+    policy
 }
 
 /// RAII guard that swaps the process cwd on construction and restores it
@@ -582,11 +597,26 @@ mod tests {
         let allow_build = vec!["esbuild".to_string()];
         let opts = dlx_install_options(&allow_build);
         assert!(!opts.ignore_scripts);
+        assert!(opts.build_policy_override.is_some());
         assert!(
             !opts
                 .cli_flags
                 .iter()
                 .any(|(key, _)| key == "ignore-scripts")
+        );
+    }
+
+    #[test]
+    fn dlx_build_policy_only_allows_explicit_approvals() {
+        let allow_build = vec!["esbuild".to_string()];
+        let policy = dlx_build_policy(&allow_build);
+        assert_eq!(
+            policy.decide("esbuild", "0.25.0"),
+            aube_scripts::AllowDecision::Allow
+        );
+        assert_eq!(
+            policy.decide("sharp", "0.33.0"),
+            aube_scripts::AllowDecision::Unspecified
         );
     }
 

@@ -81,6 +81,7 @@ pub async fn run(args: CiArgs) -> miette::Result<()> {
         env_snapshot: aube_settings::values::capture_env(),
         git_prepare_depth: 0,
         inherited_build_policy: None,
+        build_policy_override: None,
         workspace_filter: aube_workspace::selector::EffectiveFilter::default(),
         skip_root_lifecycle: false,
         // `aube ci` is the canonical "lockfile is law" path —

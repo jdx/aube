@@ -289,14 +289,20 @@ pub async fn run(opts: InstallOptions) -> miette::Result<()> {
     let ws_package_versions = workspace_plan.ws_package_versions;
     let ws_dirs = workspace_plan.ws_dirs;
     let lifecycle_manifests = workspace_plan.lifecycle_manifests;
-    let (mut build_policy, policy_warnings) = build_policy_from_manifest_sources(
-        lifecycle_manifests.iter().map(|(_, manifest)| manifest),
-        &ws_config_shared,
-        opts.dangerously_allow_all_builds,
-    );
-    if let Some(inherited) = opts.inherited_build_policy.as_deref() {
-        build_policy.merge(inherited);
-    }
+    let (build_policy, policy_warnings) =
+        if let Some(override_policy) = opts.build_policy_override.as_deref() {
+            (override_policy.clone(), Vec::new())
+        } else {
+            let (mut build_policy, policy_warnings) = build_policy_from_manifest_sources(
+                lifecycle_manifests.iter().map(|(_, manifest)| manifest),
+                &ws_config_shared,
+                opts.dangerously_allow_all_builds,
+            );
+            if let Some(inherited) = opts.inherited_build_policy.as_deref() {
+                build_policy.merge(inherited);
+            }
+            (build_policy, policy_warnings)
+        };
     let inherited_build_policy_for_git_prepare = Some(std::sync::Arc::new(build_policy.clone()));
 
     // 1b. Project `preinstall` lifecycle hooks.

@@ -283,6 +283,7 @@ impl InstallArgs {
             env_snapshot,
             git_prepare_depth: 0,
             inherited_build_policy: None,
+            build_policy_override: None,
             workspace_filter: aube_workspace::selector::EffectiveFilter::default(),
             // Argumentless `aube install` runs root lifecycle hooks; the
             // chained-call constructor (`with_mode`) is where commands
@@ -387,6 +388,10 @@ pub struct InstallOptions {
     /// scratch clone, but dependency build approval belongs to the outer
     /// project that requested the git package.
     pub inherited_build_policy: Option<std::sync::Arc<aube_scripts::BuildPolicy>>,
+    /// Fully replace the build policy discovered from manifests and
+    /// workspace config. Used by throwaway installs whose trust boundary
+    /// must not inherit ambient project/user approvals.
+    pub build_policy_override: Option<std::sync::Arc<aube_scripts::BuildPolicy>>,
     /// Global `--filter` / `--filter-prod` selectors. Resolution and
     /// lockfile writing still happen at the workspace root; these
     /// selectors narrow only the graph passed to the linker. Prod-only
@@ -445,6 +450,7 @@ impl InstallOptions {
             env_snapshot: aube_settings::values::capture_env(),
             git_prepare_depth: 0,
             inherited_build_policy: None,
+            build_policy_override: None,
             workspace_filter: aube_workspace::selector::EffectiveFilter::default(),
             // pnpm parity: every chained-call site (add / remove / update
             // / dedupe / dlx / patch / ensure_installed / git prepare)
