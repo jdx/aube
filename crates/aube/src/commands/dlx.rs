@@ -335,6 +335,13 @@ fn dlx_install_options(allow_build: &[String]) -> InstallOptions {
         opts.cli_flags
             .push(("ignore-scripts".to_string(), "true".to_string()));
     } else {
+        // The isolated dlx allowlist should skip unapproved transitive
+        // builds, not fail the one-off command because the user's project
+        // has strictDepBuilds/paranoid enabled.
+        opts.cli_flags
+            .push(("strictDepBuilds".to_string(), "false".to_string()));
+        opts.cli_flags
+            .push(("paranoid".to_string(), "false".to_string()));
         opts.build_policy_override = Some(Arc::new(dlx_build_policy(allow_build)));
     }
     opts
@@ -346,7 +353,10 @@ fn dlx_build_policy(allow_build: &[String]) -> aube_scripts::BuildPolicy {
             .iter()
             .map(|name| (name.clone(), AllowBuildRaw::Bool(true))),
     );
-    let (policy, _) = aube_scripts::BuildPolicy::from_config(&allow_builds, &[], &[], false);
+    let (policy, warnings) = aube_scripts::BuildPolicy::from_config(&allow_builds, &[], &[], false);
+    for warning in warnings {
+        crate::progress::safe_eprintln(&format!("warn: --allow-build: {warning}"));
+    }
     policy
 }
 
@@ -598,6 +608,16 @@ mod tests {
         let opts = dlx_install_options(&allow_build);
         assert!(!opts.ignore_scripts);
         assert!(opts.build_policy_override.is_some());
+        assert!(
+            opts.cli_flags
+                .iter()
+                .any(|(key, value)| { key == "strictDepBuilds" && value == "false" })
+        );
+        assert!(
+            opts.cli_flags
+                .iter()
+                .any(|(key, value)| { key == "paranoid" && value == "false" })
+        );
         assert!(
             !opts
                 .cli_flags

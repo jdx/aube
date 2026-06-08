@@ -27,6 +27,12 @@ Install a specific package (repeatable).
 
 Overrides inferring from the command.
 
+### `--allow-build… <PKG>`
+
+Allow named packages to run postinstall scripts during the transient install.
+
+Repeatable — pass once per package. Mirrors pnpm's `pnpm dlx --allow-build=<pkg>` compatibility surface while keeping dlx scripts skipped unless explicitly approved.
+
 ### `--frozen-lockfile`
 
 Error if the lockfile drifts from package.json

@@ -3418,6 +3418,27 @@
             }
           },
           {
+            "name": "allow-build",
+            "usage": "--allow-build… <PKG>",
+            "help": "Allow named packages to run postinstall scripts during the transient install",
+            "help_long": "Allow named packages to run postinstall scripts during the transient install.\n\nRepeatable — pass once per package. Mirrors pnpm's `pnpm dlx --allow-build=<pkg>` compatibility surface while keeping dlx scripts skipped unless explicitly approved.",
+            "help_first_line": "Allow named packages to run postinstall scripts during the transient install",
+            "short": [],
+            "long": [
+              "allow-build"
+            ],
+            "var": true,
+            "hide": false,
+            "global": false,
+            "arg": {
+              "name": "PKG",
+              "usage": "<PKG>",
+              "required": true,
+              "double_dash": "Optional",
+              "hide": false
+            }
+          },
+          {
             "name": "frozen-lockfile",
             "usage": "--frozen-lockfile",
             "help": "Error if the lockfile drifts from package.json",

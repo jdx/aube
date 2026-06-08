@@ -630,6 +630,10 @@ cmd dlx help="Fetch a package into a throwaway environment and run its binary" {
         long_help "Install a specific package (repeatable).\n\nOverrides inferring from the command."
         arg <PACKAGE>
     }
+    flag --allow-build help="Allow named packages to run postinstall scripts during the transient install" var=#true {
+        long_help "Allow named packages to run postinstall scripts during the transient install.\n\nRepeatable — pass once per package. Mirrors pnpm's `pnpm dlx --allow-build=<pkg>` compatibility surface while keeping dlx scripts skipped unless explicitly approved."
+        arg <PKG>
+    }
     flag --frozen-lockfile help="Error if the lockfile drifts from package.json"
     flag --no-frozen-lockfile help="Always re-resolve, even if the lockfile is up to date"
     flag --prefer-frozen-lockfile help="Use the lockfile when fresh, re-resolve when stale"
