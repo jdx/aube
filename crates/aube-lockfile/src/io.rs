@@ -385,7 +385,7 @@ fn parse_one(
                 aube_util::diag::jstr(&display)
             )
         });
-    match kind {
+    let graph = match kind {
         // `aube-lock.yaml` uses the same on-disk format as pnpm v9 for
         // now — same parser, same writer — so we piggyback on the pnpm
         // module. Keeping the variant distinct lets detection/import
@@ -399,7 +399,39 @@ fn parse_one(
         LockfileKind::Yarn | LockfileKind::YarnBerry => yarn::parse(path, manifest),
         LockfileKind::Npm | LockfileKind::NpmShrinkwrap => npm::parse(path),
         LockfileKind::Bun => bun::parse(path),
+    }?;
+    validate_resolution_shapes(path, &graph)?;
+    Ok(graph)
+}
+
+fn validate_resolution_shapes(path: &Path, graph: &LockfileGraph) -> Result<(), Error> {
+    for (dep_path, pkg) in &graph.packages {
+        if pkg.local_source.is_some() && dep_path_has_registry_version(dep_path, &pkg.name) {
+            return Err(Error::ResolutionShapeMismatch {
+                path: path.to_path_buf(),
+                dep_path: dep_path.clone(),
+                source_kind: pkg
+                    .local_source
+                    .as_ref()
+                    .map(|source| source.kind_str())
+                    .unwrap_or("unknown"),
+            });
+        }
     }
+    Ok(())
+}
+
+fn dep_path_has_registry_version(dep_path: &str, name: &str) -> bool {
+    let Some(tail) = dep_path
+        .strip_prefix('/')
+        .unwrap_or(dep_path)
+        .strip_prefix(name)
+        .and_then(|rest| rest.strip_prefix('@'))
+    else {
+        return false;
+    };
+    let version = tail.split('(').next().unwrap_or(tail);
+    node_semver::Version::parse(version).is_ok()
 }
 
 /// Replace `LockfileKind::Yarn` with `LockfileKind::YarnBerry` when
@@ -435,6 +467,20 @@ pub enum Error {
     #[error("failed to parse lockfile {0}: {1}")]
     #[diagnostic(code(ERR_AUBE_LOCKFILE_PARSE))]
     Parse(std::path::PathBuf, String),
+    #[error(
+        "lockfile {path} has registry-style dependency path `{dep_path}` backed by {source_kind} resolution"
+    )]
+    #[diagnostic(
+        code(ERR_AUBE_RESOLUTION_SHAPE_MISMATCH),
+        help(
+            "run `aube install --no-frozen-lockfile` from a trusted manifest to regenerate the lockfile"
+        )
+    )]
+    ResolutionShapeMismatch {
+        path: std::path::PathBuf,
+        dep_path: String,
+        source_kind: &'static str,
+    },
     /// Deserialization failure with a byte offset into the source
     /// content, so miette's `fancy` handler can draw a pointer at the
     /// offending byte of the lockfile. Reuses `aube_manifest`'s
@@ -496,6 +542,7 @@ impl Error {
 #[cfg(test)]
 mod parse_diag_tests {
     use super::*;
+    use crate::{LocalSource, LockedPackage};
     use std::path::Path;
 
     /// Trailing `,` in an otherwise fine JSON lockfile — confirm the
@@ -513,6 +560,79 @@ mod parse_diag_tests {
         let len: usize = pe.span.len();
         assert!(offset + len <= content.len());
         assert_eq!(pe.path, path);
+    }
+
+    #[test]
+    fn validate_resolution_shapes_rejects_local_source_with_registry_dep_path() {
+        let mut graph = LockfileGraph::default();
+        graph.packages.insert(
+            "left-pad@1.3.0".to_string(),
+            LockedPackage {
+                name: "left-pad".to_string(),
+                version: "1.3.0".to_string(),
+                dep_path: "left-pad@1.3.0".to_string(),
+                local_source: Some(LocalSource::Directory("vendor/left-pad".into())),
+                ..Default::default()
+            },
+        );
+
+        let err = validate_resolution_shapes(Path::new("pnpm-lock.yaml"), &graph).unwrap_err();
+        assert!(matches!(
+            err,
+            Error::ResolutionShapeMismatch {
+                dep_path,
+                source_kind: "file",
+                ..
+            } if dep_path == "left-pad@1.3.0"
+        ));
+    }
+
+    #[test]
+    fn validate_resolution_shapes_rejects_peer_suffixed_registry_dep_path() {
+        let mut graph = LockfileGraph::default();
+        graph.packages.insert(
+            "plugin@1.0.0(react@19.0.0)".to_string(),
+            LockedPackage {
+                name: "plugin".to_string(),
+                version: "1.0.0".to_string(),
+                dep_path: "plugin@1.0.0(react@19.0.0)".to_string(),
+                local_source: Some(LocalSource::RemoteTarball(crate::RemoteTarballSource {
+                    url: "https://example.com/plugin.tgz".to_string(),
+                    integrity: "sha512-test".to_string(),
+                    git_hosted: false,
+                })),
+                ..Default::default()
+            },
+        );
+
+        let err = validate_resolution_shapes(Path::new("pnpm-lock.yaml"), &graph).unwrap_err();
+        assert!(matches!(
+            err,
+            Error::ResolutionShapeMismatch {
+                dep_path,
+                source_kind: "url",
+                ..
+            } if dep_path == "plugin@1.0.0(react@19.0.0)"
+        ));
+    }
+
+    #[test]
+    fn validate_resolution_shapes_allows_local_source_dep_path() {
+        let source = LocalSource::Directory("vendor/left-pad".into());
+        let dep_path = source.dep_path("left-pad");
+        let mut graph = LockfileGraph::default();
+        graph.packages.insert(
+            dep_path.clone(),
+            LockedPackage {
+                name: "left-pad".to_string(),
+                version: "1.3.0".to_string(),
+                dep_path,
+                local_source: Some(source),
+                ..Default::default()
+            },
+        );
+
+        validate_resolution_shapes(Path::new("pnpm-lock.yaml"), &graph).unwrap();
     }
 
     /// Same story for YAML — yaml_serde reports a `Location` with a
