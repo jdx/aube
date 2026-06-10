@@ -27,7 +27,7 @@ use load::{
     userconfig_override_from_env,
 };
 #[cfg(test)]
-use npmrc::{parse_npmrc, substitute_env};
+use npmrc::{parse_npmrc, parse_npmrc_untrusted, substitute_env};
 #[cfg(test)]
 use token::sanitize_token_helper;
 #[cfg(test)]

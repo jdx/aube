@@ -1,13 +1,31 @@
 use std::path::Path;
 
-/// Parse a .npmrc file into key=value pairs.
-/// Supports environment variable substitution (${VAR}) and backslash
-/// line continuation. npm's `ini` parser treats a trailing `\` as
-/// "continue value on next physical line", used for long auth
-/// tokens or multi-value arrays. Without this aube would silently
-/// truncate the value at the first line break and reparse the
-/// continuation as a bogus key.
+/// Parse a trusted .npmrc file into key=value pairs.
+///
+/// User/global config may use npm's environment variable substitution
+/// (`${VAR}`) for dynamic registry hosts or tokens. Project-controlled
+/// files must use [`parse_npmrc_untrusted`] so a cloned repository
+/// cannot expand the caller's environment into registry destinations
+/// or credentials.
 pub(super) fn parse_npmrc(path: &Path) -> Result<Vec<(String, String)>, std::io::Error> {
+    parse_npmrc_inner(path, true)
+}
+
+/// Parse a repository-controlled .npmrc file without `${VAR}` expansion.
+pub(super) fn parse_npmrc_untrusted(path: &Path) -> Result<Vec<(String, String)>, std::io::Error> {
+    parse_npmrc_inner(path, false)
+}
+
+/// Parse a .npmrc file into key=value pairs.
+/// Supports backslash line continuation. npm's `ini` parser treats a
+/// trailing `\` as "continue value on next physical line", used for
+/// long auth tokens or multi-value arrays. Without this aube would
+/// silently truncate the value at the first line break and reparse the
+/// continuation as a bogus key.
+fn parse_npmrc_inner(
+    path: &Path,
+    expand_env: bool,
+) -> Result<Vec<(String, String)>, std::io::Error> {
     let raw_content = std::fs::read_to_string(path)?;
     let content = raw_content.strip_prefix('\u{feff}').unwrap_or(&raw_content);
     let mut entries = Vec::new();
@@ -36,21 +54,21 @@ pub(super) fn parse_npmrc(path: &Path) -> Result<Vec<(String, String)>, std::io:
         }
 
         if let Some((key, value)) = line.split_once('=') {
-            // Expand env vars on both sides. pnpm/npm both substitute
-            // `${VAR}` in keys as well as values, which lets users
-            // template the registry-prefix portion of per-URI auth
-            // keys like `${NEXUS_URL}:_auth=${TOKEN}` (common for
-            // Nexus / Artifactory setups where the registry host is
-            // injected by sops/CI). Without key-side expansion the
-            // entry lands in `auth_by_uri` keyed by the literal
-            // `${NEXUS_URL}` and never matches the real tarball URL.
-            let key = substitute_env(key.trim());
-            let value = substitute_env(strip_matched_quotes(value.trim()));
+            let key = maybe_substitute_env(key.trim(), expand_env);
+            let value = maybe_substitute_env(strip_matched_quotes(value.trim()), expand_env);
             entries.push((key, value));
         }
     }
 
     Ok(entries)
+}
+
+fn maybe_substitute_env(value: &str, expand_env: bool) -> String {
+    if expand_env {
+        substitute_env(value)
+    } else {
+        value.to_string()
+    }
 }
 
 /// Strip a single layer of matched surrounding `"` or `'` from `value`.

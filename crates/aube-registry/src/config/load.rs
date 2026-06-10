@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use super::env::npm_config_env_entries_from;
-use super::npmrc::parse_npmrc;
+use super::npmrc::{parse_npmrc, parse_npmrc_untrusted};
 use super::types::{NpmConfig, NpmrcSource};
 
 impl NpmConfig {
@@ -238,7 +238,7 @@ pub(super) fn load_npmrc_entries_tagged_with_home(
     }
     let project_rc = project_dir.join(".npmrc");
     if project_rc.exists()
-        && let Ok(entries) = parse_npmrc(&project_rc)
+        && let Ok(entries) = parse_npmrc_untrusted(&project_rc)
     {
         out.extend(
             entries
@@ -253,7 +253,7 @@ pub(super) fn load_npmrc_entries_tagged_with_home(
         project_dir,
         out.iter().map(|(_, k, v)| (k.as_str(), v.as_str())),
     ) && auth_path.exists()
-        && let Ok(entries) = parse_npmrc(&auth_path)
+        && let Ok(entries) = parse_npmrc_untrusted(&auth_path)
     {
         out.extend(
             entries
@@ -304,7 +304,7 @@ pub(super) fn load_npmrc_entries_with_home(
     }
     let project_rc = project_dir.join(".npmrc");
     if project_rc.exists()
-        && let Ok(entries) = parse_npmrc(&project_rc)
+        && let Ok(entries) = parse_npmrc_untrusted(&project_rc)
     {
         out.extend(entries);
     }
@@ -318,7 +318,7 @@ pub(super) fn load_npmrc_entries_with_home(
         project_dir,
         out.iter().map(|(k, v)| (k.as_str(), v.as_str())),
     ) && auth_path.exists()
-        && let Ok(entries) = parse_npmrc(&auth_path)
+        && let Ok(entries) = parse_npmrc_untrusted(&auth_path)
     {
         out.extend(entries);
     }
