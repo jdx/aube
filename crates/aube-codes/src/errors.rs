@@ -96,6 +96,7 @@ pub const ERR_AUBE_RUNTIME_DOWNLOAD_FAILED: &str = "ERR_AUBE_RUNTIME_DOWNLOAD_FA
 pub const ERR_AUBE_RUNTIME_EXTRACT_FAILED: &str = "ERR_AUBE_RUNTIME_EXTRACT_FAILED";
 #[rustfmt::skip] pub const ERR_AUBE_RUNTIME_MISE_INSTALL_FAILED: &str = "ERR_AUBE_RUNTIME_MISE_INSTALL_FAILED";
 #[rustfmt::skip] pub const ERR_AUBE_RUNTIME_UNSUPPORTED_PLATFORM: &str = "ERR_AUBE_RUNTIME_UNSUPPORTED_PLATFORM";
+pub const ERR_AUBE_RUNTIME_IO: &str = "ERR_AUBE_RUNTIME_IO";
 
 // ── misc tracing::error! sites (non-fatal but high-severity) ────────
 pub const ERR_AUBE_PATCHES_TRACKING_WRITE: &str = "ERR_AUBE_PATCHES_TRACKING_WRITE";
@@ -498,6 +499,12 @@ pub const ALL: &[CodeMeta] = &[
         category: category::ENGINE_CLI,
         description: "No official Node.js build exists for this OS/architecture/libc. Set `nodeDownloadMirrors` to a mirror that carries one, or install Node via mise/system.",
         exit_code: Some(89),
+    },
+    CodeMeta {
+        name: ERR_AUBE_RUNTIME_IO,
+        category: category::ENGINE_CLI,
+        description: "A filesystem operation in the runtime store failed (lock acquisition, staging, or publishing an install). Not a download failure — the message names the failing path.",
+        exit_code: None,
     },
     // Misc / safety
     CodeMeta {

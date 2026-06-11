@@ -292,3 +292,72 @@ _basic_project() {
 	assert_success
 	assert_output --partial "v0.99.1"
 }
+
+@test "lockfile pin beats a newer satisfying installed version on aubr" {
+	# Regression: the warm aubr path must honor the lockfile's exact
+	# pin — without pin-aware resolution it would pick the best
+	# installed version in range (0.99.7) and drift from CI.
+	_fab_node "$(_aube_runtime_dir)" "0.99.1"
+	_fab_node "$(_aube_runtime_dir)" "0.99.7"
+	cat >package.json <<-'JSON'
+		{
+		  "name": "runtime-test",
+		  "version": "0.0.0",
+		  "scripts": { "which-node": "node --version" },
+		  "devEngines": {
+		    "runtime": { "name": "node", "version": "^0.99.0", "onFail": "download" }
+		  }
+		}
+	JSON
+	cat >aube-lock.yaml <<-'YAML'
+		lockfileVersion: '9.0'
+
+		settings:
+		  autoInstallPeers: true
+		  excludeLinksFromLockfile: false
+
+		importers:
+
+		  .:
+		    devDependencies:
+		      node:
+		        specifier: runtime:^0.99.0
+		        version: runtime:0.99.1
+
+		packages:
+
+		  node@runtime:0.99.1:
+		    hasBin: true
+		    version: 0.99.1
+		    resolution:
+		      type: variations
+		      variants: []
+
+		snapshots:
+
+		  node@runtime:0.99.1: {}
+	YAML
+	run aube install
+	assert_success
+	run aubr which-node
+	assert_success
+	assert_output --partial "v0.99.1"
+	refute_output --partial "v0.99.7"
+}
+
+@test "root preinstall hook runs on the switched node" {
+	# Regression: preinstall fires before most of the install pipeline;
+	# runtime resolution must already have happened by then.
+	_fab_node "$(_aube_runtime_dir)" "0.99.1"
+	echo "0.99" >.nvmrc
+	cat >package.json <<-'JSON'
+		{
+		  "name": "runtime-test",
+		  "version": "0.0.0",
+		  "scripts": { "preinstall": "node --version" }
+		}
+	JSON
+	run aube install
+	assert_success
+	assert_output --partial "v0.99.1"
+}

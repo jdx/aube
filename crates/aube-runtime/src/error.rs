@@ -66,10 +66,10 @@ impl Error {
             Error::MiseInstallFailed { .. } => errors::ERR_AUBE_RUNTIME_MISE_INSTALL_FAILED,
             Error::UnsupportedPlatform { .. } => errors::ERR_AUBE_RUNTIME_UNSUPPORTED_PLATFORM,
             Error::Offline { .. } => errors::ERR_AUBE_OFFLINE,
-            // No bespoke code: I/O failures inside the runtime store
-            // surface through the generic exit path; the message names
-            // the failing path.
-            Error::Io { .. } => errors::ERR_AUBE_RUNTIME_DOWNLOAD_FAILED,
+            // Generic exit code (no EXIT_TABLE entry) — a lock or
+            // rename failure is not a download failure, and the
+            // message names the failing path.
+            Error::Io { .. } => errors::ERR_AUBE_RUNTIME_IO,
         }
     }
 

@@ -116,7 +116,7 @@ Aube generates this page from [`settings.toml`](https://github.com/jdx/aube/blob
 | [`dangerouslyAllowAllBuilds`](#setting-dangerouslyallowallbuilds) | `bool` | Allow all dependency build scripts automatically. |
 | [`nodeVersion`](#setting-nodeversion) | `string` | Node.js version aube reports when evaluating `engines` checks. |
 | [`nodeDownloadMirrors`](#setting-nodedownloadmirrors) | `object` | Custom Node.js download mirror URLs. |
-| [`runtimeInstaller`](#setting-runtimeinstaller) | `"auto" \| "mise" \| "aube"` | Who installs a missing Node.js version requested by `devEngines.runtime`, `.node-version`, or `.nvmrc`. |
+| [`runtimeInstaller`](#setting-runtimeinstaller) | `"auto" \| "mise" \| "aube"` | Who installs a missing runtime: Node.js versions and, with `managePackageManagerVersions`, pinned aube versions. |
 | [`runtimeOnFail`](#setting-runtimeonfail) | `"download" \| "error" \| "warn" \| "ignore"` | Override the `onFail` policy applied when the active Node.js doesn't satisfy the project's runtime requirement. |
 | [`savePrefix`](#setting-saveprefix) | `"^" \| "~" \| ""` | Version prefix used when installing a package. |
 | [`linkWorkspacePackages`](#setting-linkworkspacepackages) | `"false" \| "true" \| "deep"` | Resolve `aube add &lt;name&gt;` against local workspace siblings before falling back to the registry. |
@@ -2326,7 +2326,7 @@ nodeDownloadMirrors:
 
 ### `runtimeInstaller` {#setting-runtimeinstaller}
 
-Who installs a missing Node.js version requested by `devEngines.runtime`, `.node-version`, or `.nvmrc`.
+Who installs a missing runtime: Node.js versions and, with `managePackageManagerVersions`, pinned aube versions.
 
 - Type: `"auto" | "mise" | "aube"`
 - Default: `"auto"`
@@ -2346,6 +2346,12 @@ decides who fetches it:
   if mise is missing or fails.
 - `aube`: never delegate; download from nodejs.org (or
   `nodeDownloadMirrors.release`) into `$XDG_DATA_HOME/aube/nodejs/`.
+
+The same policy governs aube *self*-installs when a
+`packageManager` / `devEngines.packageManager` pin needs a version
+that isn't installed (see `managePackageManagerVersions`): `auto`/`mise`
+delegate to `mise install aube@<version>`, `aube` downloads the GitHub
+release archive into `$XDG_DATA_HOME/aube/self/`.
 
 Examples:
 

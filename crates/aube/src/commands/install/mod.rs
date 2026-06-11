@@ -198,6 +198,23 @@ pub async fn run(opts: InstallOptions) -> miette::Result<()> {
     // order.
     let workspace_catalogs = super::discover_catalogs(&cwd)?;
     let settings_ctx = files.ctx(&raw_workspace, &opts.env_snapshot, &opts.cli_flags);
+    // Resolve the project's Node runtime before anything can spawn
+    // node: the root `preinstall` hooks below must already run on the
+    // switched runtime, and the virtual-store keys downstream fold
+    // the node major in. The lockfile pin (when recorded) wins over
+    // the manifest range, and `--offline` blocks runtime downloads
+    // the same way it blocks registry fetches.
+    let mut runtime_settings = crate::runtime::RuntimeSettings::from_ctx(&settings_ctx);
+    if opts.network_mode == aube_registry::NetworkMode::Offline {
+        runtime_settings.network = aube_runtime::NetworkMode::Offline;
+    }
+    crate::runtime::ensure(
+        &cwd,
+        Some(&manifest),
+        runtime_settings,
+        crate::runtime::lockfile_node_pin(&cwd, &manifest).as_ref(),
+    )
+    .await?;
     super::configure_script_settings(&settings_ctx);
 
     let layout::InstallLayoutConfig {
@@ -393,26 +410,6 @@ pub async fn run(opts: InstallOptions) -> miette::Result<()> {
         && aube_lockfile::active_lockfile_has_conflict_markers(&lockfile_dir);
     let existing_for_resolver: Option<&aube_lockfile::LockfileGraph> =
         lockfile_pre_parse.as_ref().map(|(g, _)| g);
-
-    // Resolve the project's Node runtime before graph hashing (the
-    // virtual-store keys fold the node major in) and before any
-    // lifecycle script can spawn. The lockfile's recorded pin wins
-    // over the manifest range when it still satisfies it. A no-op if
-    // `aube run`/`exec` already resolved on this process.
-    crate::runtime::ensure(
-        &cwd,
-        Some(&manifest),
-        crate::runtime::RuntimeSettings::from_ctx(&settings_ctx),
-        lockfile_pre_parse
-            .as_ref()
-            .and_then(|(g, _)| g.runtimes.get("node")),
-    )
-    .await?;
-    // Re-push script settings now that the runtime context exists —
-    // the first call (top of this function) ran before the lockfile
-    // was parsed, so lifecycle scripts would otherwise miss the
-    // switched node.
-    super::configure_script_settings(&settings_ctx);
 
     // `--lockfile-only` short-circuit. Resolves (or reuses a fresh
     // lockfile), writes the new lockfile, and exits before any tarball

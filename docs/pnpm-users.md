@@ -114,7 +114,7 @@ aube equivalent — use `aube runtime set`.
 Unlike pnpm, aube also reads `.nvmrc` / `.node-version`, and it
 delegates runtime installs to [mise](https://mise.jdx.dev) when mise is
 installed so you don't keep two copies of Node (see the
-[`runtimeInstaller`](/settings#runtimeinstaller) setting).
+[`runtimeInstaller`](/settings/#runtimeinstaller) setting).
 
 aube also manages its own version the way pnpm does
 (`managePackageManagerVersions`, on by default): a

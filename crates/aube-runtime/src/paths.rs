@@ -16,7 +16,9 @@ use std::path::PathBuf;
 /// Root of aube-managed Node installs. `AUBE_RUNTIME_DIR` overrides
 /// for tests and unusual setups.
 pub fn runtime_dir() -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os("AUBE_RUNTIME_DIR") {
+    if let Some(dir) = std::env::var_os("AUBE_RUNTIME_DIR")
+        && !dir.is_empty()
+    {
         return Some(PathBuf::from(dir));
     }
     #[cfg(windows)]

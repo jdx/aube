@@ -118,7 +118,7 @@ pub(crate) fn validate_install(
         return None;
     }
     let (bin_dir, node_bin) = node_paths_in(dir);
-    if !node_bin.is_file() {
+    if !is_executable_file(&node_bin) {
         return None;
     }
     Some(InstalledNode {
@@ -128,6 +128,26 @@ pub(crate) fn validate_install(
         node_bin,
         origin,
     })
+}
+
+/// A regular file with execute permission (any bit — discovery never
+/// knows which uid will spawn it). Windows has no exec bit; existence
+/// suffices there. Guards against a corrupt or partially-written
+/// install entering the candidate set and only failing at spawn time.
+pub(crate) fn is_executable_file(path: &Path) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !meta.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    true
 }
 
 /// Per-OS layout of a native Node install: unix puts `node` under
@@ -213,6 +233,22 @@ mod tests {
         std::fs::create_dir_all(&bin).unwrap();
         let exe = bin.join(if cfg!(windows) { "node.exe" } else { "node" });
         std::fs::write(&exe, "#!/bin/sh\necho v0.0.0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_executable_node_is_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        fab_install(tmp.path(), "22.1.0");
+        use std::os::unix::fs::PermissionsExt;
+        let exe = tmp.path().join("22.1.0/bin/node");
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(scan_install_dir(tmp.path(), InstallOrigin::Aube).is_empty());
     }
 
     #[test]

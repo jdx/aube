@@ -56,7 +56,9 @@ pub struct InstalledAube {
 /// aube's own versions dir (`$XDG_DATA_HOME/aube/self`).
 /// `AUBE_SELF_DIR` overrides for tests.
 pub fn self_dir() -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os("AUBE_SELF_DIR") {
+    if let Some(dir) = std::env::var_os("AUBE_SELF_DIR")
+        && !dir.is_empty()
+    {
         return Some(PathBuf::from(dir));
     }
     #[cfg(windows)]
@@ -142,7 +144,7 @@ fn validate_aube_install(
     let exe_name = if cfg!(windows) { "aube.exe" } else { "aube" };
     let exe = [dir.join(exe_name), dir.join("bin").join(exe_name)]
         .into_iter()
-        .find(|p| p.is_file())?;
+        .find(|p| discover::is_executable_file(p))?;
     Some(InstalledAube {
         version,
         install_dir: dir.to_path_buf(),
@@ -595,11 +597,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("2.0.0/bin");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join(if cfg!(windows) { "aube.exe" } else { "aube" }),
-            "x",
-        )
-        .unwrap();
+        let exe = dir.join(if cfg!(windows) { "aube.exe" } else { "aube" });
+        std::fs::write(&exe, "x").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
         let install = validate_aube_install(
             &tmp.path().join("2.0.0"),
             "2.0.0".parse().unwrap(),

@@ -367,6 +367,12 @@
       "exit_code": 89
     },
     {
+      "name": "ERR_AUBE_RUNTIME_IO",
+      "category": "Engine / CLI",
+      "description": "A filesystem operation in the runtime store failed (lock acquisition, staging, or publishing an install). Not a download failure — the message names the failing path.",
+      "exit_code": null
+    },
+    {
       "name": "ERR_AUBE_UNSAFE_INDEX_KEY",
       "category": "Misc / safety",
       "description": "A package index key tried to escape its directory (path traversal defense in depth).",

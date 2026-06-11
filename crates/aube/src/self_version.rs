@@ -61,22 +61,11 @@ pub(crate) async fn maybe_switch(settings: &crate::startup::StartupSettings) -> 
         return Ok(());
     }
 
-    // Already switched once and still mismatched: a broken install or
-    // an alias resolving to the wrong build. Warn, keep running —
-    // never loop.
-    if std::env::var_os(REEXEC_GUARD_ENV).is_some() {
-        tracing::warn!(
-            code = aube_codes::warnings::WARN_AUBE_RUNTIME_VERSION_MISMATCH,
-            requested = pin.raw,
-            running = running_version(),
-            "switched aube binary still does not satisfy the project's pin; continuing"
-        );
-        return Ok(());
-    }
-
     // Resolve the pin to an exact version: exact pins directly, ranges
-    // against installed versions first, then the latest published
-    // release.
+    // against installed versions first, then the published list. A
+    // range that can't be resolved (offline, or nothing satisfies)
+    // follows the pin's own onFail policy — warn/ignore must not turn
+    // an advisory pin into a hard failure on an air-gapped machine.
     let target = match &pin.spec {
         aube_runtime::NodeSpec::Exact(v) => v.clone(),
         spec => {
@@ -87,38 +76,68 @@ pub(crate) async fn maybe_switch(settings: &crate::startup::StartupSettings) -> 
                 .max();
             match best_installed {
                 Some(v) => v,
-                None => match aube_runtime::available_aube_versions(2).await {
-                    Ok(published) => {
-                        let best = published
-                            .iter()
-                            .filter(|v| spec.satisfied_by(v) == Some(true))
-                            .max()
-                            .cloned();
-                        match best {
-                            Some(v) => v,
-                            None => {
-                                let newest = published.iter().max();
-                                return self_pin_unsatisfied(
-                                    &pin,
-                                    format!(
-                                        "no published aube satisfies {} (newest release: {})",
-                                        pin.raw,
-                                        newest.map(|v| v.to_string()).unwrap_or_default()
-                                    ),
-                                );
-                            }
+                None => {
+                    let resolved = match aube_runtime::available_aube_versions(2).await {
+                        Ok(published) => {
+                            let best = published
+                                .iter()
+                                .filter(|v| spec.satisfied_by(v) == Some(true))
+                                .max()
+                                .cloned();
+                            best.ok_or_else(|| {
+                                format!(
+                                    "no published aube satisfies {} (newest release: {})",
+                                    pin.raw,
+                                    published
+                                        .iter()
+                                        .max()
+                                        .map(|v| v.to_string())
+                                        .unwrap_or_default()
+                                )
+                            })
+                        }
+                        Err(e) => Err(format!("could not resolve {}: {e}", pin.raw)),
+                    };
+                    match resolved {
+                        Ok(v) => v,
+                        Err(detail) => {
+                            return match pin.on_fail {
+                                aube_manifest::OnFail::Ignore => Ok(()),
+                                aube_manifest::OnFail::Warn => {
+                                    tracing::warn!(
+                                        code =
+                                            aube_codes::warnings::WARN_AUBE_RUNTIME_VERSION_MISMATCH,
+                                        requested = pin.raw,
+                                        running = running_version(),
+                                        "{detail}; continuing on this aube"
+                                    );
+                                    Ok(())
+                                }
+                                _ => self_pin_unsatisfied(&pin, detail),
+                            };
                         }
                     }
-                    Err(e) => {
-                        return self_pin_unsatisfied(
-                            &pin,
-                            format!("could not resolve {}: {e}", pin.raw),
-                        );
-                    }
-                },
+                }
             }
         }
     };
+
+    // Loop guard, scoped to the resolved target: the guard env is
+    // inherited by every descendant process, and a nested aube
+    // invocation (lifecycle script, different project) may legitimately
+    // need to switch to a *different* version. Only "we already
+    // switched to exactly this version and it still doesn't satisfy"
+    // is a loop — warn and keep running.
+    if std::env::var(REEXEC_GUARD_ENV).is_ok_and(|v| v == target.to_string()) {
+        tracing::warn!(
+            code = aube_codes::warnings::WARN_AUBE_RUNTIME_VERSION_MISMATCH,
+            requested = pin.raw,
+            running = running_version(),
+            target = %target,
+            "switched aube binary still does not satisfy the project's pin; continuing"
+        );
+        return Ok(());
+    }
 
     // onFail gates the *download*; an already-installed target always
     // switches (that's what the pin means).

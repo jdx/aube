@@ -202,7 +202,7 @@ If a project already uses `pnpm-workspace.yaml`, aube can read and write it. New
 | File | Reads | Writes in place |
 | --- | --- | --- |
 | `aube-lock.yaml` | yes | yes |
-| `pnpm-lock.yaml` v9 | yes | yes |
+| `pnpm-lock.yaml` v9 (written by pnpm 9–11) | yes | yes |
 | `package-lock.json` v2/v3 | yes | yes |
 | `npm-shrinkwrap.json` | yes | yes |
 | `yarn.lock` (v1 classic + v2+ berry) | yes | yes |

@@ -2316,7 +2316,7 @@ sources.workspaceYaml = ["nodeDownloadMirrors"]
 examples = []
 
 [runtimeInstaller]
-description = "Who installs a missing Node.js version requested by `devEngines.runtime`, `.node-version`, or `.nvmrc`."
+description = "Who installs a missing runtime: Node.js versions and, with `managePackageManagerVersions`, pinned aube versions."
 type = '"auto" | "mise" | "aube"'
 default = "\"auto\""
 docs = """
@@ -2332,6 +2332,12 @@ decides who fetches it:
   if mise is missing or fails.
 - `aube`: never delegate; download from nodejs.org (or
   `nodeDownloadMirrors.release`) into `$XDG_DATA_HOME/aube/nodejs/`.
+
+The same policy governs aube *self*-installs when a
+`packageManager` / `devEngines.packageManager` pin needs a version
+that isn't installed (see `managePackageManagerVersions`): `auto`/`mise`
+delegate to `mise install aube@<version>`, `aube` downloads the GitHub
+release archive into `$XDG_DATA_HOME/aube/self/`.
 """
 sources.cli = []
 sources.env = ["npm_config_runtime_installer", "NPM_CONFIG_RUNTIME_INSTALLER", "AUBE_RUNTIME_INSTALLER"]

@@ -72,7 +72,13 @@ pub(crate) async fn load_shasums(
         .as_deref()
         .and_then(|p| std::fs::read_to_string(p).ok())
     {
-        return Ok(Shasums::parse(&text));
+        let parsed = Shasums::parse(&text);
+        if !parsed.entries.is_empty() {
+            return Ok(parsed);
+        }
+        // A truncated/corrupted cache entry would otherwise fail every
+        // install until manually deleted — refetch and overwrite.
+        tracing::debug!(version = %version, "ignoring unparseable shasums cache entry");
     }
     if cfg.network == NetworkMode::Offline {
         return Err(Error::Offline {

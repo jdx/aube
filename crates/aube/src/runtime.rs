@@ -133,6 +133,10 @@ pub struct RuntimeSettings {
     pub installer: aube_runtime::InstallerMode,
     pub on_fail_override: Option<aube_manifest::OnFail>,
     pub mirror: Option<String>,
+    /// `--offline` blocks runtime downloads the same way it blocks
+    /// registry fetches (caches still serve). `--prefer-offline` maps
+    /// to Online — the runtime caches are already consulted first.
+    pub network: aube_runtime::NetworkMode,
 }
 
 impl RuntimeSettings {
@@ -153,15 +157,43 @@ impl RuntimeSettings {
             installer,
             on_fail_override,
             mirror: release_mirror(ctx),
+            network: aube_runtime::NetworkMode::Online,
         }
     }
 }
 
+/// The lockfile's recorded `node` runtime pin, read cheaply enough
+/// for hot `aubr` paths: only the pnpm-shaped lockfiles can carry a
+/// pin, and a substring probe gates the full YAML parse — unpinned
+/// projects (the overwhelming majority) pay a page-cached file read,
+/// pinned projects pay one parse. The process-global OnceCell means
+/// this runs at most once per process, so an `aubr` warm path and the
+/// install pipeline resolve from the *same* pin — without this, the
+/// first `ensure_for_cwd` caller would lock in a pin-less resolution
+/// and `aubr` could drift from what `aube install` pinned.
+///
+/// Branch lockfiles (`gitBranchLockfile`) and custom `lockfileDir`
+/// layouts aren't probed — those projects resolve the range fresh,
+/// which is the pre-pin behavior, never an error.
+pub(crate) fn lockfile_node_pin(
+    project_dir: &Path,
+    manifest: &PackageJson,
+) -> Option<aube_lockfile::RuntimePin> {
+    let pinned = ["aube-lock.yaml", "pnpm-lock.yaml"].iter().any(|name| {
+        std::fs::read_to_string(project_dir.join(name))
+            .map(|s| s.contains("specifier: runtime:"))
+            .unwrap_or(false)
+    });
+    if !pinned {
+        return None;
+    }
+    let graph = aube_lockfile::parse_lockfile(project_dir, manifest).ok()?;
+    graph.runtimes.get("node").cloned()
+}
+
 /// [`ensure`] for commands that haven't loaded settings/manifests yet
 /// (dlx, run/exec warm paths): loads the settings for `cwd`'s project
-/// root and resolves from there. Skips the lockfile pin — callers
-/// that care about pin reproducibility (the install pipeline) use
-/// [`ensure`] directly with the parsed graph.
+/// root, reads the lockfile pin, and resolves from there.
 pub async fn ensure_for_cwd(cwd: &Path) -> miette::Result<&'static RuntimeContext> {
     if let Some(ctx) = current() {
         return Ok(ctx);
@@ -170,7 +202,10 @@ pub async fn ensure_for_cwd(cwd: &Path) -> miette::Result<&'static RuntimeContex
     let manifest =
         aube_manifest::PackageJson::from_path_cached(&project_dir.join("package.json")).ok();
     let settings = crate::commands::with_settings_ctx(&project_dir, RuntimeSettings::from_ctx);
-    ensure(&project_dir, manifest.as_deref(), settings, None).await
+    let pin = manifest
+        .as_deref()
+        .and_then(|m| lockfile_node_pin(&project_dir, m));
+    ensure(&project_dir, manifest.as_deref(), settings, pin.as_ref()).await
 }
 
 /// Resolve the project's runtime once for this process.
@@ -241,7 +276,7 @@ async fn resolve_context(
     let cfg = aube_runtime::RuntimeConfig {
         installer: settings.installer,
         mirror: settings.mirror.clone(),
-        network: aube_runtime::NetworkMode::Online,
+        network: settings.network,
         retries: 2,
     };
 

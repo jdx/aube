@@ -43,7 +43,9 @@ impl LtsField {
     }
 
     pub fn is_lts(&self) -> bool {
-        matches!(self, LtsField::Codename(_))
+        // The official feed uses `false` or a codename string, but a
+        // mirror emitting a bare `lts: true` still means LTS.
+        matches!(self, LtsField::Codename(_) | LtsField::Flag(true))
     }
 }
 

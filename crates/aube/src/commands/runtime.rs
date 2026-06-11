@@ -194,10 +194,31 @@ async fn run_set_global(
         .await
         .map_err(|e| miette!(code = e.code(), "{e}"))?
         .ok_or_else(|| miette!("runtime resolution returned no install"))?;
-    println!(
-        "node {resolved} installed to {}",
-        resolution.node_bin.display()
-    );
+    // Resolution follows the normal precedence (PATH, then installed,
+    // then download), so say what actually happened instead of
+    // claiming an install when the version was already available.
+    match resolution.from {
+        aube_runtime::ResolvedFrom::PathEnv => {
+            println!(
+                "node {resolved} already on PATH at {}; nothing to install",
+                resolution.node_bin.display()
+            );
+            return Ok(());
+        }
+        aube_runtime::ResolvedFrom::Installed(origin) => {
+            println!(
+                "node {resolved} already installed via {} at {}",
+                origin.label(),
+                resolution.node_bin.display()
+            );
+        }
+        aube_runtime::ResolvedFrom::FreshInstall(_) => {
+            println!(
+                "node {resolved} installed to {}",
+                resolution.node_bin.display()
+            );
+        }
+    }
     if let Some(bin_dir) = &resolution.bin_dir {
         println!(
             "aube has no shims — projects running through aube pick it up automatically;\n\

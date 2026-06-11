@@ -295,13 +295,16 @@ fn merge_into(dst: &mut LockfileGraph, src: LockfileGraph, report: &mut MergeRep
                 }
                 let dst_pin = slot.get_mut();
                 for variant in incoming.variants {
-                    let covered = variant.targets.iter().any(|t| {
+                    // Push unless *every* target is already covered —
+                    // `.any()` here would drop a multi-target variant
+                    // whose targets are only partially covered.
+                    let fully_covered = variant.targets.iter().all(|t| {
                         dst_pin
                             .variants
                             .iter()
                             .any(|dv| dv.targets.iter().any(|dt| dt == t))
                     });
-                    if !covered {
+                    if !fully_covered {
                         dst_pin.variants.push(variant);
                     }
                 }
