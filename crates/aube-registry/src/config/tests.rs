@@ -335,6 +335,38 @@ fn user_declared_npmrc_auth_file_expands_env_into_auth() {
 }
 
 #[test]
+fn user_declared_npmrc_auth_file_loses_to_project_npmrc() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let auth_file = home.path().join("auth.npmrc");
+    std::fs::write(
+        &auth_file,
+        "//registry.example.com/:_authToken=user-auth-file-token\n",
+    )
+    .unwrap();
+    std::fs::write(
+        home.path().join(".npmrc"),
+        format!("npmrc-auth-file={}\n", auth_file.display()),
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join(".npmrc"),
+        "//registry.example.com/:_authToken=project-token\n",
+    )
+    .unwrap();
+
+    let entries = load_npmrc_entries_with_home(Some(home.path()), None, project.path(), None);
+    let mut config = NpmConfig::default();
+    config.apply(entries);
+
+    assert_eq!(
+        config.auth_token_for("https://registry.example.com/"),
+        Some("project-token"),
+        "user-declared auth file entries should stay in the user precedence layer",
+    );
+}
+
+#[test]
 fn test_package_scope() {
     assert_eq!(package_scope("@myorg/pkg"), Some("@myorg"));
     assert_eq!(package_scope("lodash"), None);

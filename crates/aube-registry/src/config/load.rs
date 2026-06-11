@@ -238,6 +238,17 @@ pub(super) fn load_npmrc_entries_tagged_with_home(
             );
         }
     }
+    if let Some((auth_path, auth_source)) = resolve_npmrc_auth_file_tagged(home, project_dir, &out)
+        && !auth_source.is_project_controlled()
+        && auth_path.exists()
+        && let Ok(entries) = parse_npmrc(&auth_path)
+    {
+        out.extend(
+            entries
+                .into_iter()
+                .map(|(k, v)| (NpmrcSource::UserNpmrcAuthFile, k, v)),
+        );
+    }
     let project_rc = project_dir.join(".npmrc");
     if project_rc.exists()
         && let Ok(entries) = parse_npmrc_untrusted(&project_rc)
@@ -249,19 +260,15 @@ pub(super) fn load_npmrc_entries_tagged_with_home(
         );
     }
     if let Some((auth_path, auth_source)) = resolve_npmrc_auth_file_tagged(home, project_dir, &out)
+        && auth_source.is_project_controlled()
         && auth_path.exists()
-        && let Ok(entries) = if auth_source.is_project_controlled() {
-            parse_npmrc_untrusted(&auth_path)
-        } else {
-            parse_npmrc(&auth_path)
-        }
+        && let Ok(entries) = parse_npmrc_untrusted(&auth_path)
     {
-        let source = if auth_source.is_project_controlled() {
-            NpmrcSource::ProjectNpmrcAuthFile
-        } else {
-            NpmrcSource::UserNpmrcAuthFile
-        };
-        out.extend(entries.into_iter().map(|(k, v)| (source, k, v)));
+        out.extend(
+            entries
+                .into_iter()
+                .map(|(k, v)| (NpmrcSource::ProjectNpmrcAuthFile, k, v)),
+        );
     }
     out
 }
