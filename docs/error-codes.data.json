@@ -19,6 +19,12 @@
       "exit_code": 12
     },
     {
+      "name": "ERR_AUBE_RESOLUTION_SHAPE_MISMATCH",
+      "category": "Lockfile",
+      "description": "A registry-style lockfile dependency path is backed by a git, local directory, or direct tarball resolution.",
+      "exit_code": 13
+    },
+    {
       "name": "ERR_AUBE_NO_MATCHING_VERSION",
       "category": "Resolver",
       "description": "No published version of the named package satisfies the requested range.",

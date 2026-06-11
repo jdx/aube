@@ -385,7 +385,7 @@ fn parse_one(
                 aube_util::diag::jstr(&display)
             )
         });
-    match kind {
+    let graph = match kind {
         // `aube-lock.yaml` uses the same on-disk format as pnpm v9 for
         // now — same parser, same writer — so we piggyback on the pnpm
         // module. Keeping the variant distinct lets detection/import
@@ -399,6 +399,108 @@ fn parse_one(
         LockfileKind::Yarn | LockfileKind::YarnBerry => yarn::parse(path, manifest),
         LockfileKind::Npm | LockfileKind::NpmShrinkwrap => npm::parse(path),
         LockfileKind::Bun => bun::parse(path),
+    }?;
+    validate_resolution_shapes(path, &graph)?;
+    Ok(graph)
+}
+
+fn validate_resolution_shapes(path: &Path, graph: &LockfileGraph) -> Result<(), Error> {
+    for (dep_path, pkg) in &graph.packages {
+        if pkg.local_source.is_some() && dep_path_has_registry_version(dep_path, &pkg.name) {
+            return Err(Error::ResolutionShapeMismatch(
+                path.to_path_buf(),
+                dep_path.clone(),
+                pkg.local_source
+                    .as_ref()
+                    .map(|source| source.kind_str())
+                    .unwrap_or("unknown"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn dep_path_has_registry_version(dep_path: &str, name: &str) -> bool {
+    let Some(tail) = dep_path
+        .strip_prefix('/')
+        .unwrap_or(dep_path)
+        .strip_prefix(name)
+        .and_then(|rest| rest.strip_prefix('@'))
+    else {
+        return false;
+    };
+    let version = tail.split('(').next().unwrap_or(tail);
+    node_semver::Version::parse(version).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dep_path_has_registry_version;
+    use crate::{GitSource, LocalSource, RemoteTarballSource};
+    use proptest::prelude::*;
+    use std::path::PathBuf;
+
+    fn package_name() -> impl Strategy<Value = String> {
+        prop_oneof![
+            "[a-z][a-z0-9-]{0,20}".prop_map(|name| name),
+            ("[a-z][a-z0-9-]{0,10}", "[a-z][a-z0-9-]{0,20}")
+                .prop_map(|(scope, name)| format!("@{scope}/{name}")),
+        ]
+    }
+
+    fn semver() -> impl Strategy<Value = String> {
+        (0u16..1000, 0u16..1000, 0u16..1000)
+            .prop_map(|(major, minor, patch)| format!("{major}.{minor}.{patch}"))
+    }
+
+    fn path_source() -> impl Strategy<Value = LocalSource> {
+        ("[a-z][a-z0-9_-]{0,12}", prop_oneof![0u8..5, 5u8..10]).prop_map(|(path, kind)| {
+            let path = PathBuf::from(format!("./vendor/{path}"));
+            match kind {
+                0 => LocalSource::Directory(path),
+                1 => LocalSource::Tarball(path.with_extension("tgz")),
+                2 => LocalSource::Link(path),
+                3 => LocalSource::Portal(path),
+                _ => LocalSource::Exec(path),
+            }
+        })
+    }
+
+    fn local_source() -> impl Strategy<Value = LocalSource> {
+        prop_oneof![
+            path_source(),
+            "[a-z][a-z0-9-]{0,20}".prop_map(|repo| LocalSource::Git(GitSource {
+                url: format!("https://github.com/acme/{repo}.git"),
+                committish: None,
+                resolved: "0123456789abcdef0123456789abcdef01234567".to_string(),
+                integrity: None,
+                subpath: None,
+            })),
+            "[a-z][a-z0-9-]{0,20}".prop_map(|tarball| LocalSource::RemoteTarball(
+                RemoteTarballSource {
+                    url: format!("https://registry.example/{tarball}.tgz"),
+                    integrity: String::new(),
+                    git_hosted: false,
+                },
+            )),
+        ]
+    }
+
+    proptest! {
+        #[test]
+        fn dep_path_registry_version_accepts_name_at_semver(name in package_name(), version in semver()) {
+            let dep_path = format!("{name}@{version}");
+            prop_assert!(dep_path_has_registry_version(&dep_path, &name));
+        }
+
+        #[test]
+        fn dep_path_registry_version_rejects_local_source_dep_paths(
+            name in package_name(),
+            source in local_source(),
+        ) {
+            let dep_path = source.dep_path(&name);
+            prop_assert!(!dep_path_has_registry_version(&dep_path, &name));
+        }
     }
 }
 
@@ -435,6 +537,14 @@ pub enum Error {
     #[error("failed to parse lockfile {0}: {1}")]
     #[diagnostic(code(ERR_AUBE_LOCKFILE_PARSE))]
     Parse(std::path::PathBuf, String),
+    #[error("lockfile {0} has registry-style dependency path `{1}` backed by {2} resolution")]
+    #[diagnostic(
+        code(ERR_AUBE_RESOLUTION_SHAPE_MISMATCH),
+        help(
+            "run `aube install --no-frozen-lockfile` from a trusted manifest to regenerate the lockfile"
+        )
+    )]
+    ResolutionShapeMismatch(std::path::PathBuf, String, &'static str),
     /// Deserialization failure with a byte offset into the source
     /// content, so miette's `fancy` handler can draw a pointer at the
     /// offending byte of the lockfile. Reuses `aube_manifest`'s
@@ -496,6 +606,7 @@ impl Error {
 #[cfg(test)]
 mod parse_diag_tests {
     use super::*;
+    use crate::{LocalSource, LockedPackage};
     use std::path::Path;
 
     /// Trailing `,` in an otherwise fine JSON lockfile — confirm the
@@ -513,6 +624,73 @@ mod parse_diag_tests {
         let len: usize = pe.span.len();
         assert!(offset + len <= content.len());
         assert_eq!(pe.path, path);
+    }
+
+    #[test]
+    fn validate_resolution_shapes_rejects_local_source_with_registry_dep_path() {
+        let mut graph = LockfileGraph::default();
+        graph.packages.insert(
+            "left-pad@1.3.0".to_string(),
+            LockedPackage {
+                name: "left-pad".to_string(),
+                version: "1.3.0".to_string(),
+                dep_path: "left-pad@1.3.0".to_string(),
+                local_source: Some(LocalSource::Directory("vendor/left-pad".into())),
+                ..Default::default()
+            },
+        );
+
+        let err = validate_resolution_shapes(Path::new("pnpm-lock.yaml"), &graph).unwrap_err();
+        assert!(matches!(
+            err,
+            Error::ResolutionShapeMismatch(_, dep_path, "file")
+                if dep_path == "left-pad@1.3.0"
+        ));
+    }
+
+    #[test]
+    fn validate_resolution_shapes_rejects_peer_suffixed_registry_dep_path() {
+        let mut graph = LockfileGraph::default();
+        graph.packages.insert(
+            "plugin@1.0.0(react@19.0.0)".to_string(),
+            LockedPackage {
+                name: "plugin".to_string(),
+                version: "1.0.0".to_string(),
+                dep_path: "plugin@1.0.0(react@19.0.0)".to_string(),
+                local_source: Some(LocalSource::RemoteTarball(crate::RemoteTarballSource {
+                    url: "https://example.com/plugin.tgz".to_string(),
+                    integrity: "sha512-test".to_string(),
+                    git_hosted: false,
+                })),
+                ..Default::default()
+            },
+        );
+
+        let err = validate_resolution_shapes(Path::new("pnpm-lock.yaml"), &graph).unwrap_err();
+        assert!(matches!(
+            err,
+            Error::ResolutionShapeMismatch(_, dep_path, "url")
+                if dep_path == "plugin@1.0.0(react@19.0.0)"
+        ));
+    }
+
+    #[test]
+    fn validate_resolution_shapes_allows_local_source_dep_path() {
+        let source = LocalSource::Directory("vendor/left-pad".into());
+        let dep_path = source.dep_path("left-pad");
+        let mut graph = LockfileGraph::default();
+        graph.packages.insert(
+            dep_path.clone(),
+            LockedPackage {
+                name: "left-pad".to_string(),
+                version: "1.3.0".to_string(),
+                dep_path,
+                local_source: Some(source),
+                ..Default::default()
+            },
+        );
+
+        validate_resolution_shapes(Path::new("pnpm-lock.yaml"), &graph).unwrap();
     }
 
     /// Same story for YAML — yaml_serde reports a `Location` with a
