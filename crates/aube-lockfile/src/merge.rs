@@ -264,6 +264,24 @@ fn merge_into(dst: &mut LockfileGraph, src: LockfileGraph, report: &mut MergeRep
             }
         }
     }
+    for (name, incoming) in src.runtimes {
+        use std::collections::btree_map::Entry;
+        match dst.runtimes.entry(name) {
+            Entry::Vacant(slot) => {
+                slot.insert(incoming);
+            }
+            Entry::Occupied(slot) => {
+                if slot.get().version != incoming.version {
+                    report.conflicts.push(format!(
+                        "runtime `{}`: kept {} over {}",
+                        slot.key(),
+                        slot.get().version,
+                        incoming.version
+                    ));
+                }
+            }
+        }
+    }
     let mut seen: aube_util::collections::FxSet<String> =
         dst.trusted_dependencies.iter().cloned().collect();
     for name in src.trusted_dependencies {

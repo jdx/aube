@@ -88,7 +88,7 @@ pub(super) async fn import_local_source(
                 "buildDir": build_dir,
                 "locator": format!("{pkg_name}@{}", local.specifier()),
             });
-            let status = tokio::process::Command::new("node")
+            let status = tokio::process::Command::new(crate::runtime::node_program())
                 .arg("-e")
                 .arg(aube_resolver::YARN_EXEC_WRAPPER)
                 .arg(&script)

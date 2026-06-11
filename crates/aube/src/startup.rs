@@ -15,6 +15,11 @@ pub(crate) struct StartupSettings {
     pub loglevel: Option<String>,
     package_manager_strict: PackageManagerStrictMode,
     package_manager_strict_version: bool,
+    /// `managePackageManagerVersions` — when on, a `packageManager` /
+    /// `devEngines.packageManager` aube pin is *switched to* (see
+    /// `self_version`), so the guard's version mismatch error is
+    /// superseded.
+    pub manage_package_manager_versions: bool,
 }
 
 /// Tri-state for the `packageManagerStrict` setting.
@@ -127,6 +132,9 @@ pub(crate) fn load_startup_settings() -> miette::Result<StartupSettings> {
             })
             .or_else(|| aube_settings::values::string_from_npmrc("loglevel", &files.user_npmrc)),
         package_manager_strict: resolve_package_manager_strict(&ctx),
+        manage_package_manager_versions: aube_settings::resolved::manage_package_manager_versions(
+            &ctx,
+        ),
         package_manager_strict_version: aube_settings::resolved::package_manager_strict_version(
             &ctx,
         ),
@@ -354,9 +362,19 @@ pub(crate) fn enforce_package_manager_guardrails(
     let normalized = version.strip_suffix("-DEBUG").unwrap_or(version);
     match name {
         "aube" => {
-            if settings.package_manager_strict_version && normalized != env!("CARGO_PKG_VERSION") {
+            // With managePackageManagerVersions on, version mismatch
+            // is handled *before* this guard by the self-switch
+            // (crate::self_version) — reaching here mismatched means
+            // switching failed soft (onFail warn/ignore) or the
+            // switched binary still reports another version; either
+            // way the switcher already surfaced it.
+            if !settings.manage_package_manager_versions
+                && settings.package_manager_strict_version
+                && normalized != env!("CARGO_PKG_VERSION")
+            {
                 return Err(miette!(
-                    "packageManager requires aube@{version}, but this is aube@{}",
+                    "packageManager requires aube@{version}, but this is aube@{} \
+                     (managePackageManagerVersions=false; re-enable it to switch automatically)",
                     env!("CARGO_PKG_VERSION")
                 ));
             }

@@ -411,7 +411,7 @@ async fn run_one_shot_hook(
 ) -> Result<Vec<u8>> {
     tracing::debug!("running pnpmfile hook {hook_name} ({})", pnpmfile.display());
 
-    let mut cmd = tokio::process::Command::new("node");
+    let mut cmd = tokio::process::Command::new(crate::runtime::node_program());
     cmd.arg("-e")
         .arg(one_shot_hook_shim())
         .env("AUBE_PNPMFILE", pnpmfile)
@@ -728,7 +728,7 @@ impl ReadPackageHost {
             "spawning pnpmfile readPackage host ({})",
             pnpmfile.display()
         );
-        let mut cmd = tokio::process::Command::new("node");
+        let mut cmd = tokio::process::Command::new(crate::runtime::node_program());
         cmd.arg("-e")
             .arg(read_package_shim())
             .env("AUBE_PNPMFILE", pnpmfile)

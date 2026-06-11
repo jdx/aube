@@ -10,11 +10,19 @@ pub(crate) fn configure_script_settings(ctx: &aube_settings::ResolveCtx<'_>) {
         .and_then(|s| non_empty_string(s).map(Into::into));
     let unsafe_perm = aube_settings::resolved::unsafe_perm(ctx);
     let shell_emulator = aube_settings::resolved::shell_emulator(ctx);
+    // Runtime switching: `crate::runtime::ensure` must have run before
+    // this for lifecycle scripts to see the pinned node — the install
+    // driver resolves the runtime early, then configures script
+    // settings. When no context exists (or no switching is active)
+    // these stay `None` and scripts inherit PATH untouched.
+    let runtime = crate::runtime::current();
     aube_scripts::set_script_settings(aube_scripts::ScriptSettings {
         node_options,
         script_shell,
         unsafe_perm,
         shell_emulator,
+        node_bin_dir: runtime.and_then(|r| r.bin_dir.clone()),
+        node_exe: runtime.and_then(|r| r.node_bin.clone()),
     });
 }
 

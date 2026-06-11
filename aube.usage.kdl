@@ -1584,6 +1584,21 @@ cmd run help="Run a script defined in package.json" {
     arg "[SCRIPT]" help="Script or local binary name" help_long="Script or local binary name.\n\nOmit on an interactive TTY to pick from `package.json` scripts. If no script matches, aube falls back to `node_modules/.bin/<name>`." required=#false
     arg "[ARGS]…" help="Arguments to pass to the script" required=#false double_dash=automatic var=#true
 }
+cmd runtime subcommand_required=#true help="Manage the project's Node.js runtime (pin, install, inspect)" {
+    alias rt
+    cmd list help="Show the resolved runtime and installed versions" {
+        alias ls
+    }
+    cmd set help="Pin a runtime in package.json devEngines.runtime and install it" {
+        flag "-g --global" help="Install for the user instead of the project (delegates to `mise use -g node@<version>` when mise manages installs)"
+        flag --on-fail help="`onFail` policy written to devEngines.runtime" default=download {
+            arg <POLICY>
+        }
+        flag --save-exact help="Pin the exact resolved version instead of a caret range"
+        arg <NAME> help="Runtime name (only `node` is supported)"
+        arg <VERSION> help="Version request: an exact version, a range (`^24`, `22`), `lts`, `latest`, or an LTS codename (`lts/jod`)"
+    }
+}
 cmd sbom help="Generate a Software Bill of Materials (CycloneDX or SPDX)" {
     flag "-D --dev" help="Show only devDependencies"
     flag --format help="Output format: `cyclonedx` (default) or `spdx`" default=cyclonedx {

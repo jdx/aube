@@ -33,6 +33,7 @@ test = false
 [dependencies]
 aube-codes = { workspace = true }
 aube-lockfile = { workspace = true }
+aube-runtime = { workspace = true }
 aube-manifest = { workspace = true }
 aube-registry = { workspace = true }
 aube-util = { workspace = true }

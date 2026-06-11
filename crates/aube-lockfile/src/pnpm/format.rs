@@ -28,21 +28,41 @@ pub(super) fn reformat_for_pnpm_parity(yaml: &str) -> String {
         if is_flow_candidate && i + 1 < lines.len() {
             let inner_indent = indent + 2;
             let mut entries: Vec<String> = Vec::new();
+            let mut all_scalar = true;
             let mut j = i + 1;
             while j < lines.len() {
                 let next = lines[j];
                 let n_stripped = next.trim_start();
                 let n_indent = next.len() - n_stripped.len();
-                if n_stripped.is_empty() || n_indent != inner_indent {
+                if n_stripped.is_empty() || n_indent < inner_indent {
+                    break;
+                }
+                if n_indent > inner_indent {
+                    // Nested structure (e.g. a `variants:` list inside
+                    // a `type: variations` resolution) — flow form
+                    // can't represent it with this rewriter; keep the
+                    // whole block as-is.
+                    all_scalar = false;
                     break;
                 }
                 match n_stripped.split_once(": ") {
                     Some((k, v)) => entries.push(format!("{k}: {v}")),
-                    None => break,
+                    None => {
+                        // A key with no inline value (`variants:`)
+                        // introduces a nested block — leave it alone.
+                        all_scalar = false;
+                        break;
+                    }
                 }
                 j += 1;
             }
-            if !entries.is_empty() {
+            // pnpm renders `binary` / `variations` resolutions in
+            // block form even when (like a map-less binary) every
+            // field happens to be scalar — match that.
+            let block_form_type = entries
+                .iter()
+                .any(|e| e == "type: binary" || e == "type: variations");
+            if all_scalar && !block_form_type && !entries.is_empty() {
                 compact.push(format!(
                     "{}{}: {{{}}}",
                     " ".repeat(indent),

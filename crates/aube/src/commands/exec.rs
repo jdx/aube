@@ -79,6 +79,9 @@ pub async fn run(
     exec_args.network.install_overrides();
     exec_args.lockfile.install_overrides();
     exec_args.virtual_store.install_overrides();
+    // Resolve the project's Node runtime before anything spawns (see
+    // run.rs for the warm-path rationale).
+    crate::runtime::ensure_for_cwd(&crate::dirs::cwd()?).await?;
     let ExecArgs {
         bin,
         args,
@@ -298,7 +301,9 @@ pub(crate) async fn exec_bin_with_node_args(
             .collect::<Vec<_>>()
             .join(" ");
         let bin_dir = super::project_modules_dir(cwd).join(".bin");
-        let new_path = aube_scripts::prepend_path(&bin_dir);
+        let mut path_dirs = vec![bin_dir];
+        path_dirs.extend(crate::runtime::path_entries());
+        let new_path = aube_scripts::prepend_paths(&path_dirs);
         let mut cmd = aube_scripts::spawn_shell(&line);
         cmd.env("PATH", &new_path);
         cmd
@@ -358,7 +363,9 @@ pub(crate) async fn exec_bin_status_with_node_args(
             .collect::<Vec<_>>()
             .join(" ");
         let bin_dir = super::project_modules_dir(cwd).join(".bin");
-        let new_path = aube_scripts::prepend_path(&bin_dir);
+        let mut path_dirs = vec![bin_dir];
+        path_dirs.extend(crate::runtime::path_entries());
+        let new_path = aube_scripts::prepend_paths(&path_dirs);
         let mut cmd = aube_scripts::spawn_shell(&line);
         cmd.env("PATH", &new_path);
         cmd
@@ -366,8 +373,15 @@ pub(crate) async fn exec_bin_status_with_node_args(
         let exec_path = resolve_exec_shim(bin_path);
         let mut cmd = tokio::process::Command::new(exec_path);
         cmd.args(args);
+        // `#!/usr/bin/env node` shebangs resolve through the child's
+        // PATH — put the switched runtime ahead of the inherited one.
+        let runtime_dirs = crate::runtime::path_entries();
+        if !runtime_dirs.is_empty() {
+            cmd.env("PATH", aube_scripts::prepend_paths(&runtime_dirs));
+        }
         cmd
     };
+    crate::runtime::apply_child_env(&mut command);
     command.current_dir(cwd);
     super::run_output::run_command(command, output_mode).await
 }
@@ -385,7 +399,8 @@ fn node_bin_command(
     if !is_node_backed_bin(&target.path) {
         return None;
     }
-    let mut cmd = tokio::process::Command::new(target.node.unwrap_or_else(|| "node".into()));
+    let mut cmd =
+        tokio::process::Command::new(target.node.unwrap_or_else(crate::runtime::node_program));
     if let Some(node_path) = target.node_path {
         cmd.env("NODE_PATH", node_path);
     }

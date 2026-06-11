@@ -241,6 +241,30 @@ pub struct WorkspaceConfig {
     #[serde(default)]
     pub update_config: Option<UpdateConfig>,
 
+    /// Node.js download mirror map (pnpm parity), keyed by channel:
+    /// `release` is used for runtime downloads; `rc`/`nightly` are
+    /// parsed but currently unused.
+    #[serde(default)]
+    pub node_download_mirrors: BTreeMap<String, String>,
+
+    /// Who installs a missing Node.js runtime: `auto` (mise when
+    /// present, else aube), `mise`, or `aube`. Declared as a typed
+    /// field so the settings-meta parity test sees the workspaceYaml
+    /// key.
+    #[serde(default)]
+    pub runtime_installer: Option<String>,
+
+    /// Override for `devEngines.runtime`'s `onFail` policy:
+    /// `download`, `error`, `warn`, or `ignore`.
+    #[serde(default)]
+    pub runtime_on_fail: Option<String>,
+
+    /// Self-version switching toggle (pnpm parity). Declared as a
+    /// typed field so the settings-meta parity test sees the
+    /// workspaceYaml key.
+    #[serde(default)]
+    pub manage_package_manager_versions: Option<bool>,
+
     /// Trust-policy mode. Parsed for pnpm parity; resolver support is
     /// limited to accepting the configured policy surface until registry
     /// trust metadata is available.

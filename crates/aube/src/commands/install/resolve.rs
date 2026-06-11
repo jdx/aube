@@ -259,6 +259,14 @@ pub(super) async fn run_lockfile_only(input: LockfileOnlyInput<'_>) -> miette::R
         }
     }
     let lo_write_kind = source_kind_before.unwrap_or(LockfileKind::Aube);
+    // Same runtime-pin recording as the main install path.
+    crate::runtime::refresh_lockfile_pin(
+        &mut graph,
+        manifest,
+        crate::runtime::RuntimeSettings::from_ctx(settings_ctx),
+        lo_write_kind,
+    )
+    .await?;
     if shared_workspace_lockfile || !has_workspace {
         let lo_written = write_lockfile_dir_remapped(
             lockfile_dir,

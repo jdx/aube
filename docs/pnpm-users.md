@@ -101,13 +101,32 @@ npx pnpm@latest install
 That rewrites `pnpm-lock.yaml` at v9. Commit the result, then switch to
 `aube install`.
 
+## Node runtime management
+
+aube matches pnpm 11's runtime surface: `devEngines.runtime` in
+package.json drives [Node version switching](/package-manager/node-runtime),
+and `aube runtime set node <version>` writes the pin the same way
+`pnpm runtime set` does. The resolved version is recorded in the
+lockfile using pnpm's exact `node@runtime:` shape, so aube and pnpm
+10.14+ can read each other's pins. The deprecated `pnpm env use` has no
+aube equivalent — use `aube runtime set`.
+
+Unlike pnpm, aube also reads `.nvmrc` / `.node-version`, and it
+delegates runtime installs to [mise](https://mise.jdx.dev) when mise is
+installed so you don't keep two copies of Node (see the
+[`runtimeInstaller`](/settings#runtimeinstaller) setting).
+
+aube also manages its own version the way pnpm does
+(`managePackageManagerVersions`, on by default): a
+`packageManager: "aube@<version>"` or `devEngines.packageManager` pin
+re-execs the pinned aube automatically. See
+[Node runtime switching](/package-manager/node-runtime#pinning-aube-itself).
+
 ## Out of scope
 
-aube does not manage Node.js itself. Runtime-management commands like
-`pnpm env`, `pnpm runtime`, `pnpm setup`, and `pnpm self-update` are
-intentionally not implemented — use [mise](https://mise.jdx.dev) to
-install and switch Node versions:
+`pnpm setup` and `pnpm self-update` are intentionally not implemented —
+aube is best installed and updated through [mise](https://mise.jdx.dev):
 
 ```sh
-mise use node@22
+mise use -g aube
 ```

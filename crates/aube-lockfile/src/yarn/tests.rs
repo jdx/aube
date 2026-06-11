@@ -22,6 +22,7 @@ fn make_manifest(deps: &[(&str, &str)], dev: &[(&str, &str)]) -> aube_manifest::
         update_config: None,
         scripts: Default::default(),
         engines: Default::default(),
+        dev_engines: None,
         workspaces: None,
         bundled_dependencies: None,
         extra: Default::default(),

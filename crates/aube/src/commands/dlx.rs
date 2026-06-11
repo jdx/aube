@@ -159,6 +159,13 @@ pub async fn run(args: DlxArgs) -> miette::Result<()> {
         }
     }
 
+    // Resolve the runtime from the *user's* project before switching
+    // into the scratch dir — a dlx scratch project has no version
+    // config, and the OnceCell context is process-global, so resolving
+    // here (original cwd) is what makes `aubx` honor the project's
+    // .nvmrc / devEngines.
+    crate::runtime::ensure_for_cwd(&crate::dirs::cwd()?).await?;
+
     let tmp = tempfile::Builder::new()
         .prefix("aube-dlx-")
         .tempdir()
@@ -216,8 +223,11 @@ pub async fn run(args: DlxArgs) -> miette::Result<()> {
         // globally. Read the same setting here so the scratch bin dir
         // matches where the install actually wrote the bins.
         let bin_dir = super::project_modules_dir(&project_dir).join(".bin");
-        let new_path = aube_scripts::prepend_path(&bin_dir);
+        let mut path_dirs = vec![bin_dir];
+        path_dirs.extend(crate::runtime::path_entries());
+        let new_path = aube_scripts::prepend_paths(&path_dirs);
         let mut cmd = aube_scripts::spawn_shell(&line);
+        crate::runtime::apply_child_env(&mut cmd);
         cmd.env("PATH", &new_path)
             .current_dir(&prev_cwd)
             .stderr(aube_scripts::child_stderr())
@@ -253,11 +263,18 @@ pub async fn run(args: DlxArgs) -> miette::Result<()> {
         // (os error 193). Prefer the `.cmd` shim on Windows; on Unix
         // the bare shim is the executable.
         let exec_path = super::exec::resolve_exec_shim(&bin_path);
-        tokio::process::Command::new(&exec_path)
-            .args(&bin_args)
+        let mut cmd = tokio::process::Command::new(&exec_path);
+        cmd.args(&bin_args)
             .current_dir(&prev_cwd)
-            .stderr(aube_scripts::child_stderr())
-            .status()
+            .stderr(aube_scripts::child_stderr());
+        // Shebang shims resolve `node` through PATH — give them the
+        // switched runtime.
+        let runtime_dirs = crate::runtime::path_entries();
+        if !runtime_dirs.is_empty() {
+            cmd.env("PATH", aube_scripts::prepend_paths(&runtime_dirs));
+        }
+        crate::runtime::apply_child_env(&mut cmd);
+        cmd.status()
             .await
             .into_diagnostic()
             .wrap_err("failed to execute dlx binary")?
