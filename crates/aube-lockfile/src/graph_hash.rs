@@ -38,7 +38,7 @@ use aube_util::collections::FxSet as FxHashSet;
 /// scripts. Implemented by `aube-scripts::BuildPolicy` in practice,
 /// but the hasher stays oblivious to the policy crate so the lockfile
 /// crate doesn't depend on it.
-pub type AllowBuildFn<'a> = &'a dyn Fn(&str, &str) -> bool;
+pub type AllowBuildFn<'a> = &'a dyn Fn(&LockedPackage) -> bool;
 
 /// Engine fingerprint folded into a node's hash when any of its
 /// transitive deps are allowed to build. Callers compute this once
@@ -148,12 +148,7 @@ pub fn compute_graph_hashes_with_patches(
     // allowed to run its scripts. This is the "builds" set.
     let mut builds: FxHashSet<String> = FxHashSet::default();
     for (dep_path, pkg) in &graph.packages {
-        // Feed registry_name to allow_build, not pkg.name. pkg.name
-        // could be an npm: alias from the manifest. Allowlist pins
-        // the real name. Without this, an aliased import smuggles
-        // past the allowlist. Same fix applied at every policy.decide
-        // callsite in aube/ (install/mod.rs, ignored_builds.rs).
-        if allow_build(pkg.registry_name(), &pkg.version) {
+        if allow_build(pkg) {
             builds.insert(dep_path.clone());
         }
     }
@@ -359,8 +354,8 @@ mod tests {
             "foo@1.0.0".into(),
             mk_pkg("foo", "1.0.0", Some("sha512-ABC")),
         );
-        let h1 = compute_graph_hashes(&g, &|_, _| false, None);
-        let h2 = compute_graph_hashes(&g, &|_, _| false, None);
+        let h1 = compute_graph_hashes(&g, &|_| false, None);
+        let h2 = compute_graph_hashes(&g, &|_| false, None);
         assert_eq!(h1.node_hash, h2.node_hash);
     }
 
@@ -372,8 +367,8 @@ mod tests {
         let mut g2 = empty_graph();
         g2.packages
             .insert("foo@1.0.0".into(), mk_pkg("foo", "1.0.0", Some("sha512-B")));
-        let h1 = compute_graph_hashes(&g1, &|_, _| false, None);
-        let h2 = compute_graph_hashes(&g2, &|_, _| false, None);
+        let h1 = compute_graph_hashes(&g1, &|_| false, None);
+        let h2 = compute_graph_hashes(&g2, &|_| false, None);
         assert_ne!(h1.node_hash["foo@1.0.0"], h2.node_hash["foo@1.0.0"]);
     }
 
@@ -396,8 +391,8 @@ mod tests {
             mk_pkg("bar", "1.0.0", Some("sha512-B2")),
         );
 
-        let h1 = compute_graph_hashes(&g1, &|_, _| false, None);
-        let h2 = compute_graph_hashes(&g2, &|_, _| false, None);
+        let h1 = compute_graph_hashes(&g1, &|_| false, None);
+        let h2 = compute_graph_hashes(&g2, &|_| false, None);
         assert_ne!(h1.node_hash["foo@1.0.0"], h2.node_hash["foo@1.0.0"]);
         assert_ne!(h1.node_hash["bar@1.0.0"], h2.node_hash["bar@1.0.0"]);
     }
@@ -419,7 +414,7 @@ mod tests {
             .insert("native".into(), "1.0.0".into());
         g.packages.insert("consumer@1.0.0".into(), consumer);
 
-        let allow_native = |name: &str, _v: &str| name == "native";
+        let allow_native = |pkg: &LockedPackage| pkg.registry_name() == "native";
         let engine_a = EngineName("linux-x64-node20".into());
         let engine_b = EngineName("linux-x64-node22".into());
 
@@ -447,7 +442,7 @@ mod tests {
         g.packages.insert("a@1.0.0".into(), a);
         g.packages.insert("b@1.0.0".into(), b);
 
-        let h = compute_graph_hashes(&g, &|_, _| false, None);
+        let h = compute_graph_hashes(&g, &|_| false, None);
         assert!(h.node_hash.contains_key("a@1.0.0"));
         assert!(h.node_hash.contains_key("b@1.0.0"));
     }

@@ -158,7 +158,7 @@ pub(super) fn collect_ignored(project_dir: &std::path::Path) -> miette::Result<V
         // real pkg name. npm: alias would sneak past otherwise. Same
         // fix as every other policy.decide callsite.
         if matches!(
-            policy.decide(pkg.registry_name(), &pkg.version),
+            policy.decide_package(pkg.registry_name(), &pkg.version, pkg.source_approval_key()),
             aube_scripts::AllowDecision::Allow
         ) {
             continue;

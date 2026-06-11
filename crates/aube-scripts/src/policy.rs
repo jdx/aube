@@ -51,6 +51,11 @@ pub struct BuildPolicy {
     /// `name@version` strings (match that specific version).
     allowed: HashSet<String>,
     denied: HashSet<String>,
+    /// Exact source-backed lockfile IDs such as `pkg@file+abc123`.
+    /// These are intentionally separate from normal `name@version`
+    /// entries so a typo like `pkg@latest` still warns.
+    allowed_sources: HashSet<String>,
+    denied_sources: HashSet<String>,
     /// Bare-name patterns containing `*` wildcards. Checked with a
     /// linear scan after the exact-match sets; wildcard rules are rare
     /// enough that the linear pass is cheaper than building an
@@ -94,6 +99,8 @@ impl BuildPolicy {
         }
         let mut allowed = HashSet::new();
         let mut denied = HashSet::new();
+        let mut allowed_sources = HashSet::new();
+        let mut denied_sources = HashSet::new();
         let mut allowed_wildcards = Vec::new();
         let mut denied_wildcards = Vec::new();
         let mut warnings = Vec::new();
@@ -127,7 +134,12 @@ impl BuildPolicy {
                     } else {
                         (&mut denied, &mut denied_wildcards)
                     };
-                    sort_entries(expanded, exact, wild);
+                    let source = if bool_value {
+                        &mut allowed_sources
+                    } else {
+                        &mut denied_sources
+                    };
+                    sort_entries(expanded, exact, source, wild);
                 }
                 Err(e) => warnings.push(e),
             }
@@ -140,13 +152,23 @@ impl BuildPolicy {
         // format.
         for pattern in only_built {
             match expand_spec(pattern) {
-                Ok(expanded) => sort_entries(expanded, &mut allowed, &mut allowed_wildcards),
+                Ok(expanded) => sort_entries(
+                    expanded,
+                    &mut allowed,
+                    &mut allowed_sources,
+                    &mut allowed_wildcards,
+                ),
                 Err(e) => warnings.push(e),
             }
         }
         for pattern in never_built {
             match expand_spec(pattern) {
-                Ok(expanded) => sort_entries(expanded, &mut denied, &mut denied_wildcards),
+                Ok(expanded) => sort_entries(
+                    expanded,
+                    &mut denied,
+                    &mut denied_sources,
+                    &mut denied_wildcards,
+                ),
                 Err(e) => warnings.push(e),
             }
         }
@@ -156,6 +178,8 @@ impl BuildPolicy {
                 allow_all: false,
                 allowed,
                 denied,
+                allowed_sources,
+                denied_sources,
                 allowed_wildcards,
                 denied_wildcards,
             },
@@ -166,11 +190,17 @@ impl BuildPolicy {
     /// Build an allow-all policy with explicit package-pattern denies.
     pub fn denylist(denied_patterns: &[String]) -> (Self, Vec<BuildPolicyError>) {
         let mut denied = HashSet::new();
+        let mut denied_sources = HashSet::new();
         let mut denied_wildcards = Vec::new();
         let mut warnings = Vec::new();
         for pattern in denied_patterns {
             match expand_spec(pattern) {
-                Ok(expanded) => sort_entries(expanded, &mut denied, &mut denied_wildcards),
+                Ok(expanded) => sort_entries(
+                    expanded,
+                    &mut denied,
+                    &mut denied_sources,
+                    &mut denied_wildcards,
+                ),
                 Err(e) => warnings.push(e),
             }
         }
@@ -179,6 +209,8 @@ impl BuildPolicy {
                 allow_all: true,
                 allowed: HashSet::new(),
                 denied,
+                allowed_sources: HashSet::new(),
+                denied_sources,
                 allowed_wildcards: Vec::new(),
                 denied_wildcards,
             },
@@ -189,6 +221,22 @@ impl BuildPolicy {
     /// Decide whether `(name, version)` may run lifecycle scripts.
     /// Explicit denies always win over allows (mirrors pnpm).
     pub fn decide(&self, name: &str, version: &str) -> AllowDecision {
+        self.decide_package(name, version, None)
+    }
+
+    /// Decide whether a package may run lifecycle scripts, with an
+    /// optional source identity for non-registry packages.
+    ///
+    /// Bare package-name approvals only apply to registry packages.
+    /// Source-backed packages (`file:`, `git:`, direct tarball, etc.)
+    /// require an exact source key such as `pkg@file+abc123`; otherwise
+    /// a trusted package name could approve arbitrary untrusted bytes.
+    pub fn decide_package(
+        &self,
+        name: &str,
+        version: &str,
+        source_key: Option<&str>,
+    ) -> AllowDecision {
         // Reusable thread-local buffer for the `name@version` probe key.
         // Avoids a `format!` allocation on every call — ~2k throwaway
         // Strings on a typical install otherwise.
@@ -199,6 +247,11 @@ impl BuildPolicy {
             return AllowDecision::Deny;
         }
         if matches_any_wildcard(name, &self.denied_wildcards) {
+            return AllowDecision::Deny;
+        }
+        if let Some(source_key) = source_key
+            && self.denied_sources.contains(source_key)
+        {
             return AllowDecision::Deny;
         }
         // Build the `name@version` probe key once and answer both the
@@ -217,6 +270,13 @@ impl BuildPolicy {
         if self.allow_all {
             return AllowDecision::Allow;
         }
+        if let Some(source_key) = source_key {
+            return if self.allowed_sources.contains(source_key) {
+                AllowDecision::Allow
+            } else {
+                AllowDecision::Unspecified
+            };
+        }
         if self.allowed.contains(name) || allowed_versioned {
             return AllowDecision::Allow;
         }
@@ -230,7 +290,10 @@ impl BuildPolicy {
     /// allow-all mode. Lets callers cheaply skip the whole dep-script
     /// phase when nothing could possibly run.
     pub fn has_any_allow_rule(&self) -> bool {
-        self.allow_all || !self.allowed.is_empty() || !self.allowed_wildcards.is_empty()
+        self.allow_all
+            || !self.allowed.is_empty()
+            || !self.allowed_sources.is_empty()
+            || !self.allowed_wildcards.is_empty()
     }
 
     /// Merge another resolved policy into this one. Denies from either
@@ -239,6 +302,10 @@ impl BuildPolicy {
         self.allow_all |= other.allow_all;
         self.allowed.extend(other.allowed.iter().cloned());
         self.denied.extend(other.denied.iter().cloned());
+        self.allowed_sources
+            .extend(other.allowed_sources.iter().cloned());
+        self.denied_sources
+            .extend(other.denied_sources.iter().cloned());
         merge_unique(&mut self.allowed_wildcards, &other.allowed_wildcards);
         merge_unique(&mut self.denied_wildcards, &other.denied_wildcards);
     }
@@ -271,12 +338,19 @@ pub fn pattern_matches(pattern: &str, name: &str, version: &str) -> Result<bool,
 /// and the wildcard list. Wildcards are identified by a literal `*` in
 /// the string; since `expand_spec` rejects `wildcard@version`, a `*`
 /// can only appear in a bare name.
-fn sort_entries(entries: Vec<String>, exact: &mut HashSet<String>, wildcards: &mut Vec<String>) {
+fn sort_entries(
+    entries: Vec<String>,
+    exact: &mut HashSet<String>,
+    sources: &mut HashSet<String>,
+    wildcards: &mut Vec<String>,
+) {
     for entry in entries {
         if entry.contains('*') {
             if !wildcards.iter().any(|p| p == &entry) {
                 wildcards.push(entry);
             }
+        } else if is_source_key(&entry) {
+            sources.insert(entry);
         } else {
             exact.insert(entry);
         }
@@ -363,12 +437,27 @@ fn expand_spec(pattern: &str) -> Result<Vec<String>, BuildPolicyError> {
     let mut out = Vec::new();
     for raw in versions_part.split("||") {
         let trimmed = raw.trim();
+        if is_source_version(trimmed) && !versions_part.contains("||") {
+            out.push(format!("{name}@{trimmed}"));
+            return Ok(out);
+        }
         if trimmed.is_empty() || !is_exact_semver(trimmed) {
             return Err(BuildPolicyError::InvalidVersionUnion(pattern.to_string()));
         }
         out.push(format!("{name}@{trimmed}"));
     }
     Ok(out)
+}
+
+fn is_source_key(key: &str) -> bool {
+    let (_, version) = split_name_and_versions(key);
+    is_source_version(version)
+}
+
+fn is_source_version(version: &str) -> bool {
+    ["file+", "link+", "portal+", "exec+", "git+", "url+"]
+        .iter()
+        .any(|prefix| version.starts_with(prefix))
 }
 
 /// Split `pattern` into `(name, version_spec)`, respecting a leading
@@ -423,6 +512,38 @@ mod tests {
         assert_eq!(p.decide("esbuild", "0.19.0"), AllowDecision::Allow);
         assert_eq!(p.decide("esbuild", "0.25.0"), AllowDecision::Allow);
         assert_eq!(p.decide("rollup", "4.0.0"), AllowDecision::Unspecified);
+    }
+
+    #[test]
+    fn bare_name_does_not_allow_source_backed_package() {
+        let p = policy(&[("esbuild", true)]);
+        assert_eq!(
+            p.decide_package("esbuild", "0.25.0", Some("esbuild@file+abc123")),
+            AllowDecision::Unspecified
+        );
+    }
+
+    #[test]
+    fn exact_source_key_allows_source_backed_package() {
+        let p = policy(&[("esbuild@file+abc123", true)]);
+        assert_eq!(
+            p.decide_package("esbuild", "0.25.0", Some("esbuild@file+abc123")),
+            AllowDecision::Allow
+        );
+        assert_eq!(
+            p.decide_package("esbuild", "0.25.0", Some("esbuild@file+def456")),
+            AllowDecision::Unspecified
+        );
+        assert_eq!(p.decide("esbuild", "0.25.0"), AllowDecision::Unspecified);
+    }
+
+    #[test]
+    fn source_backed_package_name_deny_still_wins() {
+        let p = policy(&[("esbuild", false), ("esbuild@file+abc123", true)]);
+        assert_eq!(
+            p.decide_package("esbuild", "0.25.0", Some("esbuild@file+abc123")),
+            AllowDecision::Deny
+        );
     }
 
     #[test]

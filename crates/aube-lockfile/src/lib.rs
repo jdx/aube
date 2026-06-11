@@ -381,6 +381,23 @@ impl LockedPackage {
     pub fn spec_key(&self) -> String {
         format!("{}@{}", self.name, self.version)
     }
+
+    /// Exact approval key for non-registry package sources.
+    ///
+    /// Name-wide build approvals are only trustworthy for packages
+    /// fetched from a registry. Source-backed entries need to be
+    /// approved by their lockfile identity, with any peer suffix
+    /// stripped so the approval survives peer-context reshuffling.
+    pub fn source_approval_key(&self) -> Option<&str> {
+        if self.local_source.is_none() && !self.registry_git_hosted {
+            return None;
+        }
+        Some(
+            self.dep_path
+                .split_once('(')
+                .map_or(&self.dep_path, |(base, _)| base),
+        )
+    }
 }
 
 /// Metadata about a single declared peer dependency. Matches the shape of
