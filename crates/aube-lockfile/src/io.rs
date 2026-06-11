@@ -407,15 +407,14 @@ fn parse_one(
 fn validate_resolution_shapes(path: &Path, graph: &LockfileGraph) -> Result<(), Error> {
     for (dep_path, pkg) in &graph.packages {
         if pkg.local_source.is_some() && dep_path_has_registry_version(dep_path, &pkg.name) {
-            return Err(Error::ResolutionShapeMismatch {
-                path: path.to_path_buf(),
-                dep_path: dep_path.clone(),
-                source_kind: pkg
-                    .local_source
+            return Err(Error::ResolutionShapeMismatch(
+                path.to_path_buf(),
+                dep_path.clone(),
+                pkg.local_source
                     .as_ref()
                     .map(|source| source.kind_str())
                     .unwrap_or("unknown"),
-            });
+            ));
         }
     }
     Ok(())
@@ -538,20 +537,14 @@ pub enum Error {
     #[error("failed to parse lockfile {0}: {1}")]
     #[diagnostic(code(ERR_AUBE_LOCKFILE_PARSE))]
     Parse(std::path::PathBuf, String),
-    #[error(
-        "lockfile {path} has registry-style dependency path `{dep_path}` backed by {source_kind} resolution"
-    )]
+    #[error("lockfile {0} has registry-style dependency path `{1}` backed by {2} resolution")]
     #[diagnostic(
         code(ERR_AUBE_RESOLUTION_SHAPE_MISMATCH),
         help(
             "run `aube install --no-frozen-lockfile` from a trusted manifest to regenerate the lockfile"
         )
     )]
-    ResolutionShapeMismatch {
-        path: std::path::PathBuf,
-        dep_path: String,
-        source_kind: &'static str,
-    },
+    ResolutionShapeMismatch(std::path::PathBuf, String, &'static str),
     /// Deserialization failure with a byte offset into the source
     /// content, so miette's `fancy` handler can draw a pointer at the
     /// offending byte of the lockfile. Reuses `aube_manifest`'s
@@ -650,11 +643,8 @@ mod parse_diag_tests {
         let err = validate_resolution_shapes(Path::new("pnpm-lock.yaml"), &graph).unwrap_err();
         assert!(matches!(
             err,
-            Error::ResolutionShapeMismatch {
-                dep_path,
-                source_kind: "file",
-                ..
-            } if dep_path == "left-pad@1.3.0"
+            Error::ResolutionShapeMismatch(_, dep_path, "file")
+                if dep_path == "left-pad@1.3.0"
         ));
     }
 
@@ -679,11 +669,8 @@ mod parse_diag_tests {
         let err = validate_resolution_shapes(Path::new("pnpm-lock.yaml"), &graph).unwrap_err();
         assert!(matches!(
             err,
-            Error::ResolutionShapeMismatch {
-                dep_path,
-                source_kind: "url",
-                ..
-            } if dep_path == "plugin@1.0.0(react@19.0.0)"
+            Error::ResolutionShapeMismatch(_, dep_path, "url")
+                if dep_path == "plugin@1.0.0(react@19.0.0)"
         ));
     }
 
