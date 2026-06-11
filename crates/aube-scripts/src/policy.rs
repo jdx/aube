@@ -455,9 +455,25 @@ fn is_source_key(key: &str) -> bool {
 }
 
 fn is_source_version(version: &str) -> bool {
-    ["file+", "link+", "portal+", "exec+", "git+", "url+"]
-        .iter()
-        .any(|prefix| version.starts_with(prefix))
+    [
+        "file+",
+        "link+",
+        "portal+",
+        "exec+",
+        "git+",
+        "url+",
+        "file:",
+        "link:",
+        "portal:",
+        "exec:",
+        "git:",
+        "http://",
+        "https://",
+        "github:",
+        "workspace:",
+    ]
+    .iter()
+    .any(|prefix| version.starts_with(prefix))
 }
 
 /// Split `pattern` into `(name, version_spec)`, respecting a leading
@@ -535,6 +551,36 @@ mod tests {
             AllowDecision::Unspecified
         );
         assert_eq!(p.decide("esbuild", "0.25.0"), AllowDecision::Unspecified);
+    }
+
+    #[test]
+    fn source_keys_accept_url_and_git_tails() {
+        let p = policy(&[
+            ("native@url+abc123", true),
+            ("gitdep@git+def456", true),
+            ("raw-url@https://example.com/pkg.tgz", true),
+            ("raw-git@github:owner/repo", true),
+        ]);
+        assert_eq!(
+            p.decide_package("native", "1.0.0", Some("native@url+abc123")),
+            AllowDecision::Allow
+        );
+        assert_eq!(
+            p.decide_package("gitdep", "1.0.0", Some("gitdep@git+def456")),
+            AllowDecision::Allow
+        );
+        assert_eq!(
+            p.decide_package(
+                "raw-url",
+                "1.0.0",
+                Some("raw-url@https://example.com/pkg.tgz")
+            ),
+            AllowDecision::Allow
+        );
+        assert_eq!(
+            p.decide_package("raw-git", "1.0.0", Some("raw-git@github:owner/repo")),
+            AllowDecision::Allow
+        );
     }
 
     #[test]

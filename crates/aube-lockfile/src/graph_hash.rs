@@ -285,16 +285,23 @@ fn transitively_requires_build(
 }
 
 /// `full_pkg_id` — pnpm uses `${pkgIdWithPatchHash}:${resolution}`; we
-/// use `${name}@${version}[:patch:<hex>]:${integrity}`. Packages
-/// without integrity (workspace or git deps in pnpm's lockfile) fall
-/// back to `<no-integrity>` which keeps the hash deterministic
-/// without perfectly encoding identity — good enough until those
-/// sources actually matter.
+/// use `${name}@${version}[:patch:<hex>]:${source?}:${integrity}`.
+/// Source-backed packages fold in their stable specifier so two local
+/// or git dependencies with the same manifest version don't collapse
+/// onto the same graph hash when they point at different bytes.
 fn full_pkg_id(pkg: &LockedPackage, patch_hash: PatchHashFn<'_>) -> String {
     let integrity = pkg.integrity.as_deref().unwrap_or("<no-integrity>");
+    let source = pkg
+        .local_source
+        .as_ref()
+        .map(|source| format!(":source:{}", source.specifier()))
+        .unwrap_or_default();
     match patch_hash(&pkg.name, &pkg.version) {
-        Some(hex) => format!("{}@{}:patch:{hex}:{integrity}", pkg.name, pkg.version),
-        None => format!("{}@{}:{}", pkg.name, pkg.version, integrity),
+        Some(hex) => format!(
+            "{}@{}:patch:{hex}{source}:{integrity}",
+            pkg.name, pkg.version
+        ),
+        None => format!("{}@{}{source}:{}", pkg.name, pkg.version, integrity),
     }
 }
 
@@ -322,7 +329,8 @@ struct DepsHashInput<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DirectDep, LockedPackage, LockfileGraph};
+    use crate::{DirectDep, LocalSource, LockedPackage, LockfileGraph};
+    use std::path::PathBuf;
 
     fn mk_pkg(name: &str, ver: &str, integrity: Option<&str>) -> LockedPackage {
         LockedPackage {
@@ -395,6 +403,40 @@ mod tests {
         let h2 = compute_graph_hashes(&g2, &|_| false, None);
         assert_ne!(h1.node_hash["foo@1.0.0"], h2.node_hash["foo@1.0.0"]);
         assert_ne!(h1.node_hash["bar@1.0.0"], h2.node_hash["bar@1.0.0"]);
+    }
+
+    #[test]
+    fn source_change_cascades_to_parent() {
+        let mut g1 = empty_graph();
+        let mut parent = mk_pkg("parent", "1.0.0", Some("sha512-P"));
+        parent
+            .dependencies
+            .insert("child".into(), "file+aaa".into());
+        g1.packages.insert("parent@1.0.0".into(), parent);
+        let mut child = mk_pkg("child", "1.0.0", None);
+        child.dep_path = "child@file+aaa".into();
+        child.local_source = Some(LocalSource::Directory(PathBuf::from("vendor/a")));
+        g1.packages.insert("child@file+aaa".into(), child);
+
+        let mut g2 = empty_graph();
+        let mut parent = mk_pkg("parent", "1.0.0", Some("sha512-P"));
+        parent
+            .dependencies
+            .insert("child".into(), "file+bbb".into());
+        g2.packages.insert("parent@1.0.0".into(), parent);
+        let mut child = mk_pkg("child", "1.0.0", None);
+        child.dep_path = "child@file+bbb".into();
+        child.local_source = Some(LocalSource::Directory(PathBuf::from("vendor/b")));
+        g2.packages.insert("child@file+bbb".into(), child);
+
+        let h1 = compute_graph_hashes(&g1, &|_| false, None);
+        let h2 = compute_graph_hashes(&g2, &|_| false, None);
+
+        assert_ne!(
+            h1.node_hash["child@file+aaa"],
+            h2.node_hash["child@file+bbb"]
+        );
+        assert_ne!(h1.node_hash["parent@1.0.0"], h2.node_hash["parent@1.0.0"]);
     }
 
     #[test]
