@@ -198,6 +198,23 @@ pub async fn run(opts: InstallOptions) -> miette::Result<()> {
     // order.
     let workspace_catalogs = super::discover_catalogs(&cwd)?;
     let settings_ctx = files.ctx(&raw_workspace, &opts.env_snapshot, &opts.cli_flags);
+    // Resolve the project's Node runtime before anything can spawn
+    // node: the root `preinstall` hooks below must already run on the
+    // switched runtime, and the virtual-store keys downstream fold
+    // the node major in. The lockfile pin (when recorded) wins over
+    // the manifest range, and `--offline` blocks runtime downloads
+    // the same way it blocks registry fetches.
+    let mut runtime_settings = crate::runtime::RuntimeSettings::from_ctx(&settings_ctx);
+    if opts.network_mode == aube_registry::NetworkMode::Offline {
+        runtime_settings.network = aube_runtime::NetworkMode::Offline;
+    }
+    crate::runtime::ensure(
+        &cwd,
+        Some(&manifest),
+        runtime_settings,
+        crate::runtime::lockfile_node_pin(&cwd, &manifest).as_ref(),
+    )
+    .await?;
     super::configure_script_settings(&settings_ctx);
 
     let layout::InstallLayoutConfig {
@@ -618,7 +635,7 @@ pub async fn run(opts: InstallOptions) -> miette::Result<()> {
             let network_mode = opts.network_mode;
             let cwd_for_client = cwd.clone();
 
-            let lock_node_version = crate::engines::resolve_node_version(
+            let lock_node_version = crate::engines::effective_node_version(
                 aube_settings::resolved::node_version(&settings_ctx).as_deref(),
             );
             let lock_build_policy = std::sync::Arc::new(build_policy.clone());
@@ -724,7 +741,7 @@ pub async fn run(opts: InstallOptions) -> miette::Result<()> {
             // await) can compute the same graph hashes the link phase
             // will. Keeping a single source of truth avoids any
             // subdir-name drift between prewarm and link step 1.
-            let node_version_for_prewarm = crate::engines::resolve_node_version(
+            let node_version_for_prewarm = crate::engines::effective_node_version(
                 aube_settings::resolved::node_version(&settings_ctx).as_deref(),
             );
             let build_policy_for_prewarm = std::sync::Arc::new(build_policy.clone());
@@ -1472,6 +1489,15 @@ pub async fn run(opts: InstallOptions) -> miette::Result<()> {
                     }
                 }
                 let write_kind = source_kind_before.unwrap_or(aube_lockfile::LockfileKind::Aube);
+                // Record/refresh the devEngines runtime pin before the
+                // graph hits disk (pnpm 10.14+ parity).
+                crate::runtime::refresh_lockfile_pin(
+                    &mut graph,
+                    &manifest,
+                    crate::runtime::RuntimeSettings::from_ctx(&settings_ctx),
+                    write_kind,
+                )
+                .await?;
                 if shared_workspace_lockfile || !has_workspace {
                     let written_path = write_lockfile_dir_remapped(
                         &lockfile_dir,
@@ -1707,7 +1733,7 @@ pub async fn run(opts: InstallOptions) -> miette::Result<()> {
     let (jail_policy, jail_policy_warnings) =
         JailBuildPolicy::from_settings(&settings_ctx, &ws_config_shared);
     let node_version_override = aube_settings::resolved::node_version(&settings_ctx);
-    let node_version = crate::engines::resolve_node_version(node_version_override.as_deref());
+    let node_version = crate::engines::effective_node_version(node_version_override.as_deref());
     crate::engines::run_checks(
         &aube_dir,
         &manifest,

@@ -48,14 +48,13 @@ The recommended path is mise:
 mise use -g aube
 ```
 
-mise can also manage the [Node.js versions](https://mise.jdx.dev/lang/node.html)
-your projects need. If your projects already pin Node through `package.json`
-(`devEngines.runtime`), `.nvmrc`, or `.node-version`, enable mise's
-idiomatic version-file support for Node:
-
-```sh
-mise settings add idiomatic_version_file_enable_tools node
-```
+aube switches [Node.js versions](https://aube.jdx.dev/package-manager/node-runtime)
+itself: if a project pins Node through `package.json`
+(`devEngines.runtime`), `.nvmrc`, or `.node-version`, every script and
+binary run through aube gets that version — no shims or shell hooks.
+When a pinned version is missing, aube delegates the install to mise if
+you have it (one shared Node store on disk) and downloads from
+nodejs.org otherwise.
 
 Check that it is on your `PATH`:
 
@@ -203,7 +202,7 @@ If a project already uses `pnpm-workspace.yaml`, aube can read and write it. New
 | File | Reads | Writes in place |
 | --- | --- | --- |
 | `aube-lock.yaml` | yes | yes |
-| `pnpm-lock.yaml` v9 | yes | yes |
+| `pnpm-lock.yaml` v9 (written by pnpm 9–11) | yes | yes |
 | `package-lock.json` v2/v3 | yes | yes |
 | `npm-shrinkwrap.json` | yes | yes |
 | `yarn.lock` (v1 classic + v2+ berry) | yes | yes |
@@ -259,7 +258,7 @@ aube store path
 aube store prune
 ```
 
-Some pnpm commands are intentionally out of scope. Runtime-management commands such as `env`, `runtime`, `setup`, and `self-update` belong in tools like mise. Registry account helpers such as `whoami`, `token`, `owner`, `search`, `pkg`, and `set-script` are compatibility stubs that point you to the npm command instead.
+aube also matches pnpm 11's runtime surface: `aube runtime set node <version>` pins a Node version in `devEngines.runtime` and the lockfile, and `aube runtime list` shows what a project resolves to. Some pnpm commands are intentionally out of scope: `setup` and `self-update` belong in tools like mise, and registry account helpers such as `whoami`, `token`, `owner`, `search`, `pkg`, and `set-script` are compatibility stubs that point you to the npm command instead.
 
 ## Learn More
 

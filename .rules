@@ -23,7 +23,7 @@ lockfile:
   precedence[6]: aube-lock.yaml, pnpm-lock.yaml, bun.lock, yarn.lock, npm-shrinkwrap.json, package-lock.json
   frozen_fast_path: install/frozen.rs short-circuits when lockfile + install state match
 
-crates[11]{name,role}:
+crates[12]{name,role}:
   aube,CLI binary, clap dispatch, all command impls, progress UI, state tracking
   aube-codes,stable ERR_AUBE_*/WARN_AUBE_* code constants + EXIT_TABLE, no runtime deps, every other crate depends on it
   aube-settings,build.rs codegen from settings.toml, typed accessors, ResolveCtx (cli > env > npmrc > workspace > default)
@@ -35,6 +35,7 @@ crates[11]{name,role}:
   aube-manifest,package.json parser, workspace glob support, extra: BTreeMap for upstream forward-compat
   aube-scripts,root lifecycle runner, BuildPolicy allowlist for dep scripts (default deny), side-effects cache
   aube-workspace,pnpm-workspace.yaml discovery, workspace: protocol resolution
+  aube-runtime,Node version resolution/discovery/install (devEngines.runtime + .nvmrc/.node-version, mise delegation, nodejs.org downloads to $XDG_DATA_HOME/aube/nodejs/, AUBE_RUNTIME_DIR test override)
 
 pipeline:
   install: cli -> resolver (+ lockfile read) -> registry (fetch tarballs) -> store (CAS import) -> linker (virtual store + symlinks) -> scripts (root only by default)

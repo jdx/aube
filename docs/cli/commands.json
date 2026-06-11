@@ -9034,6 +9034,130 @@
         ],
         "examples": []
       },
+      "runtime": {
+        "full_cmd": [
+          "runtime"
+        ],
+        "usage": "runtime <SUBCOMMAND>",
+        "subcommands": {
+          "list": {
+            "full_cmd": [
+              "runtime",
+              "list"
+            ],
+            "usage": "runtime list",
+            "subcommands": {},
+            "args": [],
+            "flags": [],
+            "mounts": [],
+            "hide": false,
+            "help": "Show the resolved runtime and installed versions",
+            "name": "list",
+            "aliases": [
+              "ls"
+            ],
+            "hidden_aliases": [],
+            "examples": []
+          },
+          "set": {
+            "full_cmd": [
+              "runtime",
+              "set"
+            ],
+            "usage": "runtime set [FLAGS] <NAME> <VERSION>",
+            "subcommands": {},
+            "args": [
+              {
+                "name": "NAME",
+                "usage": "<NAME>",
+                "help": "Runtime name (only `node` is supported)",
+                "help_first_line": "Runtime name (only `node` is supported)",
+                "required": true,
+                "double_dash": "Optional",
+                "hide": false
+              },
+              {
+                "name": "VERSION",
+                "usage": "<VERSION>",
+                "help": "Version request: an exact version, a range (`^24`, `22`), `lts`, `latest`, or an LTS codename (`lts/jod`)",
+                "help_first_line": "Version request: an exact version, a range (`^24`, `22`), `lts`, `latest`, or an LTS codename (`lts/jod`)",
+                "required": true,
+                "double_dash": "Optional",
+                "hide": false
+              }
+            ],
+            "flags": [
+              {
+                "name": "global",
+                "usage": "-g --global",
+                "help": "Install for the user instead of the project (delegates to `mise use -g node@<version>` when mise manages installs)",
+                "help_first_line": "Install for the user instead of the project (delegates to `mise use -g node@<version>` when mise manages installs)",
+                "short": [
+                  "g"
+                ],
+                "long": [
+                  "global"
+                ],
+                "hide": false,
+                "global": false
+              },
+              {
+                "name": "on-fail",
+                "usage": "--on-fail <POLICY>",
+                "help": "`onFail` policy written to devEngines.runtime",
+                "help_first_line": "`onFail` policy written to devEngines.runtime",
+                "short": [],
+                "long": [
+                  "on-fail"
+                ],
+                "hide": false,
+                "global": false,
+                "arg": {
+                  "name": "POLICY",
+                  "usage": "<POLICY>",
+                  "required": true,
+                  "double_dash": "Optional",
+                  "hide": false
+                },
+                "default": [
+                  "download"
+                ]
+              },
+              {
+                "name": "save-exact",
+                "usage": "--save-exact",
+                "help": "Pin the exact resolved version instead of a caret range",
+                "help_first_line": "Pin the exact resolved version instead of a caret range",
+                "short": [],
+                "long": [
+                  "save-exact"
+                ],
+                "hide": false,
+                "global": false
+              }
+            ],
+            "mounts": [],
+            "hide": false,
+            "help": "Pin a runtime in package.json devEngines.runtime and install it",
+            "name": "set",
+            "aliases": [],
+            "hidden_aliases": [],
+            "examples": []
+          }
+        },
+        "args": [],
+        "flags": [],
+        "mounts": [],
+        "hide": false,
+        "subcommand_required": true,
+        "help": "Manage the project's Node.js runtime (pin, install, inspect)",
+        "name": "runtime",
+        "aliases": [
+          "rt"
+        ],
+        "hidden_aliases": [],
+        "examples": []
+      },
       "sbom": {
         "full_cmd": [
           "sbom"

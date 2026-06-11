@@ -100,7 +100,7 @@ Aube generates this page from [`settings.toml`](https://github.com/jdx/aube/blob
 | [`npmPath`](#setting-npmpath) | `path` | Path to the npm binary aube should shell out to when needed. |
 | [`packageManagerStrict`](#setting-packagemanagerstrict) | `"off" \| "warn" \| "error" \| true \| false` | Enforce the `packageManager` field in package.json (`off` \| `warn` \| `error`). |
 | [`packageManagerStrictVersion`](#setting-packagemanagerstrictversion) | `bool` | Enforce the exact `packageManager` version from package.json. |
-| [`managePackageManagerVersions`](#setting-managepackagemanagerversions) | `bool` | Auto-download the specified pnpm version when mismatched. |
+| [`managePackageManagerVersions`](#setting-managepackagemanagerversions) | `bool` | Switch to the aube version pinned by `packageManager` / `devEngines.packageManager`, downloading it when missing. |
 | [`ignoreScripts`](#setting-ignorescripts) | `bool` | Skip all lifecycle scripts in package.json. |
 | [`childConcurrency`](#setting-childconcurrency) | `int` | Maximum number of concurrent script-executing child processes. |
 | [`sideEffectsCache`](#setting-sideeffectscache) | `bool` | Cache the results of install hooks. |
@@ -116,6 +116,8 @@ Aube generates this page from [`settings.toml`](https://github.com/jdx/aube/blob
 | [`dangerouslyAllowAllBuilds`](#setting-dangerouslyallowallbuilds) | `bool` | Allow all dependency build scripts automatically. |
 | [`nodeVersion`](#setting-nodeversion) | `string` | Node.js version aube reports when evaluating `engines` checks. |
 | [`nodeDownloadMirrors`](#setting-nodedownloadmirrors) | `object` | Custom Node.js download mirror URLs. |
+| [`runtimeInstaller`](#setting-runtimeinstaller) | `"auto" \| "mise" \| "aube"` | Who installs a missing runtime: Node.js versions and, with `managePackageManagerVersions`, pinned aube versions. |
+| [`runtimeOnFail`](#setting-runtimeonfail) | `"download" \| "error" \| "warn" \| "ignore"` | Override the `onFail` policy applied when the active Node.js doesn't satisfy the project's runtime requirement. |
 | [`savePrefix`](#setting-saveprefix) | `"^" \| "~" \| ""` | Version prefix used when installing a package. |
 | [`linkWorkspacePackages`](#setting-linkworkspacepackages) | `"false" \| "true" \| "deep"` | Resolve `aube add &lt;name&gt;` against local workspace siblings before falling back to the registry. |
 | [`saveWorkspaceProtocol`](#setting-saveworkspaceprotocol) | `"true" \| "false" \| "rolling"` | Spec form written to `package.json` when `aube add` resolves against a workspace sibling. |
@@ -2009,14 +2011,24 @@ When enabled, `packageManager: "aube@<version>"` must match the running aube ver
 
 ### `managePackageManagerVersions` {#setting-managepackagemanagerversions}
 
-Auto-download the specified pnpm version when mismatched.
+Switch to the aube version pinned by `packageManager` / `devEngines.packageManager`, downloading it when missing.
 
 - Type: `bool`
 - Default: `true`
 - Environment: `npm_config_manage_package_manager_versions`, `NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS`, `AUBE_MANAGE_PACKAGE_MANAGER_VERSIONS`
-- .npmrc keys: `managePackageManagerVersions`, `manage-package-manager-versions`
+- .npmrc keys: `manage-package-manager-versions`, `managePackageManagerVersions`
+- Workspace YAML keys: `managePackageManagerVersions`
 
-Accepted for pnpm parity. aube does not download or re-exec other package-manager versions; when exact version enforcement is enabled, mismatches are reported instead.
+pnpm parity (corepack semantics). When the project pins aube —
+`packageManager: "aube@1.17.2"` (exact) or
+`devEngines.packageManager: {name: "aube", version: "^1.17"}` (ranges
+allowed) — and the running aube doesn't satisfy the pin, aube locates
+or installs the pinned version (mise installs are reused;
+`runtimeInstaller` controls who downloads) and re-execs it with the
+same arguments. Set to `false` for validation-only behavior:
+`packageManagerStrict` / `packageManagerStrictVersion` then warn or
+error on mismatch instead of switching. Pins naming *other* package
+managers (`pnpm@…`) are never switched to — only validated.
 
 ## Build
 
@@ -2283,7 +2295,15 @@ Node.js version aube reports when evaluating `engines` checks.
 - Environment: `npm_config_node_version`, `NPM_CONFIG_NODE_VERSION`, `AUBE_NODE_VERSION`
 - .npmrc keys: `node-version`, `nodeVersion`
 
-Paired with `engineStrict`. Set this in .npmrc to pin the Node version engines checks validate against, rather than probing `node --version` at install time.
+Paired with `engineStrict`. Set this in .npmrc to pin the Node version
+engines checks validate against, rather than probing `node --version`
+at install time.
+
+This setting is validation-only — it never switches the Node version
+scripts actually run on (pnpm semantics). Runtime switching is driven
+by `devEngines.runtime` in package.json, `.node-version`, or `.nvmrc`;
+when one of those resolves, engines checks validate against the
+resolved runtime unless `nodeVersion` overrides the reported version.
 
 ### `nodeDownloadMirrors` {#setting-nodedownloadmirrors}
 
@@ -2292,10 +2312,68 @@ Custom Node.js download mirror URLs.
 - Type: `object`
 - Default: `undefined`
 - .npmrc keys: `nodeDownloadMirrors`, `node-download-mirrors`
+- Workspace YAML keys: `nodeDownloadMirrors`
 
-Accepted for pnpm config parity. aube does not download Node.js itself,
-so the parsed mirror map is preserved for config introspection but has
-no install-time effect.
+Mirror map for Node.js runtime downloads, keyed like pnpm's setting
+(`release` is the only key aube currently uses; `rc`/`nightly` are
+parsed for parity). When the project requests a Node version aube has
+to download (see `devEngines.runtime` and `runtimeInstaller`), the
+`release` mirror replaces `https://nodejs.org/dist`.
+
+```yaml
+nodeDownloadMirrors:
+  release: https://npmmirror.com/mirrors/node/
+```
+
+### `runtimeInstaller` {#setting-runtimeinstaller}
+
+Who installs a missing runtime: Node.js versions and, with `managePackageManagerVersions`, pinned aube versions.
+
+- Type: `"auto" | "mise" | "aube"`
+- Default: `"auto"`
+- Environment: `npm_config_runtime_installer`, `NPM_CONFIG_RUNTIME_INSTALLER`, `AUBE_RUNTIME_INSTALLER`
+- .npmrc keys: `runtime-installer`, `runtimeInstaller`
+- Workspace YAML keys: `runtimeInstaller`
+
+When the project pins a Node version that isn't installed anywhere
+aube can see (PATH, mise installs, aube's own runtime dir), this
+decides who fetches it:
+
+- `auto` (default): delegate to `mise install node@<version>` when
+  `mise` is on PATH — one shared Node store for mise users — and fall
+  back to aube's own nodejs.org download otherwise (or when mise
+  fails).
+- `mise`: always delegate; error (`ERR_AUBE_RUNTIME_MISE_INSTALL_FAILED`)
+  if mise is missing or fails.
+- `aube`: never delegate; download from nodejs.org (or
+  `nodeDownloadMirrors.release`) into `$XDG_DATA_HOME/aube/nodejs/`.
+
+The same policy governs aube *self*-installs when a
+`packageManager` / `devEngines.packageManager` pin needs a version
+that isn't installed (see `managePackageManagerVersions`): `auto`/`mise`
+delegate to `mise install aube@<version>`, `aube` downloads the GitHub
+release archive into `$XDG_DATA_HOME/aube/self/`.
+
+Examples:
+
+- `echo 'runtime-installer=aube' >> .npmrc`
+
+### `runtimeOnFail` {#setting-runtimeonfail}
+
+Override the `onFail` policy applied when the active Node.js doesn't satisfy the project's runtime requirement.
+
+- Type: `"download" | "error" | "warn" | "ignore"`
+- Default: `undefined`
+- Environment: `npm_config_runtime_on_fail`, `NPM_CONFIG_RUNTIME_ON_FAIL`, `AUBE_RUNTIME_ON_FAIL`
+- .npmrc keys: `runtime-on-fail`, `runtimeOnFail`
+- Workspace YAML keys: `runtimeOnFail`
+
+pnpm 11 parity. When unset, `devEngines.runtime`'s own `onFail` field
+applies (spec default `error`), and `.node-version`/`.nvmrc` pins —
+which have no `onFail` vocabulary — behave as `download`. Setting this
+forces one policy everywhere: `error` is the air-gapped-CI "never
+download a runtime" switch; `download` makes a bare `devEngines.runtime`
+auto-fetch.
 
 ## Other
 

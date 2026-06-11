@@ -232,6 +232,7 @@ dependencies = [
  "aube-manifest",
  "aube-registry",
  "aube-resolver",
+ "aube-runtime",
  "aube-scripts",
  "aube-settings",
  "aube-store",
@@ -414,6 +415,30 @@ dependencies = [
  "tokio",
  "tracing",
  "zstd",
+]
+
+[[package]]
+name = "aube-runtime"
+version = "1.18.2"
+dependencies = [
+ "aube-codes",
+ "aube-manifest",
+ "aube-util",
+ "base64",
+ "flate2",
+ "hex",
+ "node-semver",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "xx",
+ "zip",
 ]
 
 [[package]]

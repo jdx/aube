@@ -157,6 +157,7 @@ aube-store = { path = "crates/aube-store", version = "1.18.2" }
 aube-linker = { path = "crates/aube-linker", version = "1.18.2" }
 aube-lockfile = { path = "crates/aube-lockfile", version = "1.18.2" }
 aube-manifest = { path = "crates/aube-manifest", version = "1.18.2" }
+aube-runtime = { path = "crates/aube-runtime", version = "1.18.2" }
 aube-scripts = { path = "crates/aube-scripts", version = "1.18.2" }
 aube-workspace = { path = "crates/aube-workspace", version = "1.18.2" }
 aube-util = { path = "crates/aube-util", version = "1.18.2" }

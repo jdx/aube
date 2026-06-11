@@ -105,6 +105,7 @@ export default defineConfig({
           { text: "Install dependencies", link: "/package-manager/install" },
           { text: "Manage dependencies", link: "/package-manager/dependencies" },
           { text: "Run scripts and binaries", link: "/package-manager/scripts" },
+          { text: "Node runtime switching", link: "/package-manager/node-runtime" },
           { text: "Workspaces", link: "/package-manager/workspaces" },
           { text: "Lockfiles", link: "/package-manager/lockfiles" },
           { text: "node_modules layout", link: "/package-manager/node-modules" },

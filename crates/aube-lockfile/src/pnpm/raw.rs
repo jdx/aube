@@ -238,6 +238,55 @@ pub(super) struct Resolution {
     /// encoding it in the snapshot key.
     #[serde(default, deserialize_with = "deserialize_subpath")]
     pub(super) path: Option<String>,
+    /// pnpm 10.14+ `type: variations` resolution (runtime pins like
+    /// `node@runtime:24.4.1`): one downloadable artifact per platform.
+    /// `None` for every ordinary package resolution.
+    #[serde(default)]
+    pub(super) variants: Option<Vec<RawRuntimeVariant>>,
+}
+
+/// One entry of a `variations` resolution's `variants:` list —
+/// pnpm's `PlatformAssetResolution` (a binary artifact plus the
+/// platform targets it serves).
+#[derive(Debug, Deserialize)]
+pub(super) struct RawRuntimeVariant {
+    pub(super) targets: Vec<RawRuntimeTarget>,
+    pub(super) resolution: RawBinaryResolution,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct RawRuntimeTarget {
+    pub(super) os: String,
+    pub(super) cpu: String,
+    #[serde(default)]
+    pub(super) libc: Option<String>,
+}
+
+/// pnpm's `BinaryResolution` (`type: binary`).
+#[derive(Debug, Deserialize)]
+pub(super) struct RawBinaryResolution {
+    #[serde(default, rename = "type")]
+    #[allow(dead_code)]
+    pub(super) type_: Option<String>,
+    #[serde(default)]
+    pub(super) archive: Option<String>,
+    pub(super) url: String,
+    #[serde(default)]
+    pub(super) integrity: Option<String>,
+    #[serde(default)]
+    pub(super) bin: Option<RawBinSpec>,
+    /// Top-level directory pnpm strips when extracting zip archives.
+    #[serde(default)]
+    pub(super) prefix: Option<String>,
+}
+
+/// pnpm's `bin` field on a binary resolution: bare string (the path
+/// of a bin named after the package) or a `name → path` map.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub(super) enum RawBinSpec {
+    Single(String),
+    Map(BTreeMap<String, String>),
 }
 
 /// Strip the leading `/` from pnpm's `path:` field so the value lines

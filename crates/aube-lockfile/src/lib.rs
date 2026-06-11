@@ -115,6 +115,17 @@ pub struct LockfileGraph {
     /// parser is responsible for deduping if the source lockfile
     /// carried a duplicate.
     pub trusted_dependencies: Vec<String>,
+    /// Pinned runtimes (pnpm 10.14+ `devEngines.runtime` recording),
+    /// keyed by runtime name (`node`). pnpm models a pinned runtime as
+    /// a synthetic importer dep whose specifier/version carry a
+    /// `runtime:` prefix plus a `packages:` entry keyed
+    /// `<name>@runtime:<version>` holding a `variations` resolution
+    /// with one downloadable artifact per platform. aube lifts that
+    /// encoding into this typed map on parse and re-emits the pnpm
+    /// shape on write (aube-lock.yaml and pnpm-lock.yaml share the
+    /// writer). Foreign formats (npm/yarn/bun) have no runtime shape:
+    /// their parsers leave this empty and their writers skip it.
+    pub runtimes: BTreeMap<String, RuntimePin>,
     /// Top-level lockfile fields that aren't explicitly modeled on
     /// `LockfileGraph`. Populated by per-format parsers on best-effort
     /// basis so the writer can re-emit blocks a future lockfile
@@ -136,6 +147,81 @@ pub struct LockfileGraph {
 pub struct CatalogEntry {
     pub specifier: String,
     pub version: String,
+}
+
+/// A pinned runtime (Node.js) recorded in the lockfile. Mirrors pnpm
+/// 10.14+'s `devEngines.runtime` encoding: the manifest's requested
+/// range plus the exact resolved version, and one downloadable
+/// artifact per supported platform so any machine reading the
+/// lockfile can fetch the same release without re-resolving.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RuntimePin {
+    /// The requested range from `devEngines.runtime.version`, without
+    /// the `runtime:` prefix pnpm adds in the importer entry
+    /// (`"^24.4.0"`).
+    pub specifier: String,
+    /// Exact resolved version (`"24.4.1"`).
+    pub version: String,
+    /// Whether the importer entry sits under `devDependencies`
+    /// (devEngines-sourced pins do; pnpm only emits this form today).
+    pub dev: bool,
+    /// `hasBin` flag on the packages entry — always true for real
+    /// runtime pins; round-tripped for byte fidelity.
+    pub has_bin: bool,
+    /// Per-platform artifacts from the `variations` resolution.
+    pub variants: Vec<RuntimeVariant>,
+}
+
+impl RuntimePin {
+    /// The variant whose target list matches `(os, cpu, libc)`. `libc`
+    /// follows pnpm's convention: `Some("musl")` matches only
+    /// musl-tagged targets; `None` matches targets without a libc tag.
+    pub fn variant_for(&self, os: &str, cpu: &str, libc: Option<&str>) -> Option<&RuntimeVariant> {
+        self.variants.iter().find(|v| {
+            v.targets
+                .iter()
+                .any(|t| t.os == os && t.cpu == cpu && t.libc.as_deref() == libc)
+        })
+    }
+}
+
+/// One platform-specific artifact inside a runtime pin's `variations`
+/// resolution. Field set mirrors pnpm's `BinaryResolution` +
+/// `PlatformAssetResolution` pair.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RuntimeVariant {
+    /// Platforms this artifact serves (usually exactly one).
+    pub targets: Vec<RuntimeTarget>,
+    /// `"tarball"` or `"zip"`.
+    pub archive: String,
+    /// Download URL for the artifact.
+    pub url: String,
+    /// SRI integrity (`sha256-<base64>` — Node publishes SHA-256
+    /// checksums for release artifacts).
+    pub integrity: String,
+    /// Executable map. pnpm writes either a bare string (`bin/node`,
+    /// meaning the `node` bin) or a `name → path` map; both parse into
+    /// this struct and the original shape round-trips via
+    /// [`Self::bin_is_bare_string`].
+    pub bin: BTreeMap<String, String>,
+    /// True when the source lockfile wrote `bin:` as a bare string;
+    /// preserved so a parse/write cycle stays byte-identical.
+    pub bin_is_bare_string: bool,
+    /// Top-level directory to strip when extracting (pnpm sets this on
+    /// zip archives, whose entries are rooted at
+    /// `node-v<V>-win-<arch>/`).
+    pub prefix: Option<String>,
+}
+
+/// One `(os, cpu, libc)` triple a runtime variant targets. Values use
+/// Node's `process.platform` / `process.arch` vocabulary (`win32`,
+/// `darwin`, `linux`; `x64`, `arm64`), with `libc: Some("musl")` only
+/// on musl builds.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RuntimeTarget {
+    pub os: String,
+    pub cpu: String,
+    pub libc: Option<String>,
 }
 
 /// Per-graph settings that mirror pnpm v9's `settings:` header.
@@ -590,6 +676,9 @@ impl LockfileGraph {
             bun_config_version: self.bun_config_version,
             patched_dependencies: self.patched_dependencies.clone(),
             trusted_dependencies: self.trusted_dependencies.clone(),
+            // Runtime pins are graph-wide resolution intent, same as
+            // overrides/catalogs — structural filters carry them.
+            runtimes: self.runtimes.clone(),
             extra_fields: self.extra_fields.clone(),
             workspace_extra_fields: self.workspace_extra_fields.clone(),
         }
@@ -650,6 +739,7 @@ impl LockfileGraph {
             bun_config_version: self.bun_config_version,
             patched_dependencies: self.patched_dependencies.clone(),
             trusted_dependencies: self.trusted_dependencies.clone(),
+            runtimes: self.runtimes.clone(),
             extra_fields: self.extra_fields.clone(),
             workspace_extra_fields: self.workspace_extra_fields.clone(),
         })
@@ -701,6 +791,14 @@ impl LockfileGraph {
         }
         if self.trusted_dependencies.is_empty() {
             self.trusted_dependencies = prior.trusted_dependencies.clone();
+        }
+        // Runtime pins can't be recovered from a fresh package resolve
+        // (they come from devEngines resolution, a separate pass), so a
+        // re-resolved graph that hasn't re-pinned yet inherits the
+        // prior pin. The install driver overwrites it when the
+        // devEngines range drifted.
+        if self.runtimes.is_empty() {
+            self.runtimes = prior.runtimes.clone();
         }
         if self.extra_fields.is_empty() {
             self.extra_fields = prior.extra_fields.clone();

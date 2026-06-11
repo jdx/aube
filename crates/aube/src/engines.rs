@@ -83,6 +83,27 @@ pub fn resolve_node_version(override_: Option<&str>) -> Option<String> {
     PROBED.get_or_init(probe_node_version).clone()
 }
 
+/// The Node version aube should report for engines checks once
+/// runtime switching is in play:
+///
+/// 1. an explicit `node-version` `.npmrc` override always wins
+///    (validation-only knob, pnpm semantics);
+/// 2. otherwise the resolved runtime context's version — engines must
+///    validate the node scripts will actually run on, not whatever
+///    PATH happened to carry;
+/// 3. otherwise the memoized `node --version` probe.
+pub fn effective_node_version(override_: Option<&str>) -> Option<String> {
+    if override_.is_some() {
+        return resolve_node_version(override_);
+    }
+    if let Some(rt) = crate::runtime::current()
+        && let Some(v) = &rt.version
+    {
+        return Some(v.clone());
+    }
+    resolve_node_version(None)
+}
+
 fn probe_node_version() -> Option<String> {
     let output = std::process::Command::new("node")
         .arg("--version")
@@ -430,6 +451,7 @@ mod tests {
             update_config: None,
             scripts: Default::default(),
             engines: Default::default(),
+            dev_engines: None,
             workspaces: None,
             bundled_dependencies: None,
             extra: Default::default(),

@@ -828,6 +828,7 @@ fn test_write_and_reparse_roundtrip() {
         update_config: None,
         scripts: BTreeMap::new(),
         engines: BTreeMap::new(),
+        dev_engines: None,
         workspaces: None,
         bundled_dependencies: None,
         extra: BTreeMap::new(),
@@ -1024,6 +1025,7 @@ fn writer_preserves_workspace_importer_specifiers() {
         update_config: None,
         scripts: BTreeMap::new(),
         engines: BTreeMap::new(),
+        dev_engines: None,
         workspaces: None,
         bundled_dependencies: None,
         extra: BTreeMap::new(),
@@ -1065,6 +1067,7 @@ fn overrides_round_trip_through_pnpm_lock_yaml() {
         update_config: None,
         scripts: BTreeMap::new(),
         engines: BTreeMap::new(),
+        dev_engines: None,
         workspaces: None,
         bundled_dependencies: None,
         extra: BTreeMap::new(),
@@ -1157,6 +1160,7 @@ fn empty_overrides_block_omitted_from_yaml() {
         update_config: None,
         scripts: BTreeMap::new(),
         engines: BTreeMap::new(),
+        dev_engines: None,
         workspaces: None,
         bundled_dependencies: None,
         extra: BTreeMap::new(),
@@ -1237,6 +1241,7 @@ fn test_write_dev_and_optional_deps() {
         update_config: None,
         scripts: BTreeMap::new(),
         engines: BTreeMap::new(),
+        dev_engines: None,
         workspaces: None,
         bundled_dependencies: None,
         extra: BTreeMap::new(),
@@ -1422,6 +1427,7 @@ fn exclude_links_from_lockfile_drops_link_deps_from_importer() {
         update_config: None,
         scripts: BTreeMap::new(),
         engines: BTreeMap::new(),
+        dev_engines: None,
         workspaces: None,
         bundled_dependencies: None,
         extra: BTreeMap::new(),
@@ -3116,4 +3122,337 @@ snapshots:
     write(&path, &graph, &PackageJson::default()).unwrap();
     let yaml = std::fs::read_to_string(&path).unwrap();
     assert!(yaml.contains("gitHosted: true"), "{yaml}");
+}
+
+// ── runtime pins (pnpm 10.14+ devEngines.runtime recording) ─────────
+
+/// A pnpm-11-authored lockfile with a `node@runtime:` pin. The
+/// importer's synthetic `node` dep must land in `graph.runtimes` (not
+/// `importers`/`packages`) so the install pipeline never tries to
+/// fetch `node` from the npm registry — this is both the pin feature
+/// and a compat fix for reading pnpm 10.14+ lockfiles.
+#[test]
+fn runtime_pin_parses_from_pnpm_lockfile() {
+    let dir = tempfile::tempdir().unwrap();
+    let lockfile_path = dir.path().join("pnpm-lock.yaml");
+    let src = r#"lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    devDependencies:
+      node:
+        specifier: runtime:^24.4.0
+        version: runtime:24.4.1
+
+packages:
+
+  node@runtime:24.4.1:
+    hasBin: true
+    version: 24.4.1
+    resolution:
+      type: variations
+      variants:
+        - resolution:
+            archive: tarball
+            bin: bin/node
+            integrity: sha256-aGVsbG8gd29ybGQgdGhpcyBpcyBub3QgcmVhbA==
+            type: binary
+            url: https://nodejs.org/download/release/v24.4.1/node-v24.4.1-darwin-arm64.tar.gz
+          targets:
+            - cpu: arm64
+              os: darwin
+        - resolution:
+            archive: zip
+            bin:
+              node: node.exe
+            integrity: sha256-d2luZG93cyBidWlsZCBjaGVja3N1bSBmYWtl
+            prefix: node-v24.4.1-win-x64
+            type: binary
+            url: https://nodejs.org/download/release/v24.4.1/node-v24.4.1-win-x64.zip
+          targets:
+            - cpu: x64
+              os: win32
+        - resolution:
+            archive: tarball
+            bin: bin/node
+            integrity: sha256-bXVzbCBidWlsZCBjaGVja3N1bSBmYWtlIQ==
+            type: binary
+            url: https://unofficial-builds.nodejs.org/download/release/v24.4.1/node-v24.4.1-linux-x64-musl.tar.gz
+          targets:
+            - cpu: x64
+              libc: musl
+              os: linux
+
+snapshots:
+
+  node@runtime:24.4.1: {}
+"#;
+    std::fs::write(&lockfile_path, src).unwrap();
+    let graph = parse(&lockfile_path).unwrap();
+
+    // The synthetic dep must not leak into the package graph.
+    assert!(graph.importers.get(".").unwrap().is_empty());
+    assert!(graph.packages.is_empty());
+
+    let pin = graph.runtimes.get("node").expect("node pin parsed");
+    assert_eq!(pin.specifier, "^24.4.0");
+    assert_eq!(pin.version, "24.4.1");
+    assert!(pin.dev);
+    assert!(pin.has_bin);
+    assert_eq!(pin.variants.len(), 3);
+
+    let mac = pin.variant_for("darwin", "arm64", None).unwrap();
+    assert_eq!(mac.archive, "tarball");
+    assert!(mac.bin_is_bare_string);
+    assert_eq!(mac.bin.get("node").map(String::as_str), Some("bin/node"));
+    assert_eq!(
+        mac.url,
+        "https://nodejs.org/download/release/v24.4.1/node-v24.4.1-darwin-arm64.tar.gz"
+    );
+
+    let win = pin.variant_for("win32", "x64", None).unwrap();
+    assert_eq!(win.archive, "zip");
+    assert!(!win.bin_is_bare_string);
+    assert_eq!(win.bin.get("node").map(String::as_str), Some("node.exe"));
+    assert_eq!(win.prefix.as_deref(), Some("node-v24.4.1-win-x64"));
+
+    let musl = pin.variant_for("linux", "x64", Some("musl")).unwrap();
+    assert!(musl.url.contains("unofficial-builds"));
+    assert!(pin.variant_for("linux", "x64", None).is_none());
+}
+
+/// Write → parse round-trip of a runtime pin must preserve the full
+/// pnpm shape: importer synthetic dep, `variations` packages entry,
+/// and the empty snapshot.
+#[test]
+fn runtime_pin_round_trips_through_write() {
+    use crate::{RuntimePin, RuntimeTarget, RuntimeVariant};
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut graph = LockfileGraph::default();
+    graph.importers.insert(".".to_string(), Vec::new());
+    graph.runtimes.insert(
+        "node".to_string(),
+        RuntimePin {
+            specifier: "^24.4.0".to_string(),
+            version: "24.4.1".to_string(),
+            dev: true,
+            has_bin: true,
+            variants: vec![
+                RuntimeVariant {
+                    targets: vec![RuntimeTarget {
+                        os: "darwin".to_string(),
+                        cpu: "arm64".to_string(),
+                        libc: None,
+                    }],
+                    archive: "tarball".to_string(),
+                    url: "https://nodejs.org/download/release/v24.4.1/node-v24.4.1-darwin-arm64.tar.gz".to_string(),
+                    integrity: "sha256-aGVsbG8gd29ybGQgdGhpcyBpcyBub3QgcmVhbA==".to_string(),
+                    bin: [("node".to_string(), "bin/node".to_string())].into_iter().collect(),
+                    bin_is_bare_string: true,
+                    prefix: None,
+                },
+                RuntimeVariant {
+                    targets: vec![RuntimeTarget {
+                        os: "win32".to_string(),
+                        cpu: "x64".to_string(),
+                        libc: None,
+                    }],
+                    archive: "zip".to_string(),
+                    url: "https://nodejs.org/download/release/v24.4.1/node-v24.4.1-win-x64.zip".to_string(),
+                    integrity: "sha256-d2luZG93cyBidWlsZCBjaGVja3N1bSBmYWtl".to_string(),
+                    bin: [("node".to_string(), "node.exe".to_string())].into_iter().collect(),
+                    bin_is_bare_string: false,
+                    prefix: Some("node-v24.4.1-win-x64".to_string()),
+                },
+            ],
+        },
+    );
+
+    let manifest = PackageJson::default();
+    let out_path = dir.path().join("aube-lock.yaml");
+    write(&out_path, &graph, &manifest).unwrap();
+    let written = std::fs::read_to_string(&out_path).unwrap();
+
+    assert!(
+        written.contains("specifier: runtime:^24.4.0"),
+        "importer specifier missing: {written}"
+    );
+    assert!(
+        written.contains("version: runtime:24.4.1"),
+        "importer version missing: {written}"
+    );
+    assert!(
+        written.contains("node@runtime:24.4.1:"),
+        "packages/snapshots key missing: {written}"
+    );
+    assert!(
+        written.contains("type: variations"),
+        "variations resolution missing (or flow-collapsed): {written}"
+    );
+    // The variations resolution must stay in block form — the
+    // flow-collapse pass must not mangle it.
+    assert!(
+        !written.contains("resolution: {type: variations"),
+        "variations resolution was flow-collapsed: {written}"
+    );
+    assert!(
+        written.contains("bin: bin/node"),
+        "bare-string bin form not preserved: {written}"
+    );
+
+    let reparsed = parse(&out_path).unwrap();
+    assert_eq!(
+        reparsed.runtimes, graph.runtimes,
+        "runtime pin did not round-trip"
+    );
+    assert!(reparsed.packages.is_empty());
+}
+
+/// Branch-lockfile merges of the same pinned version must union the
+/// per-platform variants (a pin written on darwin + one written on
+/// linux merge into one pin carrying both artifacts) and surface
+/// specifier disagreements instead of silently keeping one side.
+#[test]
+fn runtime_pin_merge_unions_variants() {
+    use crate::{RuntimePin, RuntimeTarget, RuntimeVariant};
+
+    fn variant(os: &str) -> RuntimeVariant {
+        RuntimeVariant {
+            targets: vec![RuntimeTarget {
+                os: os.to_string(),
+                cpu: "x64".to_string(),
+                libc: None,
+            }],
+            archive: "tarball".to_string(),
+            url: format!("https://nodejs.org/download/release/v1.0.0/node-v1.0.0-{os}-x64.tar.gz"),
+            integrity: "sha256-AAAA".to_string(),
+            bin: [("node".to_string(), "bin/node".to_string())]
+                .into_iter()
+                .collect(),
+            bin_is_bare_string: true,
+            prefix: None,
+        }
+    }
+    fn graph_with_pin(os: &str) -> LockfileGraph {
+        let mut g = LockfileGraph::default();
+        g.importers.insert(".".to_string(), Vec::new());
+        g.runtimes.insert(
+            "node".to_string(),
+            RuntimePin {
+                specifier: "^1.0.0".to_string(),
+                version: "1.0.0".to_string(),
+                dev: true,
+                has_bin: true,
+                variants: vec![variant(os)],
+            },
+        );
+        g
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let manifest = PackageJson::default();
+    write(
+        &dir.path().join("aube-lock.yaml"),
+        &graph_with_pin("darwin"),
+        &manifest,
+    )
+    .unwrap();
+    write(
+        &dir.path().join("aube-lock.feature.yaml"),
+        &graph_with_pin("linux"),
+        &manifest,
+    )
+    .unwrap();
+
+    let report = crate::merge_branch_lockfiles(dir.path(), &manifest).unwrap();
+    assert_eq!(report.merged_files.len(), 1);
+
+    let merged = parse(&dir.path().join("aube-lock.yaml")).unwrap();
+    let pin = merged.runtimes.get("node").unwrap();
+    let mut oses: Vec<&str> = pin
+        .variants
+        .iter()
+        .flat_map(|v| v.targets.iter().map(|t| t.os.as_str()))
+        .collect();
+    oses.sort();
+    assert_eq!(
+        oses,
+        vec!["darwin", "linux"],
+        "variants must union across branches"
+    );
+}
+
+/// devEngines drift: a recorded pin whose range no longer matches the
+/// manifest (or whose devEngines entry was removed) must read stale;
+/// a matching pin stays fresh; and a manifest with devEngines but no
+/// recorded pin is NOT drift (foreign formats can't record pins).
+#[test]
+fn runtime_pin_drift_detection() {
+    use crate::{DriftStatus, RuntimePin};
+
+    let mut graph = LockfileGraph::default();
+    graph.importers.insert(".".to_string(), Vec::new());
+    graph.runtimes.insert(
+        "node".to_string(),
+        RuntimePin {
+            specifier: "^24.4.0".to_string(),
+            version: "24.4.1".to_string(),
+            dev: true,
+            has_bin: true,
+            variants: Vec::new(),
+        },
+    );
+
+    let manifest_with = |range: &str| -> PackageJson {
+        let json = format!(
+            r#"{{"name": "t", "devEngines": {{"runtime": {{"name": "node", "version": "{range}", "onFail": "download"}}}}}}"#
+        );
+        serde_json::from_str(&json).unwrap()
+    };
+
+    let empty: BTreeMap<String, String> = BTreeMap::new();
+    let empty_catalogs: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    let fresh = graph.check_drift(&manifest_with("^24.4.0"), &empty, &[], &empty_catalogs);
+    assert_eq!(fresh, DriftStatus::Fresh, "matching pin must be fresh");
+
+    let changed = graph.check_drift(&manifest_with("^26.0.0"), &empty, &[], &empty_catalogs);
+    assert!(
+        matches!(&changed, DriftStatus::Stale { reason } if reason.contains("node")),
+        "changed range must be stale: {changed:?}"
+    );
+
+    let removed = graph.check_drift(&PackageJson::default(), &empty, &[], &empty_catalogs);
+    assert!(
+        matches!(removed, DriftStatus::Stale { .. }),
+        "removed devEngines must be stale"
+    );
+
+    // Entry still names node but drops the version: no concrete
+    // range to contradict the pin — must stay fresh (a hard frozen
+    // failure here would fire on a field that changes nothing).
+    let versionless: PackageJson =
+        serde_json::from_str(r#"{"name": "t", "devEngines": {"runtime": {"name": "node"}}}"#)
+            .unwrap();
+    assert_eq!(
+        graph.check_drift(&versionless, &empty, &[], &empty_catalogs),
+        DriftStatus::Fresh,
+        "version-less devEngines entry must not read as a removed pin"
+    );
+
+    // No pin recorded + devEngines present → not drift (the install
+    // driver records the pin on formats that support it).
+    let no_pin = LockfileGraph {
+        importers: graph.importers.clone(),
+        ..LockfileGraph::default()
+    };
+    assert_eq!(
+        no_pin.check_drift(&manifest_with("^24.4.0"), &empty, &[], &empty_catalogs),
+        DriftStatus::Fresh
+    );
 }
