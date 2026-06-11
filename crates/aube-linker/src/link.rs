@@ -126,11 +126,20 @@ impl Linker {
 
         // Step 1: Populate .aube virtual store
         //
-        // Local packages (file:/link:) never go into the shared global
-        // virtual store — their source is project-specific, so we
-        // materialize them straight into per-project `.aube/` below.
-        // `link:` entries don't need any `.aube/` entry at all; their
-        // top-level symlink points directly at the target.
+        // `file:` / `link:` / `portal:` / `exec:` sources resolve
+        // against a path inside the project, so they never go into the
+        // shared global virtual store — we materialize them straight
+        // into per-project `.aube/` below. `link:` entries don't need
+        // any `.aube/` entry at all; their top-level symlink points
+        // directly at the target.
+        //
+        // Git and remote-tarball sources are the exception: they're
+        // pinned to immutable content and shared across projects like
+        // registry packages. Under the global virtual store they must
+        // be materialized into the shared store (and have their
+        // `.aube/<dep_path>` entry symlinked at it) so a registry
+        // dependent that also lives in the shared store doesn't get a
+        // dangling sibling symlink to them.
         for (dep_path, pkg) in &graph.packages {
             let Some(ref local) = pkg.local_source else {
                 continue;
@@ -141,6 +150,17 @@ impl Linker {
             let Some(index) = package_indices.get(dep_path) else {
                 continue;
             };
+            if self.use_global_virtual_store && local.is_globally_shareable() {
+                self.ensure_shared_local_in_global_store(
+                    &aube_dir,
+                    dep_path,
+                    pkg,
+                    index,
+                    &mut stats,
+                    nested_link_targets.as_ref(),
+                )?;
+                continue;
+            }
             let aube_entry = aube_dir.join(dep_path);
             if !aube_entry.exists() {
                 self.materialize_into(
@@ -642,11 +662,19 @@ impl Linker {
 
         let nested_link_targets = build_nested_link_targets(root_dir, graph);
 
-        // Step 1a: Materialize local (`file:` dir/tarball) packages
-        // straight into the shared per-project `.aube/`. They never
-        // participate in the global virtual store since their source
-        // is project-specific. `link:` deps get no `.aube/` entry at
-        // all — step 2 symlinks directly to the target.
+        // Step 1a: Materialize local (`file:` dir/tarball, `portal:`,
+        // `exec:`) packages straight into the shared per-project
+        // `.aube/`. They never participate in the global virtual store
+        // since their source resolves against a path inside the
+        // project. `link:` deps get no `.aube/` entry at all — step 2
+        // symlinks directly to the target.
+        //
+        // Git and remote-tarball sources are content-pinned and shared
+        // across projects like registry packages, so under the global
+        // virtual store they're materialized into the shared store with
+        // a `.aube/<dep_path>` symlink pointing at it — otherwise a
+        // registry dependent in the shared store would get a dangling
+        // sibling symlink to them.
         for (dep_path, pkg) in &graph.packages {
             let Some(ref local) = pkg.local_source else {
                 continue;
@@ -657,6 +685,17 @@ impl Linker {
             let Some(index) = package_indices.get(dep_path) else {
                 continue;
             };
+            if self.use_global_virtual_store && local.is_globally_shareable() {
+                self.ensure_shared_local_in_global_store(
+                    &aube_dir,
+                    dep_path,
+                    pkg,
+                    index,
+                    &mut stats,
+                    nested_link_targets.as_ref(),
+                )?;
+                continue;
+            }
             let aube_entry = aube_dir.join(self.aube_dir_entry_name(dep_path));
             if aube_entry.exists() {
                 stats.packages_cached += 1;

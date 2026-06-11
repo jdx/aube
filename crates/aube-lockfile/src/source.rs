@@ -114,6 +114,30 @@ impl LocalSource {
         }
     }
 
+    /// Whether this source is pinned to immutable, globally
+    /// reproducible content and can therefore be shared across
+    /// projects inside aube's global virtual store, exactly like a
+    /// registry package.
+    ///
+    /// `Git` is pinned to a 40-char commit SHA and `RemoteTarball` to
+    /// a fetched URL (and, once resolved, an integrity hash), so two
+    /// projects that depend on the same one resolve to the same files.
+    /// `file:` / `link:` / `portal:` / `exec:` all resolve against a
+    /// path inside the depending project, so they stay per-project and
+    /// are never promoted into the shared store.
+    ///
+    /// Load-bearing for global-virtual-store correctness: a registry
+    /// package materialized into the shared store points its
+    /// dependency siblings at the hashed global path
+    /// (`virtual_store_subdir(dep_path)`). If one of those deps were a
+    /// git/tarball source that only ever landed in the per-project
+    /// `.aube/`, the sibling symlink would dangle and Node's module
+    /// walk would silently fall back to some unrelated `<name>` found
+    /// higher up the tree.
+    pub fn is_globally_shareable(&self) -> bool {
+        matches!(self, LocalSource::Git(_) | LocalSource::RemoteTarball(_))
+    }
+
     /// The path as a POSIX-style string with forward-slash separators.
     /// `Path::display()` and `to_string_lossy()` honor the host's
     /// separator (backslash on Windows), which would make `dep_path`
