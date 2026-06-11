@@ -471,6 +471,12 @@
       "exit_code": null
     },
     {
+      "name": "WARN_AUBE_OVERRIDE_DOLLAR_REF_DEPRECATED",
+      "category": "Settings / config validation",
+      "description": "An `overrides` entry used pnpm's deprecated `$` version reference syntax.",
+      "exit_code": null
+    },
+    {
       "name": "WARN_AUBE_INVALID_PEER_PATTERN",
       "category": "Settings / config validation",
       "description": "A `peerDependencyRules` pattern was unparseable and skipped.",
