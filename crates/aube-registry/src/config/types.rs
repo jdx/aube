@@ -19,10 +19,13 @@ pub(crate) enum NpmrcSource {
     /// therefore attacker controlled when the project came from a
     /// hostile clone.
     Project,
-    /// A file pointed at by the `npmrc-auth-file` setting. The path
-    /// itself can be declared from a project `.npmrc`, so the
-    /// file's contents inherit the project trust level.
-    NpmrcAuthFile,
+    /// A file pointed at by a user/global `npmrc-auth-file` setting.
+    /// Trusted because the user chose the file location.
+    UserNpmrcAuthFile,
+    /// A file pointed at by a project `npmrc-auth-file` setting. The
+    /// path itself came from committed config, so the file's contents
+    /// inherit the project trust level.
+    ProjectNpmrcAuthFile,
     /// Environment variable. `npm_config_*` / `NPM_CONFIG_*`.
     /// Trusted because the developer or their CI pipeline has to
     /// set them explicitly in the shell that invoked aube.
@@ -32,10 +35,17 @@ pub(crate) enum NpmrcSource {
 impl NpmrcSource {
     /// Whether a setting from this source is allowed to configure
     /// subprocess spawning (e.g. `tokenHelper`). `Project` and
-    /// `NpmrcAuthFile` both return false since both are reachable
-    /// from a hostile repo clone.
+    /// `ProjectNpmrcAuthFile` both return false since both are
+    /// reachable from a hostile repo clone.
     pub(super) fn is_trusted_for_subprocess_settings(self) -> bool {
-        matches!(self, Self::User | Self::PnpmAuth | Self::Env)
+        matches!(
+            self,
+            Self::User | Self::PnpmAuth | Self::UserNpmrcAuthFile | Self::Env
+        )
+    }
+
+    pub(super) fn is_project_controlled(self) -> bool {
+        matches!(self, Self::Project | Self::ProjectNpmrcAuthFile)
     }
 }
 

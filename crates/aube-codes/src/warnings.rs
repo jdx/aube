@@ -50,6 +50,7 @@ pub const WARN_AUBE_UNTRUSTED_STRICT_SSL_DISABLE: &str = "WARN_AUBE_UNTRUSTED_ST
 pub const WARN_AUBE_INVALID_LOCAL_ADDRESS: &str = "WARN_AUBE_INVALID_LOCAL_ADDRESS";
 pub const WARN_AUBE_INVALID_MAXSOCKETS: &str = "WARN_AUBE_INVALID_MAXSOCKETS";
 pub const WARN_AUBE_UNSCOPED_AUTH_RESCOPED: &str = "WARN_AUBE_UNSCOPED_AUTH_RESCOPED";
+pub const WARN_AUBE_UNTRUSTED_AUTH_ENV: &str = "WARN_AUBE_UNTRUSTED_AUTH_ENV";
 pub const WARN_AUBE_UNTRUSTED_TOKEN_HELPER: &str = "WARN_AUBE_UNTRUSTED_TOKEN_HELPER";
 pub const WARN_AUBE_INVALID_TOKEN_HELPER: &str = "WARN_AUBE_INVALID_TOKEN_HELPER";
 pub const WARN_AUBE_TOKEN_HELPER_SPAWN_FAILED: &str = "WARN_AUBE_TOKEN_HELPER_SPAWN_FAILED";
@@ -311,6 +312,12 @@ pub const ALL: &[CodeMeta] = &[
         name: WARN_AUBE_UNSCOPED_AUTH_RESCOPED,
         category: category::REGISTRY_CONFIG,
         description: "An unscoped registry credential was pinned to the registry declared by the same config source.",
+        exit_code: None,
+    },
+    CodeMeta {
+        name: WARN_AUBE_UNTRUSTED_AUTH_ENV,
+        category: category::REGISTRY_CONFIG,
+        description: "An auth setting from project-controlled `.npmrc` contained an environment variable reference and was ignored.",
         exit_code: None,
     },
     CodeMeta {

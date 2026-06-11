@@ -146,15 +146,7 @@ fn parse_npmrc_expands_env_in_keys_for_per_uri_auth() {
     // cleanup can't leak these names into the rest of the test
     // run (the harness runs cases in parallel threads on shared
     // process-wide env).
-    struct EnvVars(&'static [&'static str]);
-    impl Drop for EnvVars {
-        fn drop(&mut self) {
-            for name in self.0 {
-                unsafe { std::env::remove_var(name) };
-            }
-        }
-    }
-    let _vars = EnvVars(&["AUBE_TEST_NEXUS_HOST_CFG", "AUBE_TEST_NEXUS_TOKEN_CFG"]);
+    let _vars = ScopedEnvVars(&["AUBE_TEST_NEXUS_HOST_CFG", "AUBE_TEST_NEXUS_TOKEN_CFG"]);
     unsafe {
         std::env::set_var(
             "AUBE_TEST_NEXUS_HOST_CFG",
@@ -241,8 +233,8 @@ fn project_npmrc_does_not_expand_env_into_auth() {
 
     assert_eq!(
         config.auth_token_for("https://registry.example.com/"),
-        Some("${AUBE_TEST_PROJECT_TOKEN_CFG}"),
-        "project .npmrc must not expand env vars into credentials",
+        None,
+        "project .npmrc auth env refs must be ignored instead of stored literally",
     );
 }
 
@@ -303,8 +295,42 @@ fn npmrc_auth_file_does_not_expand_env_into_auth() {
 
     assert_eq!(
         config.auth_token_for("https://registry.example.com/"),
-        Some("${AUBE_TEST_AUTH_FILE_TOKEN_CFG}"),
-        "auth file loaded through project config inherits project trust",
+        None,
+        "auth file loaded through project config inherits project trust and ignores auth env refs",
+    );
+}
+
+#[test]
+fn user_declared_npmrc_auth_file_expands_env_into_auth() {
+    let _vars = ScopedEnvVars(&["AUBE_TEST_USER_AUTH_FILE_TOKEN_CFG"]);
+    unsafe { std::env::set_var("AUBE_TEST_USER_AUTH_FILE_TOKEN_CFG", "secret-token") };
+
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let auth_file = home.path().join("auth.npmrc");
+    std::fs::write(
+        &auth_file,
+        "//registry.example.com/:_authToken=${AUBE_TEST_USER_AUTH_FILE_TOKEN_CFG}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        home.path().join(".npmrc"),
+        format!("npmrc-auth-file={}\n", auth_file.display()),
+    )
+    .unwrap();
+
+    let mut config = NpmConfig::default();
+    config.apply_tagged(load_npmrc_entries_tagged_with_home(
+        Some(home.path()),
+        None,
+        project.path(),
+        None,
+    ));
+
+    assert_eq!(
+        config.auth_token_for("https://registry.example.com/"),
+        Some("secret-token"),
+        "auth file loaded through user config keeps trusted env substitution",
     );
 }
 

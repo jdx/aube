@@ -124,8 +124,10 @@ pub fn load_npmrc_entries_split(project_dir: &Path) -> SplitNpmrcEntries {
     let mut split = SplitNpmrcEntries::default();
     for (src, k, v) in tagged {
         match src {
-            NpmrcSource::User | NpmrcSource::PnpmAuth => split.user.push((k, v)),
-            NpmrcSource::Project | NpmrcSource::NpmrcAuthFile => split.project.push((k, v)),
+            NpmrcSource::User | NpmrcSource::PnpmAuth | NpmrcSource::UserNpmrcAuthFile => {
+                split.user.push((k, v));
+            }
+            NpmrcSource::Project | NpmrcSource::ProjectNpmrcAuthFile => split.project.push((k, v)),
             // Env-derived entries (npm_config_*) aren't loaded by the
             // tagged file walker, so this arm is unreachable here.
             NpmrcSource::Env => continue,
@@ -246,20 +248,20 @@ pub(super) fn load_npmrc_entries_tagged_with_home(
                 .map(|(k, v)| (NpmrcSource::Project, k, v)),
         );
     }
-    // Resolve `npmrc-auth-file` by borrowing the tagged entries we
-    // already parsed. No clone, the iterator just drops the tag.
-    if let Some(auth_path) = resolve_npmrc_auth_file(
-        home,
-        project_dir,
-        out.iter().map(|(_, k, v)| (k.as_str(), v.as_str())),
-    ) && auth_path.exists()
-        && let Ok(entries) = parse_npmrc_untrusted(&auth_path)
+    if let Some((auth_path, auth_source)) = resolve_npmrc_auth_file_tagged(home, project_dir, &out)
+        && auth_path.exists()
+        && let Ok(entries) = if auth_source.is_project_controlled() {
+            parse_npmrc_untrusted(&auth_path)
+        } else {
+            parse_npmrc(&auth_path)
+        }
     {
-        out.extend(
-            entries
-                .into_iter()
-                .map(|(k, v)| (NpmrcSource::NpmrcAuthFile, k, v)),
-        );
+        let source = if auth_source.is_project_controlled() {
+            NpmrcSource::ProjectNpmrcAuthFile
+        } else {
+            NpmrcSource::UserNpmrcAuthFile
+        };
+        out.extend(entries.into_iter().map(|(k, v)| (source, k, v)));
     }
     out
 }
@@ -273,74 +275,20 @@ pub(super) fn load_npmrc_entries_with_home(
     project_dir: &Path,
     user_rc_override: Option<&Path>,
 ) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    // User-level rc: explicit override (from `NPM_CONFIG_USERCONFIG`)
-    // wins over `$HOME/.npmrc`. When the override is set, the default
-    // path is skipped entirely — matching npm/pnpm, which treat the
-    // env var as "this is where the user rc lives," not "also read
-    // this file on top of the default."
-    let user_rc = user_rc_override
-        .map(PathBuf::from)
-        .or_else(|| home.map(|h| h.join(".npmrc")));
-    if let Some(user_rc) = user_rc
-        && user_rc.exists()
-        && let Ok(entries) = parse_npmrc(&user_rc)
-    {
-        out.extend(entries);
-    }
-    if let Some(home) = home {
-        // pnpm's global auth file: `~/.config/pnpm/auth.ini`. Same
-        // `key=value` grammar as `.npmrc`, but lives under the pnpm
-        // config dir so a user can keep registry credentials out of
-        // `~/.npmrc` (which tooling like `npm login` rewrites). Loaded
-        // after the user rc so it overrides any stale token there but
-        // before the project rc, which still wins for per-repo pins.
-        let auth_ini = pnpm_global_auth_ini_path(home, xdg_config_home);
-        if auth_ini.exists()
-            && let Ok(entries) = parse_npmrc(&auth_ini)
-        {
-            out.extend(entries);
-        }
-    }
-    let project_rc = project_dir.join(".npmrc");
-    if project_rc.exists()
-        && let Ok(entries) = parse_npmrc_untrusted(&project_rc)
-    {
-        out.extend(entries);
-    }
-    // pnpm's `npmrcAuthFile` setting points at an out-of-tree file
-    // (typically a CI secret mount or a per-user override) that holds
-    // auth tokens. Load it last so anything declared there wins —
-    // users who put auth tokens in this file expect them to take
-    // precedence over whatever happens to be in `~/.npmrc`.
-    if let Some(auth_path) = resolve_npmrc_auth_file(
-        home,
-        project_dir,
-        out.iter().map(|(k, v)| (k.as_str(), v.as_str())),
-    ) && auth_path.exists()
-        && let Ok(entries) = parse_npmrc_untrusted(&auth_path)
-    {
-        out.extend(entries);
-    }
-    out
+    load_npmrc_entries_tagged_with_home(home, xdg_config_home, project_dir, user_rc_override)
+        .into_iter()
+        .map(|(_, k, v)| (k, v))
+        .collect()
 }
 
-/// Walk the loaded `.npmrc` entries (last-write-wins) for an
-/// `npmrcAuthFile` / `npmrc-auth-file` key and resolve it to an
-/// absolute path. `~` expands against `home`; relative paths resolve
-/// against the project root, matching the storeDir convention.
-pub(super) fn resolve_npmrc_auth_file<'a, I>(
+/// Resolve an `npmrcAuthFile` / `npmrc-auth-file` value to an absolute
+/// path. `~` expands against `home`; relative paths resolve against the
+/// project root, matching the storeDir convention.
+fn resolve_npmrc_auth_file_path(
     home: Option<&Path>,
     project_dir: &Path,
-    entries: I,
-) -> Option<PathBuf>
-where
-    I: DoubleEndedIterator<Item = (&'a str, &'a str)>,
-{
-    let raw = entries
-        .rev()
-        .find(|(k, _)| matches!(*k, "npmrcAuthFile" | "npmrc-auth-file"))
-        .map(|(_, v)| v)?;
+    raw: &str,
+) -> Option<PathBuf> {
     let expanded = if let Some(rest) = raw.strip_prefix("~/") {
         home.map(|h| h.join(rest))?
     } else if raw == "~" {
@@ -355,10 +303,23 @@ where
     }
 }
 
+fn resolve_npmrc_auth_file_tagged(
+    home: Option<&Path>,
+    project_dir: &Path,
+    entries: &[(NpmrcSource, String, String)],
+) -> Option<(PathBuf, NpmrcSource)> {
+    let (source, _, raw) = entries
+        .iter()
+        .rev()
+        .find(|(_, k, _)| matches!(k.as_str(), "npmrcAuthFile" | "npmrc-auth-file"))?;
+    let path = resolve_npmrc_auth_file_path(home, project_dir, raw)?;
+    Some((path, *source))
+}
+
 /// Expand a raw `userconfig` / `NPM_CONFIG_USERCONFIG` value into a
 /// concrete path, applying the same tilde-expansion rules
-/// [`resolve_npmrc_auth_file`] uses so both env-var and `.npmrc`-derived
-/// path overrides behave the same way. Empty (after trim) returns
+/// `npmrc-auth-file` uses so both env-var and `.npmrc`-derived path
+/// overrides behave the same way. Empty (after trim) returns
 /// `None` so callers can skip a pointless file probe. Relative paths
 /// are returned verbatim and resolve against the process cwd when
 /// later fed to `exists()` / `parse_npmrc` — matching npm's behavior.

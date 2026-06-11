@@ -156,6 +156,13 @@ impl NpmConfig {
 
         let mut explicit_uri_fields = BTreeSet::new();
         for (source, key, value) in entries {
+            if source.is_project_controlled() && auth_entry_contains_env_ref(&key, &value) {
+                tracing::warn!(
+                    code = aube_codes::warnings::WARN_AUBE_UNTRUSTED_AUTH_ENV,
+                    "ignoring auth setting {key:?} from untrusted source {source:?}: project-controlled `.npmrc` cannot expand environment variables in auth config"
+                );
+                continue;
+            }
             if key == "registry" {
                 self.registry = normalize_registry_url(&value);
             } else if key == "_authToken" {
@@ -523,7 +530,7 @@ fn source_registry<'a>(
         NpmrcSource::User => user,
         NpmrcSource::PnpmAuth => pnpm_auth,
         NpmrcSource::Project => project,
-        NpmrcSource::NpmrcAuthFile => npmrc_auth_file,
+        NpmrcSource::UserNpmrcAuthFile | NpmrcSource::ProjectNpmrcAuthFile => npmrc_auth_file,
         NpmrcSource::Env => env,
     }
 }
@@ -540,7 +547,33 @@ fn source_registry_mut<'a>(
         NpmrcSource::User => user,
         NpmrcSource::PnpmAuth => pnpm_auth,
         NpmrcSource::Project => project,
-        NpmrcSource::NpmrcAuthFile => npmrc_auth_file,
+        NpmrcSource::UserNpmrcAuthFile | NpmrcSource::ProjectNpmrcAuthFile => npmrc_auth_file,
         NpmrcSource::Env => env,
     }
+}
+
+fn auth_entry_contains_env_ref(key: &str, value: &str) -> bool {
+    auth_suffix(key).is_some_and(|suffix| {
+        matches!(
+            suffix,
+            "_authToken" | "_auth" | "username" | "_password" | "cert" | "key"
+        ) && (contains_env_ref(key) || contains_env_ref(value))
+    })
+}
+
+fn auth_suffix(key: &str) -> Option<&str> {
+    if matches!(
+        key,
+        "_authToken" | "_auth" | "username" | "_password" | "cert" | "key"
+    ) {
+        return Some(key);
+    }
+    key.rsplit_once(':').map(|(_, suffix)| suffix)
+}
+
+fn contains_env_ref(value: &str) -> bool {
+    value.contains("${")
+        && value
+            .split_once("${")
+            .is_some_and(|(_, rest)| rest.contains('}'))
 }
