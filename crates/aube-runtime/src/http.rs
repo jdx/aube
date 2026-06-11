@@ -55,10 +55,28 @@ impl Http {
         last_modified: Option<&str>,
         identity_encoding: bool,
     ) -> Result<HttpResponse, Error> {
+        self.get_with_bearer(url, etag, last_modified, identity_encoding, None)
+            .await
+    }
+
+    /// [`Self::get`] with an optional bearer token (GitHub API calls
+    /// attach `GITHUB_TOKEN` to dodge the 60/hr unauthenticated
+    /// per-IP limit on shared CI/NAT addresses).
+    pub(crate) async fn get_with_bearer(
+        &self,
+        url: &str,
+        etag: Option<&str>,
+        last_modified: Option<&str>,
+        identity_encoding: bool,
+        bearer: Option<&str>,
+    ) -> Result<HttpResponse, Error> {
         validate_url(url)?;
         let mut attempt = 0u32;
         loop {
             let mut req = self.client.get(url);
+            if let Some(token) = bearer {
+                req = req.bearer_auth(token);
+            }
             if let Some(tag) = etag {
                 req = req.header(reqwest::header::IF_NONE_MATCH, tag);
             }

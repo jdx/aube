@@ -419,7 +419,23 @@ async fn fetch_release_digest(
         "{}/v{version}",
         api_base.as_deref().unwrap_or(RELEASE_API_BASE)
     );
-    let resp = http.get(&url, None, None, false).await.ok()?;
+    // CI runners and NATed offices share the 60/hr unauthenticated
+    // per-IP API limit; a token (always present in GitHub Actions)
+    // lifts that. Attached only for the real GitHub API host so an
+    // `AUBE_SELF_API_BASE` override can never siphon it.
+    let token = url
+        .starts_with("https://api.github.com/")
+        .then(|| {
+            std::env::var("GITHUB_TOKEN")
+                .or_else(|_| std::env::var("GH_TOKEN"))
+                .ok()
+                .filter(|t| !t.trim().is_empty())
+        })
+        .flatten();
+    let resp = http
+        .get_with_bearer(&url, None, None, false, token.as_deref())
+        .await
+        .ok()?;
     let bytes = resp.body?.bytes().await.ok()?;
     let release: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     let digest = release
