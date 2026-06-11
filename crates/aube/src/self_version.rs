@@ -157,7 +157,7 @@ pub(crate) async fn maybe_switch(settings: &crate::startup::StartupSettings) -> 
                     "Switching to aube@{target} (pinned by {})…",
                     pin.source
                 ));
-                aube_runtime::install_aube(&cfg, &target)
+                aube_runtime::install_aube(&cfg, &target, &crate::runtime::CliProgress::aube())
                     .await
                     .map_err(|e| miette!(code = e.code(), "{e}"))?
             }

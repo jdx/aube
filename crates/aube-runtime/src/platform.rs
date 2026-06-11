@@ -104,12 +104,10 @@ impl Platform {
 
 #[cfg(target_os = "linux")]
 fn detect_musl() -> bool {
-    let arch = match std::env::consts::ARCH {
-        "x86_64" => "x86_64",
-        "aarch64" => "aarch64",
-        other => other,
-    };
-    std::path::Path::new(&format!("/lib/ld-musl-{arch}.so.1")).exists()
+    // Rust's arch names match musl's loader names for every
+    // architecture Node ships (x86_64, aarch64), so the constant is
+    // used verbatim.
+    std::path::Path::new(&format!("/lib/ld-musl-{}.so.1", std::env::consts::ARCH)).exists()
 }
 
 #[cfg(not(target_os = "linux"))]

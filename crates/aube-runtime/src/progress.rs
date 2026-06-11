@@ -17,6 +17,11 @@ pub trait DownloadProgress: Send + Sync {
     fn on_download_start(&self, _total_bytes: Option<u64>) {}
     fn on_download_chunk(&self, _bytes: u64) {}
     fn on_done(&self) {}
+    /// An external tool (mise) is about to inherit the terminal for
+    /// its own progress output — the CLI pauses any live progress
+    /// renderer so the two don't interleave.
+    fn on_external_tool_start(&self) {}
+    fn on_external_tool_end(&self) {}
 }
 
 pub struct NoopProgress;

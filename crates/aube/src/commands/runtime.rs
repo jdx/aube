@@ -190,7 +190,7 @@ async fn run_set_global(
         origin: std::path::PathBuf::from("aube runtime set -g"),
     };
     let resolution = aube_runtime::NodeRuntime::new(cfg)
-        .resolve(&request, None, &aube_runtime::NoopProgress)
+        .resolve(&request, None, &crate::runtime::CliProgress::node())
         .await
         .map_err(|e| miette!(code = e.code(), "{e}"))?
         .ok_or_else(|| miette!("runtime resolution returned no install"))?;

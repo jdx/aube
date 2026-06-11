@@ -266,20 +266,22 @@ impl NodeRuntime {
                         reason: "runtimeInstaller=mise but mise is not on PATH".to_string(),
                     });
                 };
-                mise::install_via_mise(&mise_bin, version).await
+                mise::install_via_mise(&mise_bin, version, progress).await
             }
             InstallerMode::Auto => match mise::mise_on_path() {
-                Some(mise_bin) => match mise::install_via_mise(&mise_bin, version).await {
-                    Ok(node) => Ok(node),
-                    Err(e) => {
-                        tracing::warn!(
-                            code = aube_codes::warnings::WARN_AUBE_RUNTIME_MISE_FALLBACK,
-                            error = %e,
-                            "mise failed to install the runtime; falling back to aube's own download"
-                        );
-                        installer::install(&self.http, version, download, progress).await
+                Some(mise_bin) => {
+                    match mise::install_via_mise(&mise_bin, version, progress).await {
+                        Ok(node) => Ok(node),
+                        Err(e) => {
+                            tracing::warn!(
+                                code = aube_codes::warnings::WARN_AUBE_RUNTIME_MISE_FALLBACK,
+                                error = %e,
+                                "mise failed to install the runtime; falling back to aube's own download"
+                            );
+                            installer::install(&self.http, version, download, progress).await
+                        }
                     }
-                },
+                }
                 None => installer::install(&self.http, version, download, progress).await,
             },
         }

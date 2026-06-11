@@ -25,6 +25,8 @@
 mod ci;
 mod render;
 
+pub(crate) use render::format_bytes;
+
 use ci::{CiState, format_duration};
 use clx::progress::{
     ProgressJob, ProgressJobBuilder, ProgressJobDoneBehavior, ProgressOutput, ProgressStatus,

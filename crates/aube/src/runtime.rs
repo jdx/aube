@@ -263,7 +263,7 @@ async fn resolve_context(
 
     let runtime = aube_runtime::NodeRuntime::new(cfg);
     let resolved = runtime
-        .resolve(&request, pinned.as_ref(), &CliProgress::default())
+        .resolve(&request, pinned.as_ref(), &CliProgress::node())
         .await
         .map_err(|e| miette!(code = e.code(), "{e}"))?;
 
@@ -462,29 +462,172 @@ pub fn lockfile_pin_from(
     }
 }
 
-/// Minimal progress reporter: announces the download through the
-/// progress-safe print path (no raw stderr writes — a clx bar may be
-/// live).
+/// Progress reporter for runtime installs.
+///
+/// Two cooperating modes, mirroring how `aube install` treats the
+/// terminal:
+///
+/// - **Self-downloads** get a live clx progress bar (spinner, byte
+///   counts, phase label) — the same renderer `aube install` uses —
+///   degrading to plain `safe_eprintln` lines when clx is in text
+///   mode (`--silent`, `-v`, line reporters) or stderr is not a
+///   terminal.
+/// - **mise delegation** pauses any live clx renderer for the
+///   duration of the child (`on_external_tool_*`) so mise's own
+///   progress output owns the terminal instead of fighting ours.
+pub(crate) struct CliProgress {
+    /// Display name: `Node.js` for runtime installs, `aube` for
+    /// self-version installs.
+    tool: &'static str,
+    state: std::sync::Mutex<CliProgressState>,
+}
+
 #[derive(Default)]
-struct CliProgress {
-    announced: std::sync::atomic::AtomicBool,
+struct CliProgressState {
+    version: Option<String>,
+    job: Option<std::sync::Arc<clx::progress::ProgressJob>>,
+    /// True when the text-mode fallback announced the download.
+    announced: bool,
+    downloaded: u64,
+    total: Option<u64>,
+    /// Whether `on_external_tool_start` paused a previously-running
+    /// renderer (and so `on_external_tool_end` must resume it).
+    paused_for_tool: bool,
+}
+
+impl CliProgress {
+    pub(crate) fn node() -> Self {
+        Self::for_tool("Node.js")
+    }
+
+    pub(crate) fn aube() -> Self {
+        Self::for_tool("aube")
+    }
+
+    fn for_tool(tool: &'static str) -> Self {
+        CliProgress {
+            tool,
+            state: std::sync::Mutex::new(CliProgressState::default()),
+        }
+    }
+
+    fn fancy_output() -> bool {
+        use std::io::IsTerminal;
+        clx::progress::output() != clx::progress::ProgressOutput::Text
+            && std::io::stderr().is_terminal()
+    }
+
+    fn label(&self, version: &str, phase: &str) -> String {
+        if phase.is_empty() {
+            format!("{} v{version}", self.tool)
+        } else {
+            format!("{} v{version} ({phase})", self.tool)
+        }
+    }
+
+    fn bytes_prop(state: &CliProgressState) -> String {
+        match state.total {
+            Some(total) if total > 0 => format!(
+                "{} / {}",
+                crate::progress::format_bytes(state.downloaded),
+                crate::progress::format_bytes(total)
+            ),
+            _ => crate::progress::format_bytes(state.downloaded),
+        }
+    }
 }
 
 impl aube_runtime::DownloadProgress for CliProgress {
     fn on_phase(&self, version: Option<&node_semver::Version>, phase: aube_runtime::InstallPhase) {
-        if phase == aube_runtime::InstallPhase::Downloading
-            && let Some(version) = version
-            && !self
-                .announced
-                .swap(true, std::sync::atomic::Ordering::Relaxed)
-        {
-            crate::progress::safe_eprintln(&format!("Downloading Node.js v{version}…"));
+        use aube_runtime::InstallPhase;
+        let mut state = self.state.lock().unwrap();
+        if let Some(v) = version {
+            state.version = Some(v.to_string());
+        }
+        let version = state.version.clone().unwrap_or_default();
+        match phase {
+            InstallPhase::Resolving => {}
+            InstallPhase::Downloading => {
+                if !Self::fancy_output() && !state.announced {
+                    state.announced = true;
+                    crate::progress::safe_eprintln(&format!(
+                        "Downloading {} v{version}…",
+                        self.tool
+                    ));
+                }
+            }
+            InstallPhase::Verifying => {
+                if let Some(job) = &state.job {
+                    job.prop("label", &self.label(&version, "verifying…"));
+                }
+            }
+            InstallPhase::Extracting => {
+                if let Some(job) = &state.job {
+                    job.prop("label", &self.label(&version, "extracting…"));
+                }
+            }
+        }
+    }
+
+    fn on_download_start(&self, total_bytes: Option<u64>) {
+        if !Self::fancy_output() {
+            return;
+        }
+        let mut state = self.state.lock().unwrap();
+        state.total = total_bytes;
+        let version = state.version.clone().unwrap_or_default();
+        let builder = clx::progress::ProgressJobBuilder::new()
+            .body("{{spinner()}} {{label}}  {{progress_bar(flex=true)}} {{bytes}}")
+            .body_text(Some("{{label}} {{bytes}}"))
+            .prop("label", &self.label(&version, ""))
+            .prop("bytes", "")
+            .status(clx::progress::ProgressStatus::Running)
+            .progress_current(0)
+            // No Content-Length → hold the bar empty and let the byte
+            // counter carry the signal (both GitHub and nodejs.org
+            // send a length in practice).
+            .progress_total(total_bytes.unwrap_or(1).max(1) as usize);
+        state.job = Some(builder.start());
+    }
+
+    fn on_download_chunk(&self, bytes: u64) {
+        let mut state = self.state.lock().unwrap();
+        state.downloaded += bytes;
+        let bytes_text = Self::bytes_prop(&state);
+        if let Some(job) = &state.job {
+            if state.total.is_some() {
+                job.progress_current(state.downloaded as usize);
+            }
+            job.prop("bytes", &bytes_text);
         }
     }
 
     fn on_done(&self) {
-        if self.announced.load(std::sync::atomic::Ordering::Relaxed) {
-            crate::progress::safe_eprintln("Node.js runtime installed");
+        let state = self.state.lock().unwrap();
+        if let Some(job) = &state.job {
+            job.set_status(clx::progress::ProgressStatus::Done);
+        } else if state.announced {
+            crate::progress::safe_eprintln(&format!(
+                "{} v{} installed",
+                self.tool,
+                state.version.clone().unwrap_or_default()
+            ));
+        }
+    }
+
+    fn on_external_tool_start(&self) {
+        let mut state = self.state.lock().unwrap();
+        if !clx::progress::is_paused() {
+            clx::progress::pause();
+            state.paused_for_tool = true;
+        }
+    }
+
+    fn on_external_tool_end(&self) {
+        let mut state = self.state.lock().unwrap();
+        if state.paused_for_tool {
+            clx::progress::resume();
+            state.paused_for_tool = false;
         }
     }
 }

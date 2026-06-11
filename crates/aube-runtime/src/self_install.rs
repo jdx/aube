@@ -15,7 +15,7 @@ use crate::error::Error;
 use crate::http::Http;
 use crate::installer::stream_to_file;
 use crate::mise;
-use crate::progress::{DownloadProgress, InstallPhase, NoopProgress};
+use crate::progress::{DownloadProgress, InstallPhase};
 use crate::{InstallerMode, RuntimeConfig};
 use std::path::{Path, PathBuf};
 
@@ -265,12 +265,13 @@ async fn fetch_text(http: &Http, url: &str) -> Result<String, Error> {
 pub async fn install_aube(
     cfg: &RuntimeConfig,
     version: &node_semver::Version,
+    progress: &dyn DownloadProgress,
 ) -> Result<InstalledAube, Error> {
     if let Some(existing) = find_installed_aube(version) {
         return Ok(existing);
     }
     match cfg.installer {
-        InstallerMode::Aube => self_download(cfg, version).await,
+        InstallerMode::Aube => self_download(cfg, version, progress).await,
         InstallerMode::Mise => {
             let Some(mise_bin) = mise::mise_on_path() else {
                 return Err(Error::MiseInstallFailed {
@@ -278,10 +279,10 @@ pub async fn install_aube(
                     reason: "runtimeInstaller=mise but mise is not on PATH".to_string(),
                 });
             };
-            delegate_to_mise(&mise_bin, version).await
+            delegate_to_mise(&mise_bin, version, progress).await
         }
         InstallerMode::Auto => match mise::mise_on_path() {
-            Some(mise_bin) => match delegate_to_mise(&mise_bin, version).await {
+            Some(mise_bin) => match delegate_to_mise(&mise_bin, version, progress).await {
                 Ok(install) => Ok(install),
                 Err(e) => {
                     tracing::warn!(
@@ -289,10 +290,10 @@ pub async fn install_aube(
                         error = %e,
                         "mise failed to install aube; falling back to a release download"
                     );
-                    self_download(cfg, version).await
+                    self_download(cfg, version, progress).await
                 }
             },
-            None => self_download(cfg, version).await,
+            None => self_download(cfg, version, progress).await,
         },
     }
 }
@@ -300,8 +301,9 @@ pub async fn install_aube(
 async fn delegate_to_mise(
     mise_bin: &Path,
     version: &node_semver::Version,
+    progress: &dyn DownloadProgress,
 ) -> Result<InstalledAube, Error> {
-    mise::install_tool_via_mise(mise_bin, "aube", version).await?;
+    mise::install_tool_via_mise(mise_bin, "aube", version, progress).await?;
     discover::mise_tool_installs_dir("aube")
         .map(|d| d.join(version.to_string()))
         .and_then(|d| validate_aube_install(&d, version.clone(), InstallOrigin::Mise))
@@ -320,6 +322,7 @@ async fn delegate_to_mise(
 async fn self_download(
     cfg: &RuntimeConfig,
     version: &node_semver::Version,
+    progress: &dyn DownloadProgress,
 ) -> Result<InstalledAube, Error> {
     let root = self_dir().ok_or_else(|| {
         Error::io(
@@ -356,7 +359,6 @@ async fn self_download(
     let archive_name = format!("aube-v{version}-{triple}.{ext}");
     let url = format!("{}/v{version}/{archive_name}", release_base());
     let http = Http::new(cfg.retries);
-    let progress = NoopProgress;
     progress.on_phase(Some(version), InstallPhase::Downloading);
 
     let downloads = root.join(".downloads");
@@ -366,12 +368,13 @@ async fn self_download(
     std::fs::create_dir_all(&staging_root)
         .map_err(|e| Error::io(format!("create {}", staging_root.display()), e))?;
     let archive_path = downloads.join(format!("{archive_name}.{}", std::process::id()));
-    let actual = stream_to_file(&http, &url, &archive_path, &progress).await?;
+    let actual = stream_to_file(&http, &url, &archive_path, progress).await?;
 
     // Expected checksum: GitHub's server-computed asset digest first
     // (covers every release, nothing to publish); a `.sha256` sibling
     // as the fallback for custom mirrors that ship one; TLS-only as
     // the last resort.
+    progress.on_phase(Some(version), InstallPhase::Verifying);
     let expected = match fetch_release_digest(&http, version, &archive_name).await {
         Some(digest) => Some(digest),
         None => fetch_published_sha256(&http, &url).await,
@@ -395,6 +398,7 @@ async fn self_download(
         }
     }
 
+    progress.on_phase(Some(version), InstallPhase::Extracting);
     let staging = staging_root.join(format!("{version}.{}", std::process::id()));
     std::fs::create_dir_all(&staging)
         .map_err(|e| Error::io(format!("create {}", staging.display()), e))?;
@@ -426,6 +430,7 @@ async fn self_download(
         }
     }
     drop(lock);
+    progress.on_done();
 
     validate_aube_install(&dest, version.clone(), InstallOrigin::Aube).ok_or_else(|| {
         Error::ExtractFailed {

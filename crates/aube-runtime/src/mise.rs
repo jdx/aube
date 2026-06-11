@@ -19,17 +19,17 @@ pub fn mise_on_path() -> Option<PathBuf> {
 /// Run `mise install node@<version>` and return the resulting install
 /// from mise's installs dir.
 ///
-/// Output is captured, never inherited — a clx progress bar may be
-/// live on stderr, and mise's own progress output would corrupt it.
-/// Captured stderr is surfaced through `tracing::debug!` and, on
-/// failure, the tail rides along in the error message. Failure is
-/// exit-status only; mise's stderr is human prose and not a stable
-/// interface.
+/// mise's stderr (its own progress UI) is inherited; see
+/// `install_tool_via_mise` for the stdout/pausing contract.
+/// Failure is exit-status only; mise's stderr is human prose and not
+/// a stable interface (the user watches it live — see
+/// `install_tool_via_mise`).
 pub(crate) async fn install_via_mise(
     mise_bin: &std::path::Path,
     version: &node_semver::Version,
+    progress: &dyn crate::progress::DownloadProgress,
 ) -> Result<InstalledNode, Error> {
-    install_tool_via_mise(mise_bin, "node", version).await?;
+    install_tool_via_mise(mise_bin, "node", version, progress).await?;
 
     // Rescan for exactly that version. Exit 0 but no discoverable
     // install usually means aube's view of the installs dir differs
@@ -50,40 +50,45 @@ pub(crate) async fn install_via_mise(
 
 /// Run `mise install <tool>@<version>` for any tool. Callers rescan
 /// the installs dir themselves — layouts differ per tool.
+///
+/// mise draws its own download progress on stderr, so the child
+/// inherits it (the CLI pauses any live aube progress bar via the
+/// `on_external_tool_*` hooks first). stdout is piped into tracing
+/// instead — runtime resolution can run inside commands whose stdout
+/// is a contract (`aubx tool | jq`), and mise's stdout must not leak
+/// into that stream.
 pub(crate) async fn install_tool_via_mise(
     mise_bin: &std::path::Path,
     tool: &str,
     version: &node_semver::Version,
+    progress: &dyn crate::progress::DownloadProgress,
 ) -> Result<(), Error> {
     let spec = format!("{tool}@{version}");
     tracing::debug!(mise = %mise_bin.display(), %spec, "delegating install to mise");
-    let output = tokio::process::Command::new(mise_bin)
+    progress.on_external_tool_start();
+    let result = tokio::process::Command::new(mise_bin)
         .args(["install", &spec])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::inherit())
         .output()
-        .await
-        .map_err(|e| Error::MiseInstallFailed {
-            version: spec.clone(),
-            reason: format!("failed to spawn mise: {e}"),
-        })?;
+        .await;
+    progress.on_external_tool_end();
+    let output = result.map_err(|e| Error::MiseInstallFailed {
+        version: spec.clone(),
+        reason: format!("failed to spawn mise: {e}"),
+    })?;
 
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    for line in stderr.lines() {
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
         tracing::debug!(target: "mise", "{line}");
     }
 
     if !output.status.success() {
-        let tail: Vec<&str> = stderr.lines().rev().take(20).collect();
-        let tail: String = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
         return Err(Error::MiseInstallFailed {
             version: spec,
             reason: format!(
-                "exit status {}{}{}",
-                output.status.code().unwrap_or(-1),
-                if tail.is_empty() { "" } else { "\n" },
-                tail
+                "exit status {} (see mise output above)",
+                output.status.code().unwrap_or(-1)
             ),
         });
     }

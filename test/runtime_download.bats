@@ -62,8 +62,8 @@ _start_mirror() {
 	python3 -u -m http.server 0 --bind 127.0.0.1 --directory "$MIRROR_DIR" >"$log" 2>&1 &
 	MIRROR_PID=$!
 	# Wait for the bind line ("Serving HTTP on 127.0.0.1 port NNNN ...").
-	local i port=""
-	for i in $(seq 1 50); do
+	local port=""
+	for _ in $(seq 1 50); do
 		port="$(sed -n 's/.*port \([0-9]*\).*/\1/p' "$log" | head -1)"
 		[ -n "$port" ] && break
 		sleep 0.1
