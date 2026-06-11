@@ -129,9 +129,10 @@ pnpm's `managePackageManagerVersions` — on by default). Pin via either:
 When the running aube doesn't satisfy the pin, it locates the pinned
 version — mise installs (`~/.local/share/mise/installs/aube/`) are
 reused, missing versions install per
-[`runtimeInstaller`](/settings#runtimeinstaller) (mise delegation or a
-checksum-verified GitHub release download into
-`~/.local/share/aube/self/`) — and re-execs it with the same
+[`runtimeInstaller`](/settings#runtimeinstaller) (mise delegation, or
+a GitHub release download into `~/.local/share/aube/self/` verified
+against GitHub's server-computed asset digest) — and re-execs it with
+the same
 arguments. `aubr` and `aubx` switch the same way. The corepack
 `packageManager` field takes exact versions; `devEngines.packageManager`
 accepts ranges, `lts`-style aliases excluded, plus the usual `onFail`

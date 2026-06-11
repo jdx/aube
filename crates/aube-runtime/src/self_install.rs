@@ -7,7 +7,8 @@
 //! (`installs/aube/<v>/`, binaries at the version root) are reused
 //! read-only, and self-downloads come from GitHub release archives
 //! (`aube-v{V}-{target-triple}.tar.gz` / `.zip`, binaries at the
-//! archive root) into `$XDG_DATA_HOME/aube/self/<v>/`.
+//! archive root) into `$XDG_DATA_HOME/aube/self/<v>/`, verified
+//! against GitHub's server-computed release asset digests.
 
 use crate::discover::{self, InstallOrigin};
 use crate::error::Error;
@@ -20,9 +21,15 @@ use std::path::{Path, PathBuf};
 
 /// Default base for release archives. `AUBE_SELF_DOWNLOAD_BASE`
 /// overrides for tests and mirrors; archives live at
-/// `{base}/v{V}/aube-v{V}-{triple}.{ext}` with a sibling
-/// `{archive}.sha256`.
+/// `{base}/v{V}/aube-v{V}-{triple}.{ext}`.
 const RELEASE_BASE: &str = "https://github.com/jdx/aube/releases/download";
+
+/// Releases API base for asset digests: GitHub computes a server-side
+/// SHA-256 for every release asset (`assets[].digest`, tamper-evident
+/// under immutable releases), so downloads verify without aube
+/// publishing any checksum files — including every release that
+/// already exists. `AUBE_SELF_API_BASE` overrides for tests.
+const RELEASE_API_BASE: &str = "https://api.github.com/repos/jdx/aube/releases/tags";
 
 /// Endpoint announcing the newest release (one line, bare version).
 /// Shared with the update notifier. `AUBE_SELF_VERSION_URL` overrides.
@@ -320,8 +327,15 @@ async fn self_download(
     let archive_path = downloads.join(format!("{archive_name}.{}", std::process::id()));
     let actual = stream_to_file(&http, &url, &archive_path, &progress).await?;
 
-    // Published checksum, when the release ships one.
-    match fetch_published_sha256(&http, &url).await {
+    // Expected checksum: GitHub's server-computed asset digest first
+    // (covers every release, nothing to publish); a `.sha256` sibling
+    // as the fallback for custom mirrors that ship one; TLS-only as
+    // the last resort.
+    let expected = match fetch_release_digest(&http, version, &archive_name).await {
+        Some(digest) => Some(digest),
+        None => fetch_published_sha256(&http, &url).await,
+    };
+    match expected {
         Some(expected) if expected != actual => {
             let _ = std::fs::remove_file(&archive_path);
             drop(lock);
@@ -335,7 +349,7 @@ async fn self_download(
         None => {
             tracing::debug!(
                 %url,
-                "release publishes no .sha256 (pre-checksum release); trusting TLS"
+                "no asset digest or .sha256 available for this archive; trusting TLS"
             );
         }
     }
@@ -380,6 +394,49 @@ async fn self_download(
             ),
         }
     })
+}
+
+/// Look up the archive's server-computed digest in the GitHub
+/// releases API (`assets[].digest`, `"sha256:<hex>"`). Skipped when a
+/// custom `AUBE_SELF_DOWNLOAD_BASE` mirror is active without its own
+/// `AUBE_SELF_API_BASE` — GitHub's digest describes GitHub's copy,
+/// not whatever a mirror chose to serve. `None` on any miss (network,
+/// rate limit, unknown tag/asset): the caller falls back rather than
+/// failing a download GitHub itself already served over TLS.
+async fn fetch_release_digest(
+    http: &Http,
+    version: &node_semver::Version,
+    archive_name: &str,
+) -> Option<[u8; 32]> {
+    let api_base = std::env::var("AUBE_SELF_API_BASE")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim_end_matches('/').to_string());
+    if api_base.is_none() && std::env::var_os("AUBE_SELF_DOWNLOAD_BASE").is_some() {
+        return None;
+    }
+    let url = format!(
+        "{}/v{version}",
+        api_base.as_deref().unwrap_or(RELEASE_API_BASE)
+    );
+    let resp = http.get(&url, None, None, false).await.ok()?;
+    let bytes = resp.body?.bytes().await.ok()?;
+    let release: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let digest = release
+        .get("assets")?
+        .as_array()?
+        .iter()
+        .find(|a| a.get("name").and_then(|n| n.as_str()) == Some(archive_name))?
+        .get("digest")?
+        .as_str()?;
+    parse_sha256_digest(digest)
+}
+
+/// Parse GitHub's `"sha256:<hex>"` digest form.
+fn parse_sha256_digest(digest: &str) -> Option<[u8; 32]> {
+    let hex_part = digest.strip_prefix("sha256:")?;
+    let bytes = hex::decode(hex_part).ok()?;
+    <[u8; 32]>::try_from(bytes.as_slice()).ok()
 }
 
 /// Fetch `{archive_url}.sha256` and parse the leading hex digest
@@ -450,6 +507,15 @@ mod tests {
         )
         .unwrap();
         assert!(install.exe.parent().unwrap().ends_with("bin"));
+    }
+
+    #[test]
+    fn parses_github_digest_form() {
+        let digest = format!("sha256:{}", "ab".repeat(32));
+        assert_eq!(parse_sha256_digest(&digest), Some([0xab; 32]));
+        assert_eq!(parse_sha256_digest("sha512:abcd"), None);
+        assert_eq!(parse_sha256_digest("sha256:nothex"), None);
+        assert_eq!(parse_sha256_digest("sha256:abcd"), None); // wrong length
     }
 
     #[test]
