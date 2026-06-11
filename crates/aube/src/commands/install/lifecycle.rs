@@ -420,11 +420,8 @@ pub(crate) async fn run_dep_lifecycle_scripts(
             // writes `"h3-safe": "npm:h3@0.19.0"` to sneak a denied pkg
             // through the allowlist. registry_name() strips alias back to
             // real name.
-            match policy.decide_package(
-                pkg.registry_name(),
-                &pkg.version,
-                pkg.source_approval_key(),
-            ) {
+            let source_key = pkg.source_approval_key();
+            match policy.decide_package(pkg.registry_name(), &pkg.version, source_key.as_deref()) {
                 aube_scripts::AllowDecision::Allow => {}
                 aube_scripts::AllowDecision::Deny | aube_scripts::AllowDecision::Unspecified => {
                     continue;
@@ -502,7 +499,7 @@ pub(crate) async fn run_dep_lifecycle_scripts(
             name: pkg.name.clone(),
             registry_name: pkg.registry_name().to_string(),
             version: pkg.version.clone(),
-            source_key: pkg.source_approval_key().map(str::to_owned),
+            source_key: pkg.source_approval_key(),
             package_dir,
             dep_modules_dir,
             manifest: dep_manifest,
@@ -1111,8 +1108,9 @@ pub(super) fn unreviewed_dep_builds(
 ) -> miette::Result<Vec<UnreviewedBuild>> {
     let mut unreviewed = Vec::new();
     for (dep_path, pkg) in &graph.packages {
+        let source_key = pkg.source_approval_key();
         if !matches!(
-            policy.decide_package(pkg.registry_name(), &pkg.version, pkg.source_approval_key()),
+            policy.decide_package(pkg.registry_name(), &pkg.version, source_key.as_deref()),
             aube_scripts::AllowDecision::Unspecified
         ) {
             continue;
@@ -1151,9 +1149,7 @@ pub(super) fn unreviewed_dep_builds(
             })?;
         if aube_scripts::has_dep_lifecycle_work(&package_dir, &dep_manifest) {
             unreviewed.push(UnreviewedBuild {
-                spec_key: pkg
-                    .source_approval_key()
-                    .map_or_else(|| pkg.spec_key(), str::to_owned),
+                spec_key: pkg.source_approval_key().unwrap_or_else(|| pkg.spec_key()),
                 suspicions: aube_scripts::sniff_lifecycle(&dep_manifest),
             });
         }

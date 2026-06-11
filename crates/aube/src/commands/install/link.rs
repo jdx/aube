@@ -214,7 +214,7 @@ pub(super) fn run_link_phase(input: LinkPhaseInput<'_>) -> miette::Result<LinkPh
                     build_policy.decide_package(
                         pkg.registry_name(),
                         &pkg.version,
-                        pkg.source_approval_key()
+                        pkg.source_approval_key().as_deref(),
                     ),
                     aube_scripts::AllowDecision::Allow
                 )

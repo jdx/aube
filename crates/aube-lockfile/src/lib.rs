@@ -386,15 +386,12 @@ impl LockedPackage {
     ///
     /// Name-wide build approvals are only trustworthy for packages
     /// fetched from a registry. Source-backed entries need to be
-    /// approved by their lockfile identity, with any peer suffix
-    /// stripped so the approval survives peer-context reshuffling.
-    pub fn source_approval_key(&self) -> Option<&str> {
-        self.local_source.as_ref()?;
-        Some(
-            self.dep_path
-                .split_once('(')
-                .map_or(&self.dep_path, |(base, _)| base),
-        )
+    /// approved by their source identity as pnpm records it in
+    /// lockfile keys / `allowBuilds` placeholders.
+    pub fn source_approval_key(&self) -> Option<String> {
+        self.local_source
+            .as_ref()
+            .map(|source| format!("{}@{}", self.registry_name(), source.specifier()))
     }
 }
 
@@ -442,12 +439,31 @@ mod locked_package_tests {
     }
 
     #[test]
-    fn source_approval_key_strips_peer_suffix_for_local_sources() {
+    fn source_approval_key_uses_source_spec_for_local_sources() {
         let mut pkg = pkg();
         pkg.dep_path = "pkg@file+abc(peer@1.0.0)".to_string();
         pkg.local_source = Some(LocalSource::Directory(PathBuf::from("vendor/pkg")));
 
-        assert_eq!(pkg.source_approval_key(), Some("pkg@file+abc"));
+        assert_eq!(
+            pkg.source_approval_key(),
+            Some("pkg@file:vendor/pkg".to_string())
+        );
+    }
+
+    #[test]
+    fn source_approval_key_uses_raw_remote_tarball_url() {
+        let mut pkg = pkg();
+        pkg.dep_path = "pkg@url+abc123".to_string();
+        pkg.local_source = Some(LocalSource::RemoteTarball(RemoteTarballSource {
+            url: "https://example.com/pkg.tgz".to_string(),
+            integrity: "sha512-tarball".to_string(),
+            git_hosted: false,
+        }));
+
+        assert_eq!(
+            pkg.source_approval_key(),
+            Some("pkg@https://example.com/pkg.tgz".to_string())
+        );
     }
 }
 

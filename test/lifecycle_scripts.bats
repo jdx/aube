@@ -136,7 +136,7 @@ JSON
 	run aube install
 	assert_success
 	assert_file_not_exists packages/app/node_modules/member-dep-with-build/built.marker
-	assert_output --partial "member-dep-with-build@file+"
+	assert_output --partial "member-dep-with-build@file:packages/app/dep-with-build"
 }
 
 @test "requiredScripts enforces root package scripts" {
@@ -185,7 +185,7 @@ JSON
 	run aube install
 	assert_failure
 	assert_output --partial "dependencies with build scripts must be reviewed"
-	assert_output --partial "dep-with-build@file+"
+	assert_output --partial "dep-with-build@file:./dep-with-build"
 	# Diverges from pnpm: aube does not auto-seed an `allowBuilds`
 	# placeholder. The manifest is left exactly as the user wrote it.
 	assert_file_not_exists aube-workspace.yaml
@@ -219,7 +219,7 @@ JSON
 	run aube install --config.strict-dep-builds=true
 	assert_failure
 	assert_output --partial "dependencies with build scripts must be reviewed"
-	assert_output --partial "dep-with-build@file+"
+	assert_output --partial "dep-with-build@file:./dep-with-build"
 }
 
 @test "strictDepBuilds=false keeps unreviewed dependency build scripts skipped" {

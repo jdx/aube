@@ -686,6 +686,32 @@ mod tests {
     }
 
     #[test]
+    fn source_specs_cannot_be_union_members() {
+        let map: BTreeMap<String, AllowBuildRaw> = [(
+            "dependency@https://example.com/dep.tgz || 1.0.0".to_string(),
+            AllowBuildRaw::Bool(true),
+        )]
+        .into_iter()
+        .collect();
+        let (_, errs) = BuildPolicy::from_config(&map, &[], &[], false);
+        assert_eq!(errs.len(), 1);
+        assert!(matches!(errs[0], BuildPolicyError::InvalidVersionUnion(_)));
+    }
+
+    #[test]
+    fn semver_then_source_spec_union_is_also_rejected() {
+        let map: BTreeMap<String, AllowBuildRaw> = [(
+            "dependency@1.0.0 || https://example.com/dep.tgz".to_string(),
+            AllowBuildRaw::Bool(true),
+        )]
+        .into_iter()
+        .collect();
+        let (_, errs) = BuildPolicy::from_config(&map, &[], &[], false);
+        assert_eq!(errs.len(), 1);
+        assert!(matches!(errs[0], BuildPolicyError::InvalidVersionUnion(_)));
+    }
+
+    #[test]
     fn non_bool_value_reports_warning() {
         let map: BTreeMap<String, AllowBuildRaw> =
             [("esbuild".to_string(), AllowBuildRaw::Other("maybe".into()))]

@@ -2241,7 +2241,8 @@ Explicitly allow or disallow script execution per package.
 Per-package review map for dependency lifecycle scripts. Read from
 `package.json`'s `pnpm.allowBuilds` field and workspace yaml's
 `allowBuilds`. Keys are package name patterns (`esbuild`, `@scope/*`,
-`pkg@1.0.0 || 2.0.0`); values are `true` to allow `preinstall` /
+`pkg@1.0.0 || 2.0.0`, exact non-registry sources like
+`pkg@https://example.com/pkg.tgz`); values are `true` to allow `preinstall` /
 `install` / `postinstall` scripts for that package or `false` to record
 an intentional skip. Packages not listed are skipped by default, and
 install adds unreviewed build packages to workspace `allowBuilds` as

@@ -65,7 +65,10 @@ Deny rules win over allow rules. Workspace-yaml entries and
 Entry keys support a bare package name (matches every version), an
 exact version pin (`esbuild@0.19.0`), an exact version union
 (`esbuild@0.19.0 || 0.20.0`), or a `*` wildcard name (`@babel/*`,
-`*-loader`, or bare `*` for everything). Wildcards can't be combined
+`*-loader`, or bare `*` for everything). Exact non-registry source
+keys from pnpm are also honored, such as
+`dep@https://codeload.github.com/example/dep/tar.gz/<sha>`.
+Wildcards can't be combined
 with a version pin — the point of a version pin is to assert a
 specific build was audited, and a wildcard defeats that. Semver
 ranges aren't supported for the same reason.
