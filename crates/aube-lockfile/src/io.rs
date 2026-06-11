@@ -434,6 +434,77 @@ fn dep_path_has_registry_version(dep_path: &str, name: &str) -> bool {
     node_semver::Version::parse(version).is_ok()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::dep_path_has_registry_version;
+    use crate::{GitSource, LocalSource, RemoteTarballSource};
+    use proptest::prelude::*;
+    use std::path::PathBuf;
+
+    fn package_name() -> impl Strategy<Value = String> {
+        prop_oneof![
+            "[a-z][a-z0-9-]{0,20}".prop_map(|name| name),
+            ("[a-z][a-z0-9-]{0,10}", "[a-z][a-z0-9-]{0,20}")
+                .prop_map(|(scope, name)| format!("@{scope}/{name}")),
+        ]
+    }
+
+    fn semver() -> impl Strategy<Value = String> {
+        (0u16..1000, 0u16..1000, 0u16..1000)
+            .prop_map(|(major, minor, patch)| format!("{major}.{minor}.{patch}"))
+    }
+
+    fn path_source() -> impl Strategy<Value = LocalSource> {
+        ("[a-z][a-z0-9_-]{0,12}", prop_oneof![0u8..5, 5u8..10]).prop_map(|(path, kind)| {
+            let path = PathBuf::from(format!("./vendor/{path}"));
+            match kind {
+                0 => LocalSource::Directory(path),
+                1 => LocalSource::Tarball(path.with_extension("tgz")),
+                2 => LocalSource::Link(path),
+                3 => LocalSource::Portal(path),
+                _ => LocalSource::Exec(path),
+            }
+        })
+    }
+
+    fn local_source() -> impl Strategy<Value = LocalSource> {
+        prop_oneof![
+            path_source(),
+            "[a-z][a-z0-9-]{0,20}".prop_map(|repo| LocalSource::Git(GitSource {
+                url: format!("https://github.com/acme/{repo}.git"),
+                committish: None,
+                resolved: "0123456789abcdef0123456789abcdef01234567".to_string(),
+                integrity: None,
+                subpath: None,
+            })),
+            "[a-z][a-z0-9-]{0,20}".prop_map(|tarball| LocalSource::RemoteTarball(
+                RemoteTarballSource {
+                    url: format!("https://registry.example/{tarball}.tgz"),
+                    integrity: String::new(),
+                    git_hosted: false,
+                },
+            )),
+        ]
+    }
+
+    proptest! {
+        #[test]
+        fn dep_path_registry_version_accepts_name_at_semver(name in package_name(), version in semver()) {
+            let dep_path = format!("{name}@{version}");
+            prop_assert!(dep_path_has_registry_version(&dep_path, &name));
+        }
+
+        #[test]
+        fn dep_path_registry_version_rejects_local_source_dep_paths(
+            name in package_name(),
+            source in local_source(),
+        ) {
+            let dep_path = source.dep_path(&name);
+            prop_assert!(!dep_path_has_registry_version(&dep_path, &name));
+        }
+    }
+}
+
 /// Replace `LockfileKind::Yarn` with `LockfileKind::YarnBerry` when
 /// the yarn.lock at `path` is actually a yarn 2+ lockfile. Other
 /// kinds pass through unchanged.
