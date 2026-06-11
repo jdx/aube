@@ -35,7 +35,7 @@ pub use platform::Platform;
 pub use progress::{DownloadProgress, InstallPhase, NoopProgress};
 pub use resolver::{NodeRuntime, Resolution, ResolvedFrom};
 pub use self_install::{
-    InstalledAube, find_installed_aube, install_aube, latest_aube_version, list_installed_aube,
+    InstalledAube, available_aube_versions, find_installed_aube, install_aube, list_installed_aube,
     release_target_triple, self_dir,
 };
 pub use shasums::{sha256_from_sri, sri_sha256};

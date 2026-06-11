@@ -87,16 +87,27 @@ pub(crate) async fn maybe_switch(settings: &crate::startup::StartupSettings) -> 
                 .max();
             match best_installed {
                 Some(v) => v,
-                None => match aube_runtime::latest_aube_version(2).await {
-                    Ok(latest) if spec.satisfied_by(&latest) == Some(true) => latest,
-                    Ok(latest) => {
-                        return self_pin_unsatisfied(
-                            &pin,
-                            format!(
-                                "no installed aube satisfies {} and the newest release is {latest}",
-                                pin.raw
-                            ),
-                        );
+                None => match aube_runtime::available_aube_versions(2).await {
+                    Ok(published) => {
+                        let best = published
+                            .iter()
+                            .filter(|v| spec.satisfied_by(v) == Some(true))
+                            .max()
+                            .cloned();
+                        match best {
+                            Some(v) => v,
+                            None => {
+                                let newest = published.iter().max();
+                                return self_pin_unsatisfied(
+                                    &pin,
+                                    format!(
+                                        "no published aube satisfies {} (newest release: {})",
+                                        pin.raw,
+                                        newest.map(|v| v.to_string()).unwrap_or_default()
+                                    ),
+                                );
+                            }
+                        }
                     }
                     Err(e) => {
                         return self_pin_unsatisfied(

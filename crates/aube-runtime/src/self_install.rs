@@ -24,11 +24,19 @@ use std::path::{Path, PathBuf};
 /// `{base}/v{V}/aube-v{V}-{triple}.{ext}`.
 const RELEASE_BASE: &str = "https://github.com/jdx/aube/releases/download";
 
-/// Releases API base for asset digests: GitHub computes a server-side
-/// SHA-256 for every release asset (`assets[].digest`, tamper-evident
-/// under immutable releases), so downloads verify without aube
-/// publishing any checksum files — including every release that
-/// already exists. `AUBE_SELF_API_BASE` overrides for tests.
+/// mise-versions host: CDN-cached, rate-limit-free mirrors of the
+/// release version list (`/aube`, plaintext) and GitHub release
+/// metadata (`/api/github/repos/jdx/aube/releases/<tag>`, including
+/// `assets[].digest`) — the same service mise itself consults before
+/// falling back to the GitHub API. `AUBE_VERSIONS_HOST` overrides for
+/// tests.
+const VERSIONS_HOST: &str = "https://mise-versions.jdx.dev";
+
+/// GitHub releases API fallback for asset digests: GitHub computes a
+/// server-side SHA-256 for every release asset (`assets[].digest`,
+/// tamper-evident under immutable releases). Consulted when the
+/// versions host misses; honors `GITHUB_TOKEN`. `AUBE_SELF_API_BASE`
+/// overrides for tests.
 const RELEASE_API_BASE: &str = "https://api.github.com/repos/jdx/aube/releases/tags";
 
 /// Endpoint announcing the newest release (one line, bare version).
@@ -194,27 +202,60 @@ fn release_base() -> String {
         .unwrap_or_else(|| RELEASE_BASE.to_string())
 }
 
-/// Resolve the newest published aube version (for range pins).
-pub async fn latest_aube_version(retries: u32) -> Result<node_semver::Version, Error> {
+fn versions_host() -> String {
+    std::env::var("AUBE_VERSIONS_HOST")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim_end_matches('/').to_string())
+        .unwrap_or_else(|| VERSIONS_HOST.to_string())
+}
+
+/// Every published aube version (for resolving range pins to the best
+/// satisfying release). Primary source is the versions host's
+/// plaintext list — CDN-cached, no rate limits; the
+/// `aube.jdx.dev/VERSION` latest-only announcement is the fallback,
+/// degrading range resolution to "newest release" rather than failing.
+pub async fn available_aube_versions(retries: u32) -> Result<Vec<node_semver::Version>, Error> {
+    let http = Http::new(retries);
+    let list_url = format!("{}/aube", versions_host());
+    match fetch_text(&http, &list_url).await {
+        Ok(text) => {
+            let versions: Vec<node_semver::Version> = text
+                .lines()
+                .filter_map(|l| node_semver::Version::parse(l.trim().trim_start_matches('v')).ok())
+                .collect();
+            if !versions.is_empty() {
+                return Ok(versions);
+            }
+            tracing::debug!(%list_url, "versions host returned an empty list; falling back");
+        }
+        Err(e) => {
+            tracing::debug!(%list_url, error = %e, "versions host unreachable; falling back");
+        }
+    }
     let url = std::env::var("AUBE_SELF_VERSION_URL")
         .ok()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| VERSION_URL.to_string());
-    let http = Http::new(retries);
-    let resp = http.get(&url, None, None, false).await?;
-    let body = resp.body.ok_or_else(|| Error::DownloadFailed {
-        url: url.clone(),
-        reason: "unexpected empty response".to_string(),
-    })?;
-    let text = body.text().await.map_err(|e| Error::DownloadFailed {
-        url: url.clone(),
-        reason: e.to_string(),
-    })?;
-    node_semver::Version::parse(text.trim().trim_start_matches('v')).map_err(|e| {
+    let text = fetch_text(&http, &url).await?;
+    let latest = node_semver::Version::parse(text.trim().trim_start_matches('v')).map_err(|e| {
         Error::DownloadFailed {
             url,
             reason: format!("unparseable version announcement: {e}"),
         }
+    })?;
+    Ok(vec![latest])
+}
+
+async fn fetch_text(http: &Http, url: &str) -> Result<String, Error> {
+    let resp = http.get(url, None, None, false).await?;
+    let body = resp.body.ok_or_else(|| Error::DownloadFailed {
+        url: url.to_string(),
+        reason: "unexpected empty response".to_string(),
+    })?;
+    body.text().await.map_err(|e| Error::DownloadFailed {
+        url: url.to_string(),
+        reason: e.to_string(),
     })
 }
 
@@ -316,7 +357,7 @@ async fn self_download(
     let url = format!("{}/v{version}/{archive_name}", release_base());
     let http = Http::new(cfg.retries);
     let progress = NoopProgress;
-    progress.on_phase(version, InstallPhase::Downloading);
+    progress.on_phase(Some(version), InstallPhase::Downloading);
 
     let downloads = root.join(".downloads");
     let staging_root = root.join(".tmp");
@@ -408,21 +449,40 @@ async fn fetch_release_digest(
     version: &node_semver::Version,
     archive_name: &str,
 ) -> Option<[u8; 32]> {
-    let api_base = std::env::var("AUBE_SELF_API_BASE")
+    let api_override = std::env::var("AUBE_SELF_API_BASE")
         .ok()
         .filter(|s| !s.trim().is_empty())
         .map(|s| s.trim_end_matches('/').to_string());
-    if api_base.is_none() && std::env::var_os("AUBE_SELF_DOWNLOAD_BASE").is_some() {
+    let host_override = std::env::var_os("AUBE_VERSIONS_HOST").is_some();
+    // Custom download mirrors may serve different bytes than GitHub's
+    // archives; digests describing GitHub's copies don't apply unless
+    // a test override says otherwise.
+    if api_override.is_none()
+        && !host_override
+        && std::env::var_os("AUBE_SELF_DOWNLOAD_BASE").is_some()
+    {
         return None;
     }
+
+    // 1. mise-versions proxy: CDN-cached, no rate limits, no token.
+    let host_url = format!(
+        "{}/api/github/repos/jdx/aube/releases/v{version}",
+        versions_host()
+    );
+    if let Some(digest) =
+        digest_from_release_json(http, &host_url, None, version, archive_name).await
+    {
+        return Some(digest);
+    }
+
+    // 2. GitHub API. CI runners and NATed offices share the 60/hr
+    // unauthenticated per-IP limit; a token (always present in GitHub
+    // Actions) lifts that. Attached only for the real GitHub API host
+    // so an `AUBE_SELF_API_BASE` override can never siphon it.
     let url = format!(
         "{}/v{version}",
-        api_base.as_deref().unwrap_or(RELEASE_API_BASE)
+        api_override.as_deref().unwrap_or(RELEASE_API_BASE)
     );
-    // CI runners and NATed offices share the 60/hr unauthenticated
-    // per-IP API limit; a token (always present in GitHub Actions)
-    // lifts that. Attached only for the real GitHub API host so an
-    // `AUBE_SELF_API_BASE` override can never siphon it.
     let token = url
         .starts_with("https://api.github.com/")
         .then(|| {
@@ -432,12 +492,31 @@ async fn fetch_release_digest(
                 .filter(|t| !t.trim().is_empty())
         })
         .flatten();
+    digest_from_release_json(http, &url, token.as_deref(), version, archive_name).await
+}
+
+/// Fetch a GitHub-release-shaped JSON document and pull out
+/// `archive_name`'s digest. The returned `tag_name` must echo the
+/// requested version — guards against a stale or mis-keyed cache
+/// entry on the proxy handing back another release's digests.
+async fn digest_from_release_json(
+    http: &Http,
+    url: &str,
+    bearer: Option<&str>,
+    version: &node_semver::Version,
+    archive_name: &str,
+) -> Option<[u8; 32]> {
     let resp = http
-        .get_with_bearer(&url, None, None, false, token.as_deref())
+        .get_with_bearer(url, None, None, false, bearer)
         .await
         .ok()?;
     let bytes = resp.body?.bytes().await.ok()?;
     let release: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let tag = release.get("tag_name")?.as_str()?;
+    if tag != format!("v{version}") {
+        tracing::debug!(%url, tag, expected = %format!("v{version}"), "release metadata tag mismatch; ignoring");
+        return None;
+    }
     let digest = release
         .get("assets")?
         .as_array()?
