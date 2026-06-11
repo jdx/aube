@@ -394,7 +394,13 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                 resolution: WritableRuntimeBinaryResolution {
                     archive: v.archive.clone(),
                     bin: if v.bin_is_bare_string && v.bin.len() == 1 {
-                        WritableRuntimeBin::Single(v.bin.values().next().unwrap().clone())
+                        WritableRuntimeBin::Single(
+                            v.bin
+                                .values()
+                                .next()
+                                .expect("bin.len() == 1 checked above")
+                                .clone(),
+                        )
                     } else {
                         WritableRuntimeBin::Map(v.bin.clone())
                     },

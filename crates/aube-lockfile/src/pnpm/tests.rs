@@ -3314,6 +3314,80 @@ fn runtime_pin_round_trips_through_write() {
     assert!(reparsed.packages.is_empty());
 }
 
+/// Branch-lockfile merges of the same pinned version must union the
+/// per-platform variants (a pin written on darwin + one written on
+/// linux merge into one pin carrying both artifacts) and surface
+/// specifier disagreements instead of silently keeping one side.
+#[test]
+fn runtime_pin_merge_unions_variants() {
+    use crate::{RuntimePin, RuntimeTarget, RuntimeVariant};
+
+    fn variant(os: &str) -> RuntimeVariant {
+        RuntimeVariant {
+            targets: vec![RuntimeTarget {
+                os: os.to_string(),
+                cpu: "x64".to_string(),
+                libc: None,
+            }],
+            archive: "tarball".to_string(),
+            url: format!("https://nodejs.org/download/release/v1.0.0/node-v1.0.0-{os}-x64.tar.gz"),
+            integrity: "sha256-AAAA".to_string(),
+            bin: [("node".to_string(), "bin/node".to_string())]
+                .into_iter()
+                .collect(),
+            bin_is_bare_string: true,
+            prefix: None,
+        }
+    }
+    fn graph_with_pin(os: &str) -> LockfileGraph {
+        let mut g = LockfileGraph::default();
+        g.importers.insert(".".to_string(), Vec::new());
+        g.runtimes.insert(
+            "node".to_string(),
+            RuntimePin {
+                specifier: "^1.0.0".to_string(),
+                version: "1.0.0".to_string(),
+                dev: true,
+                has_bin: true,
+                variants: vec![variant(os)],
+            },
+        );
+        g
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let manifest = PackageJson::default();
+    write(
+        &dir.path().join("aube-lock.yaml"),
+        &graph_with_pin("darwin"),
+        &manifest,
+    )
+    .unwrap();
+    write(
+        &dir.path().join("aube-lock.feature.yaml"),
+        &graph_with_pin("linux"),
+        &manifest,
+    )
+    .unwrap();
+
+    let report = crate::merge_branch_lockfiles(dir.path(), &manifest).unwrap();
+    assert_eq!(report.merged_files.len(), 1);
+
+    let merged = parse(&dir.path().join("aube-lock.yaml")).unwrap();
+    let pin = merged.runtimes.get("node").unwrap();
+    let mut oses: Vec<&str> = pin
+        .variants
+        .iter()
+        .flat_map(|v| v.targets.iter().map(|t| t.os.as_str()))
+        .collect();
+    oses.sort();
+    assert_eq!(
+        oses,
+        vec!["darwin", "linux"],
+        "variants must union across branches"
+    );
+}
+
 /// devEngines drift: a recorded pin whose range no longer matches the
 /// manifest (or whose devEngines entry was removed) must read stale;
 /// a matching pin stays fresh; and a manifest with devEngines but no
@@ -3357,6 +3431,18 @@ fn runtime_pin_drift_detection() {
     assert!(
         matches!(removed, DriftStatus::Stale { .. }),
         "removed devEngines must be stale"
+    );
+
+    // Entry still names node but drops the version: no concrete
+    // range to contradict the pin — must stay fresh (a hard frozen
+    // failure here would fire on a field that changes nothing).
+    let versionless: PackageJson =
+        serde_json::from_str(r#"{"name": "t", "devEngines": {"runtime": {"name": "node"}}}"#)
+            .unwrap();
+    assert_eq!(
+        graph.check_drift(&versionless, &empty, &[], &empty_catalogs),
+        DriftStatus::Fresh,
+        "version-less devEngines entry must not read as a removed pin"
     );
 
     // No pin recorded + devEngines present → not drift (the install

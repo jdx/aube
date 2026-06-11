@@ -270,7 +270,7 @@ fn merge_into(dst: &mut LockfileGraph, src: LockfileGraph, report: &mut MergeRep
             Entry::Vacant(slot) => {
                 slot.insert(incoming);
             }
-            Entry::Occupied(slot) => {
+            Entry::Occupied(mut slot) => {
                 if slot.get().version != incoming.version {
                     report.conflicts.push(format!(
                         "runtime `{}`: kept {} over {}",
@@ -278,6 +278,32 @@ fn merge_into(dst: &mut LockfileGraph, src: LockfileGraph, report: &mut MergeRep
                         slot.get().version,
                         incoming.version
                     ));
+                    continue;
+                }
+                // Same resolved version: a silently-kept dst would
+                // drop the incoming side's metadata. Surface specifier
+                // disagreements and union the per-platform variants
+                // (dst wins on target collisions) so a pin written on
+                // another platform keeps its artifacts after a merge.
+                if slot.get().specifier != incoming.specifier {
+                    report.conflicts.push(format!(
+                        "runtime `{}` specifier: kept {} over {}",
+                        slot.key(),
+                        slot.get().specifier,
+                        incoming.specifier
+                    ));
+                }
+                let dst_pin = slot.get_mut();
+                for variant in incoming.variants {
+                    let covered = variant.targets.iter().any(|t| {
+                        dst_pin
+                            .variants
+                            .iter()
+                            .any(|dv| dv.targets.iter().any(|dt| dt == t))
+                    });
+                    if !covered {
+                        dst_pin.variants.push(variant);
+                    }
                 }
             }
         }

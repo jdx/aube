@@ -105,48 +105,57 @@ impl NodeRuntime {
         }
 
         // Locally unsatisfiable: apply policy before touching the
-        // network.
-        match req.on_fail {
-            OnFail::Ignore => return Ok(None),
-            OnFail::Warn => {
-                tracing::warn!(
-                    code = aube_codes::warnings::WARN_AUBE_RUNTIME_VERSION_MISMATCH,
-                    requested = %req.raw,
-                    source = req.source.label(),
-                    "the active Node.js does not satisfy the project's runtime requirement"
-                );
-                return Ok(None);
-            }
-            OnFail::Error => {
-                // Alias specs were never checked locally; give them
-                // their network check before failing (an installed
-                // node may well BE the latest LTS, but we can't know
-                // without the index — and `error` says don't fetch
-                // runtimes, not don't fetch metadata).
-                if matches!(target, NodeSpec::Exact(_) | NodeSpec::Range(_)) {
-                    return Err(self.unsatisfied(req));
+        // network — but only for specs whose satisfaction is locally
+        // decidable. Alias specs (`lts`, `latest`, codenames) need the
+        // index first under *every* policy: the installed node may
+        // well BE the latest LTS, and warning or erroring without
+        // checking would be a false positive. Policy gates runtime
+        // downloads, not metadata fetches.
+        let locally_decidable = matches!(target, NodeSpec::Exact(_) | NodeSpec::Range(_));
+        if locally_decidable {
+            match req.on_fail {
+                OnFail::Ignore => return Ok(None),
+                OnFail::Warn => {
+                    warn_version_mismatch(req);
+                    return Ok(None);
                 }
+                OnFail::Error => return Err(self.unsatisfied(req)),
+                OnFail::Download => {}
             }
-            OnFail::Download => {}
         }
 
         // Network: pin the spec to an exact version.
-        progress.on_phase(
-            &node_semver::Version::parse("0.0.0").unwrap(),
-            crate::progress::InstallPhase::Resolving,
-        );
+        progress.on_phase(None, crate::progress::InstallPhase::Resolving);
         let platform = Platform::current()?;
         let (version, fresh_pin) = match pinned {
             Some(p) => (p.version.clone(), None),
             None => {
-                let entries = index::load_index(&self.http, &self.cfg).await?;
-                let entry = index::select(&entries, &target, &platform).ok_or_else(|| {
-                    Error::NoMatchingVersion {
-                        requested: req.raw.clone(),
-                        platform_note: format!(" with a build for {}", platform.label()),
+                let selected = match index::load_index(&self.http, &self.cfg).await {
+                    Ok(entries) => index::select(&entries, &target, &platform)
+                        .map(|e| e.version.clone())
+                        .ok_or_else(|| Error::NoMatchingVersion {
+                            requested: req.raw.clone(),
+                            platform_note: format!(" with a build for {}", platform.label()),
+                        }),
+                    Err(e) => Err(e),
+                };
+                match selected {
+                    Ok(v) => (v, None),
+                    // Under warn/ignore the requirement is advisory —
+                    // an unreachable index must not block the command.
+                    Err(_) if req.on_fail == OnFail::Ignore => return Ok(None),
+                    Err(e) if req.on_fail == OnFail::Warn => {
+                        tracing::warn!(
+                            code = aube_codes::warnings::WARN_AUBE_RUNTIME_VERSION_MISMATCH,
+                            requested = %req.raw,
+                            source = req.source.label(),
+                            error = %e,
+                            "could not verify the project's runtime requirement; continuing on the active Node.js"
+                        );
+                        return Ok(None);
                     }
-                })?;
-                (entry.version.clone(), None)
+                    Err(e) => return Err(e),
+                }
             }
         };
 
@@ -157,8 +166,17 @@ impl NodeRuntime {
         if let Some(resolution) = local_resolution(&exact) {
             return Ok(Some(resolution));
         }
-        if req.on_fail == OnFail::Error {
-            return Err(self.unsatisfied(req));
+        // Alias specs reach their policy here, after the index turned
+        // them into a concrete version (a confirmed mismatch, not a
+        // guess).
+        match req.on_fail {
+            OnFail::Ignore => return Ok(None),
+            OnFail::Warn => {
+                warn_version_mismatch(req);
+                return Ok(None);
+            }
+            OnFail::Error => return Err(self.unsatisfied(req)),
+            OnFail::Download => {}
         }
 
         // Build the download spec: lockfile variant when available,
@@ -324,6 +342,15 @@ impl NodeRuntime {
             variants,
         })
     }
+}
+
+fn warn_version_mismatch(req: &NodeRequest) {
+    tracing::warn!(
+        code = aube_codes::warnings::WARN_AUBE_RUNTIME_VERSION_MISMATCH,
+        requested = %req.raw,
+        source = req.source.label(),
+        "the active Node.js does not satisfy the project's runtime requirement"
+    );
 }
 
 /// Zero-network resolution: PATH probe, then installed scan. Only

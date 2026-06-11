@@ -471,8 +471,9 @@ struct CliProgress {
 }
 
 impl aube_runtime::DownloadProgress for CliProgress {
-    fn on_phase(&self, version: &node_semver::Version, phase: aube_runtime::InstallPhase) {
+    fn on_phase(&self, version: Option<&node_semver::Version>, phase: aube_runtime::InstallPhase) {
         if phase == aube_runtime::InstallPhase::Downloading
+            && let Some(version) = version
             && !self
                 .announced
                 .swap(true, std::sync::atomic::Ordering::Relaxed)

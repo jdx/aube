@@ -198,3 +198,27 @@ _dev_engines_project() {
 	assert_success
 	assert_output --partial "v0.95.2"
 }
+
+@test "alias spec with onFail=warn consults the index before warning" {
+	# Regression: `latest`/`lts` satisfaction is index-dependent. With
+	# onFail=warn, aube must resolve the alias (the mirror says latest
+	# is 0.95.2), notice the installed 0.95.2 satisfies it, and switch
+	# — not emit a false mismatch warning and stay on PATH node.
+	mkdir -p "$XDG_DATA_HOME/aube/nodejs/0.95.2/bin"
+	printf '#!/bin/sh\necho "v0.95.2"\n' >"$XDG_DATA_HOME/aube/nodejs/0.95.2/bin/node"
+	chmod +x "$XDG_DATA_HOME/aube/nodejs/0.95.2/bin/node"
+	cat >package.json <<-'JSON'
+		{
+		  "name": "runtime-dl-test",
+		  "version": "0.0.0",
+		  "scripts": { "which-node": "node --version" },
+		  "devEngines": {
+		    "runtime": { "name": "node", "version": "latest", "onFail": "warn" }
+		  }
+		}
+	JSON
+	run aubr which-node
+	assert_success
+	assert_output --partial "v0.95.2"
+	refute_output --partial "does not satisfy"
+}

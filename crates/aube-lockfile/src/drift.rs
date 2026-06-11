@@ -680,25 +680,32 @@ fn runtime_drift_reason(
     manifest: &aube_manifest::PackageJson,
 ) -> Option<String> {
     for (name, pin) in runtimes {
-        let declared = manifest
+        let entry = manifest
             .dev_engines
             .as_ref()
-            .and_then(|d| d.runtime.iter().find(|r| r.name == *name))
-            .and_then(|r| r.version.as_deref());
-        match declared {
+            .and_then(|d| d.runtime.iter().find(|r| r.name == *name));
+        match entry {
             None => {
                 return Some(format!(
                     "devEngines.runtime: manifest no longer pins {name} (lockfile records {})",
                     pin.version
                 ));
             }
-            Some(range) if range != pin.specifier => {
-                return Some(format!(
-                    "devEngines.runtime: {name} changed ({} → {range})",
-                    pin.specifier
-                ));
-            }
-            Some(_) => {}
+            // An entry that names the runtime but declares no
+            // `version` carries no concrete range — resolution treats
+            // it as "no requirement", so it can't contradict the pin.
+            // Flagging it would hard-fail frozen installs over a
+            // field that changes nothing.
+            Some(entry) => match entry.version.as_deref() {
+                None => {}
+                Some(range) if range != pin.specifier => {
+                    return Some(format!(
+                        "devEngines.runtime: {name} changed ({} → {range})",
+                        pin.specifier
+                    ));
+                }
+                Some(_) => {}
+            },
         }
     }
     None

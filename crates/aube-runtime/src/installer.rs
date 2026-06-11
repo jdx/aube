@@ -94,7 +94,7 @@ async fn download_verify_extract(
         .map_err(|e| Error::io(format!("create {}", staging_root.display()), e))?;
 
     // Download, hashing incrementally.
-    progress.on_phase(version, InstallPhase::Downloading);
+    progress.on_phase(Some(version), InstallPhase::Downloading);
     let archive_name = spec
         .url
         .rsplit('/')
@@ -104,7 +104,7 @@ async fn download_verify_extract(
     let archive_path = downloads.join(format!("{archive_name}.{}", std::process::id()));
     let actual = stream_to_file(http, &spec.url, &archive_path, progress).await?;
 
-    progress.on_phase(version, InstallPhase::Verifying);
+    progress.on_phase(Some(version), InstallPhase::Verifying);
     if actual != spec.expected_sha256 {
         let _ = std::fs::remove_file(&archive_path);
         return Err(Error::ChecksumMismatch {
@@ -115,7 +115,7 @@ async fn download_verify_extract(
     }
 
     // Extract into staging, then atomically publish.
-    progress.on_phase(version, InstallPhase::Extracting);
+    progress.on_phase(Some(version), InstallPhase::Extracting);
     let staging = staging_root.join(format!("{version}.{}", std::process::id()));
     std::fs::create_dir_all(&staging)
         .map_err(|e| Error::io(format!("create {}", staging.display()), e))?;
