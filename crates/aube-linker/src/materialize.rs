@@ -907,9 +907,11 @@ mod shared_local_dep_path_tests {
         // `<url>.git#<sha>` form, both must canonicalize to one key.
         let from_shorthand =
             shared_local_dep_path("request", &format!("github:request/request#{SHA}")).unwrap();
-        let from_url =
-            shared_local_dep_path("request", &format!("https://github.com/request/request.git#{SHA}"))
-                .unwrap();
+        let from_url = shared_local_dep_path(
+            "request",
+            &format!("https://github.com/request/request.git#{SHA}"),
+        )
+        .unwrap();
         assert_eq!(from_shorthand, from_url);
     }
 
@@ -918,9 +920,11 @@ mod shared_local_dep_path_tests {
         // A lockfile round-trip that never re-resolved leaves `resolved`
         // empty and only carries `#<committish>`; the helper must promote
         // it so the hash matches the package's `<url>#<sha>` key.
-        let got =
-            shared_local_dep_path("request", &format!("https://github.com/request/request.git#{SHA}"))
-                .unwrap();
+        let got = shared_local_dep_path(
+            "request",
+            &format!("https://github.com/request/request.git#{SHA}"),
+        )
+        .unwrap();
         assert_eq!(got, git_key("https://github.com/request/request.git", SHA));
     }
 
