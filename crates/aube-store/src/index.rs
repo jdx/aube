@@ -32,6 +32,40 @@ pub struct StoredFile {
 /// file content).
 pub type PackageIndex = aube_util::collections::FxMap<String, StoredFile>;
 
+/// Deterministic content fingerprint of a materialized package.
+///
+/// Hashes the package's full file set — every relative path plus its
+/// CAS content hash and executable bit — in sorted order, so two
+/// imports with byte-identical trees produce the same fingerprint and
+/// two imports that differ in any file (presence, contents, or mode)
+/// produce different fingerprints.
+///
+/// Used by the global virtual store to disambiguate source-backed
+/// dependencies (git / remote tarball) whose lockfile coordinate is
+/// identical but whose materialized bytes are not — e.g. the same git
+/// commit installed once normally (its `prepare` script built `dist/`)
+/// and once under `--ignore-scripts` (raw checkout, no `dist/`). The
+/// graph hash folds this in so the two land at distinct GVS paths
+/// instead of the first writer's tree leaking into the second project.
+///
+/// `PackageIndex` is an `FxMap` with non-deterministic iteration order,
+/// so the entries are collected and sorted by path before hashing.
+pub fn index_content_fingerprint(index: &PackageIndex) -> String {
+    let mut entries: Vec<(&str, &str, bool)> = index
+        .iter()
+        .map(|(path, file)| (path.as_str(), file.hex_hash.as_str(), file.executable))
+        .collect();
+    entries.sort_unstable();
+    let mut hasher = blake3::Hasher::new();
+    for (path, hex_hash, executable) in entries {
+        hasher.update(path.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(hex_hash.as_bytes());
+        hasher.update(if executable { b"\x01" } else { b"\x00" });
+    }
+    hasher.finalize().to_hex().to_string()
+}
+
 fn index_files_match_metadata(index: &PackageIndex, verify_all: bool) -> bool {
     let mut files = index.values();
     if verify_all {

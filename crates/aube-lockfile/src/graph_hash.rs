@@ -122,6 +122,22 @@ fn append_hex_to_leaf(dep_path: &str, hex: &str) -> String {
 /// package also lands at a fresh virtual-store path.
 pub type PatchHashFn<'a> = &'a dyn Fn(&str, &str) -> Option<String>;
 
+/// Per-`dep_path` materialized-content fingerprint. Folded into
+/// `full_pkg_id` so a source-backed dependency (git / remote tarball)
+/// whose lockfile coordinate is identical to another's but whose
+/// on-disk bytes differ hashes to a distinct value.
+///
+/// The motivating case is a git dep installed once normally (its
+/// `prepare` built `dist/`) and once under `--ignore-scripts` (raw
+/// checkout): same `<url>#<commit>` coordinate, no integrity in the
+/// lockfile, but different trees. Keying the global virtual store by
+/// coordinate alone would let the first project's built tree leak into
+/// the second's scripts-free install; folding the content fingerprint
+/// in keeps them at separate paths. Returns `None` for packages whose
+/// content the caller doesn't fingerprint (registry packages already
+/// carry an integrity, so they need no extra disambiguation).
+pub type ContentHashFn<'a> = &'a dyn Fn(&str) -> Option<String>;
+
 /// Compute final hashes for every package in `graph`. When
 /// `engine` is `Some`, packages whose transitive subtree contains a
 /// build-allowed package fold the engine name into their hash; when
@@ -144,6 +160,21 @@ pub fn compute_graph_hashes_with_patches(
     engine: Option<&EngineName>,
     patch_hash: PatchHashFn<'_>,
 ) -> GraphHashes {
+    compute_graph_hashes_full(graph, allow_build, engine, patch_hash, &|_| None)
+}
+
+/// Variant of [`compute_graph_hashes_with_patches`] that additionally
+/// folds a per-`dep_path` materialized-content fingerprint into each
+/// node's identity. See [`ContentHashFn`] for why this is needed for
+/// source-backed (git / remote-tarball) dependencies under the global
+/// virtual store.
+pub fn compute_graph_hashes_full(
+    graph: &LockfileGraph,
+    allow_build: AllowBuildFn<'_>,
+    engine: Option<&EngineName>,
+    patch_hash: PatchHashFn<'_>,
+    content_hash: ContentHashFn<'_>,
+) -> GraphHashes {
     // Pass 1: identify every dep_path whose `(name, version)` is
     // allowed to run its scripts. This is the "builds" set.
     let mut builds: FxHashSet<String> = FxHashSet::default();
@@ -162,6 +193,7 @@ pub fn compute_graph_hashes_with_patches(
             &mut deps_hash_cache,
             &mut FxHashSet::default(),
             patch_hash,
+            content_hash,
         );
     }
 
@@ -213,6 +245,7 @@ fn calc_deps_hash(
     cache: &mut FxHashMap<String, String>,
     parents: &mut FxHashSet<String>,
     patch_hash: PatchHashFn<'_>,
+    content_hash: ContentHashFn<'_>,
 ) -> String {
     if let Some(cached) = cache.get(dep_path) {
         return cached.clone();
@@ -227,7 +260,7 @@ fn calc_deps_hash(
 
     let hash = match graph.packages.get(dep_path) {
         Some(pkg) => {
-            let id = full_pkg_id(pkg, patch_hash);
+            let id = full_pkg_id(pkg, patch_hash, content_hash(dep_path).as_deref());
             let mut deps: BTreeMap<String, String> = BTreeMap::new();
             for (alias, child_tail) in &pkg.dependencies {
                 let child_dep_path = format!("{alias}@{child_tail}");
@@ -237,7 +270,14 @@ fn calc_deps_hash(
                 if !graph.packages.contains_key(&child_dep_path) {
                     continue;
                 }
-                let child_hash = calc_deps_hash(graph, &child_dep_path, cache, parents, patch_hash);
+                let child_hash = calc_deps_hash(
+                    graph,
+                    &child_dep_path,
+                    cache,
+                    parents,
+                    patch_hash,
+                    content_hash,
+                );
                 deps.insert(alias.clone(), child_hash);
             }
             hash_canonical(&DepsHashInput {
@@ -285,23 +325,31 @@ fn transitively_requires_build(
 }
 
 /// `full_pkg_id` — pnpm uses `${pkgIdWithPatchHash}:${resolution}`; we
-/// use `${name}@${version}[:patch:<hex>]:${source?}:${integrity}`.
+/// use `${name}@${version}[:patch:<hex>]:${source?}[:content:<hex>]:${integrity}`.
 /// Source-backed packages fold in their stable specifier so two local
 /// or git dependencies with the same manifest version don't collapse
 /// onto the same graph hash when they point at different bytes.
-fn full_pkg_id(pkg: &LockedPackage, patch_hash: PatchHashFn<'_>) -> String {
+///
+/// `content` is the materialized-content fingerprint (see
+/// [`ContentHashFn`]). It disambiguates source-backed deps that share a
+/// coordinate but not bytes — e.g. a git dep whose `prepare` ran versus
+/// the same commit installed under `--ignore-scripts`.
+fn full_pkg_id(pkg: &LockedPackage, patch_hash: PatchHashFn<'_>, content: Option<&str>) -> String {
     let integrity = pkg.integrity.as_deref().unwrap_or("<no-integrity>");
     let source = pkg
         .local_source
         .as_ref()
         .map(|source| format!(":source:{}", source.specifier()))
         .unwrap_or_default();
+    let content = content
+        .map(|hex| format!(":content:{hex}"))
+        .unwrap_or_default();
     match patch_hash(&pkg.name, &pkg.version) {
         Some(hex) => format!(
-            "{}@{}:patch:{hex}{source}:{integrity}",
+            "{}@{}:patch:{hex}{source}{content}:{integrity}",
             pkg.name, pkg.version
         ),
-        None => format!("{}@{}{source}:{}", pkg.name, pkg.version, integrity),
+        None => format!("{}@{}{source}{content}:{integrity}", pkg.name, pkg.version),
     }
 }
 
@@ -472,6 +520,66 @@ mod tests {
         );
         // `pure` has no build in its subtree → engine-agnostic → stable
         assert_eq!(h_a.node_hash["pure@1.0.0"], h_b.node_hash["pure@1.0.0"]);
+    }
+
+    #[test]
+    fn content_hash_disambiguates_same_coordinate() {
+        // A git dep with no integrity: two installs share the same
+        // `(name, version, source)` coordinate but materialize
+        // different trees (prepare ran vs `--ignore-scripts`). Folding
+        // the content fingerprint in must split them onto distinct
+        // hashes; an absent fingerprint must leave the hash unchanged.
+        let mut g = empty_graph();
+        let mut pkg = mk_pkg("gitdep", "1.0.0", None);
+        pkg.dep_path = "gitdep@git+abc".into();
+        pkg.local_source = Some(LocalSource::Directory(PathBuf::from("clone")));
+        g.packages.insert("gitdep@git+abc".into(), pkg);
+
+        let none = compute_graph_hashes_full(&g, &|_| false, None, &|_, _| None, &|_| None);
+        let prepared = compute_graph_hashes_full(&g, &|_| false, None, &|_, _| None, &|dp| {
+            (dp == "gitdep@git+abc").then(|| "prepared".to_string())
+        });
+        let raw = compute_graph_hashes_full(&g, &|_| false, None, &|_, _| None, &|dp| {
+            (dp == "gitdep@git+abc").then(|| "raw".to_string())
+        });
+
+        assert_ne!(
+            prepared.node_hash["gitdep@git+abc"], raw.node_hash["gitdep@git+abc"],
+            "different content fingerprints must produce different hashes"
+        );
+        assert_ne!(
+            none.node_hash["gitdep@git+abc"], prepared.node_hash["gitdep@git+abc"],
+            "folding in a fingerprint must change the hash vs none"
+        );
+        // A no-op content fn reproduces the with-patches result exactly,
+        // so existing GVS paths for the common case stay stable.
+        let with_patches = compute_graph_hashes_with_patches(&g, &|_| false, None, &|_, _| None);
+        assert_eq!(none.node_hash, with_patches.node_hash);
+    }
+
+    #[test]
+    fn content_hash_cascades_to_parent() {
+        // A parent that depends on the fingerprinted git dep must also
+        // get a fresh hash, so its sibling symlink lands on the dep's
+        // content-disambiguated path rather than dangling.
+        let mut g = empty_graph();
+        let mut parent = mk_pkg("parent", "1.0.0", Some("sha512-P"));
+        parent
+            .dependencies
+            .insert("gitdep".into(), "git+abc".into());
+        g.packages.insert("parent@1.0.0".into(), parent);
+        let mut child = mk_pkg("gitdep", "1.0.0", None);
+        child.dep_path = "gitdep@git+abc".into();
+        child.local_source = Some(LocalSource::Directory(PathBuf::from("clone")));
+        g.packages.insert("gitdep@git+abc".into(), child);
+
+        let a = compute_graph_hashes_full(&g, &|_| false, None, &|_, _| None, &|dp| {
+            (dp == "gitdep@git+abc").then(|| "prepared".to_string())
+        });
+        let b = compute_graph_hashes_full(&g, &|_| false, None, &|_, _| None, &|dp| {
+            (dp == "gitdep@git+abc").then(|| "raw".to_string())
+        });
+        assert_ne!(a.node_hash["parent@1.0.0"], b.node_hash["parent@1.0.0"]);
     }
 
     #[test]

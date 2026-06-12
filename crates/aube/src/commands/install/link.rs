@@ -190,6 +190,36 @@ pub(super) fn run_link_phase(input: LinkPhaseInput<'_>) -> miette::Result<LinkPh
     };
 
     if linker.uses_global_virtual_store() {
+        // Source-backed deps that get shared globally (git / remote
+        // tarball) carry no registry integrity, so their graph-hash
+        // identity is just their `<url>#<commit>` coordinate. Two
+        // installs of the same coordinate can still materialize
+        // different bytes — most commonly a git dep whose `prepare`
+        // built `dist/` versus the same commit installed under
+        // `--ignore-scripts` (raw checkout). Fingerprint the actual
+        // imported tree and fold it into the hash so those two land at
+        // distinct GVS paths instead of the first writer's tree leaking
+        // into the second project.
+        let content_hashes: aube_util::collections::FxMap<String, String> = graph_for_link
+            .packages
+            .iter()
+            .filter(|(_, pkg)| {
+                pkg.local_source
+                    .as_ref()
+                    .is_some_and(|s| s.is_globally_shareable())
+            })
+            .filter_map(|(dep_path, _)| {
+                package_indices.get(dep_path).map(|index| {
+                    (
+                        dep_path.clone(),
+                        aube_store::index_content_fingerprint(index),
+                    )
+                })
+            })
+            .collect();
+        let content_hash_fn =
+            |dep_path: &str| -> Option<String> { content_hashes.get(dep_path).cloned() };
+
         // Reuse the prewarm task's `compute_graph_hashes` output when
         // the link-phase graph matches what the prewarm hashed. The
         // prewarm hashed the unfiltered post-resolve graph; if no
@@ -198,8 +228,15 @@ pub(super) fn run_link_phase(input: LinkPhaseInput<'_>) -> miette::Result<LinkPh
         // hashes are byte-identical to a fresh compute. Falling
         // through to a fresh compute keeps the contract simple
         // whenever the graphs diverge.
+        //
+        // The prewarm runs concurrently with fetch and so can't see the
+        // not-yet-imported source-dep trees; when any globally-shared
+        // source dep is present its content fingerprint is missing from
+        // the prewarm hashes, so skip the reuse and recompute here where
+        // every index is available.
         let cached_hashes = prewarm_graph_hashes.filter(|arc| {
-            arc.node_hash.len() == graph_for_link.packages.len()
+            content_hashes.is_empty()
+                && arc.node_hash.len() == graph_for_link.packages.len()
                 && graph_for_link
                     .packages
                     .keys()
@@ -219,11 +256,12 @@ pub(super) fn run_link_phase(input: LinkPhaseInput<'_>) -> miette::Result<LinkPh
                     aube_scripts::AllowDecision::Allow
                 )
             };
-            aube_lockfile::graph_hash::compute_graph_hashes_with_patches(
+            aube_lockfile::graph_hash::compute_graph_hashes_full(
                 graph_for_link,
                 &allow,
                 engine.as_ref(),
                 &patch_hash_fn,
+                &content_hash_fn,
             )
         };
         linker = linker.with_graph_hashes(graph_hashes);

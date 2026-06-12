@@ -22,7 +22,7 @@ use cas::copy_dir_recursive;
 use git::{
     codeload_cache_paths, extract_codeload_tarball_at, git_commit_matches, validate_git_positional,
 };
-pub use index::{PackageIndex, StoredFile};
+pub use index::{PackageIndex, StoredFile, index_content_fingerprint};
 pub use integrity::{
     SHA512_INTEGRITY_PREFIX, integrity_to_hex, sha512_integrity, validate_and_encode_name,
     validate_pkg_content, validate_version, verify_integrity, verify_precomputed_sha512,
