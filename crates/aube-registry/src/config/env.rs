@@ -7,9 +7,31 @@
 /// aliases. Env entries must be applied *after* `.npmrc` entries so
 /// last-write-wins gives env the higher precedence npm/pnpm document.
 pub(super) fn npm_config_env_entries_from(env: &[(String, String)]) -> Vec<(String, String)> {
-    env.iter()
-        .filter_map(|(n, v)| translate_npm_config_env(n, v))
-        .collect()
+    let mut npm_scoped = Vec::new();
+    let mut pnpm_scoped = Vec::new();
+    let mut out = Vec::new();
+    for (name, value) in env {
+        if value.is_empty() {
+            continue;
+        }
+        match translate_npm_config_env(name, value) {
+            Some((key, value)) if key.starts_with("//") => {
+                if name
+                    .get(.."pnpm_config_".len())
+                    .is_some_and(|p| p.eq_ignore_ascii_case("pnpm_config_"))
+                {
+                    pnpm_scoped.push((key, value));
+                } else {
+                    npm_scoped.push((key, value));
+                }
+            }
+            Some(entry) => out.push(entry),
+            None => {}
+        }
+    }
+    out.extend(npm_scoped);
+    out.extend(pnpm_scoped);
+    out
 }
 
 /// Map a single `npm_config_*` / `NPM_CONFIG_*` env var to the
@@ -20,13 +42,14 @@ pub(super) fn npm_config_env_entries_from(env: &[(String, String)]) -> Vec<(Stri
 pub(super) fn translate_npm_config_env(name: &str, value: &str) -> Option<(String, String)> {
     let suffix = name
         .strip_prefix("npm_config_")
-        .or_else(|| name.strip_prefix("NPM_CONFIG_"))?;
+        .or_else(|| name.strip_prefix("NPM_CONFIG_"))
+        .or_else(|| strip_url_scoped_config_prefix(name))?;
     // Per-URI auth keys (e.g. `//registry.example.com/:_authToken`)
     // already carry `.npmrc` syntax in the env-var name. Pass them
     // through unchanged so `apply`'s `starts_with("//")` arm picks
     // them up and preserves the `_authToken` / `_auth` / `username`
     // casing that the match inside it depends on.
-    if suffix.starts_with("//") {
+    if suffix.starts_with("//") && is_url_scoped_env_auth_key(suffix) {
         return Some((suffix.to_string(), value.to_string()));
     }
     // Scoped-registry keys: `@myorg:REGISTRY` or `@MYORG:registry`,
@@ -58,6 +81,27 @@ pub(super) fn translate_npm_config_env(name: &str, value: &str) -> Option<(Strin
         _ => return None,
     };
     Some((npmrc_key.to_string(), value.to_string()))
+}
+
+fn strip_url_scoped_config_prefix(name: &str) -> Option<&str> {
+    for prefix in ["npm_config_", "pnpm_config_"] {
+        if name
+            .get(..prefix.len())
+            .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix))
+        {
+            let suffix = &name[prefix.len()..];
+            if suffix.starts_with("//") {
+                return Some(suffix);
+            }
+        }
+    }
+    None
+}
+
+fn is_url_scoped_env_auth_key(key: &str) -> bool {
+    key.rsplit_once(':').is_some_and(|(_, suffix)| {
+        matches!(suffix, "_authToken" | "_auth" | "username" | "_password")
+    })
 }
 /// Return the first set (and non-empty) env var in `names`. Used to
 /// read proxy config from both the upper- and lowercase spellings that

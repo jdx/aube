@@ -14,7 +14,9 @@ impl NpmConfig {
     /// the generic settings resolver (`aube_cli::settings_values`) can
     /// never disagree on precedence.
     pub fn load(project_dir: &Path) -> Self {
-        let env: Vec<(String, String)> = std::env::vars().collect();
+        let env: Vec<(String, String)> = std::env::vars_os()
+            .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
+            .collect();
         Self::load_with_env(project_dir, &env)
     }
 
