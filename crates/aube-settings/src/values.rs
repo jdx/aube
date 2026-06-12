@@ -449,6 +449,15 @@ pub fn workspace_yaml_value<'a>(
 
 fn raw_from_env<'a>(meta: &meta::SettingMeta, env: &'a [(String, String)]) -> Option<&'a str> {
     for alias in meta.env_vars.iter().rev() {
+        // Gate the tool-branded alias (`AUBE_<NAME>`) on the active embedder's
+        // `env_prefix`: standalone aube (`Some("AUBE")`) reads it as before, an
+        // embedder with `None` reads no branded settings env vars. The neutral
+        // `npm_config_*` / `NPM_CONFIG_*` aliases and bare external vars are
+        // never gated. `env_prefix` is the single binary switch for the whole
+        // branded-env settings surface.
+        if !aube_util::env::branded_env_alias_enabled(alias) {
+            continue;
+        }
         for (key, raw) in env.iter().rev() {
             if key == alias {
                 return Some(raw);
