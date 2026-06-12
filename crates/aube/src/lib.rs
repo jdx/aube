@@ -502,9 +502,6 @@ enum Commands {
     /// Update dependencies
     #[command(aliases = ["up", "upgrade"])]
     Update(commands::update::UpdateArgs),
-    /// Print a usage.jdx.dev KDL spec for the CLI (internal)
-    #[command(hide = true)]
-    Usage,
     /// Bump the version in package.json (and optionally create a git commit + tag)
     Version(commands::version::VersionArgs),
     /// Print package metadata from the registry
@@ -533,6 +530,18 @@ enum Commands {
 /// Do not call it expecting control to return normally for further work.
 pub fn cli_main(embedder: &'static aube_util::Embedder) {
     cli_main_with_defaults(embedder, Vec::new());
+}
+
+/// The clap [`Command`](clap::Command) for the CLI, with its version reset to
+/// the plain package version (stripping the `-DEBUG` runtime suffix) so any
+/// derived artifact stays byte-stable across profiles. This exposes the
+/// command surface itself — not aube's own `usage` KDL subcommand, which is
+/// aube-specific tooling that lives in the binary (`src/main.rs`), not in the
+/// embeddable command layer. A downstream embedder builds its own top-level
+/// usage/completions from this.
+pub fn command() -> clap::Command {
+    use clap::CommandFactory;
+    Cli::command().version(env!("CARGO_PKG_VERSION"))
 }
 
 /// [`cli_main`] plus embedder-supplied setting defaults. The `defaults` are
@@ -1008,14 +1017,6 @@ async fn async_main(cli: Cli) -> miette::Result<Option<i32>> {
             return Ok(Some(commands::npm_fallback::run("whoami", &args)?));
         }
         Some(Commands::Why(args)) => commands::why::run(args, effective_filter.clone()).await?,
-        Some(Commands::Usage) => {
-            use clap::CommandFactory;
-            // Reset the `-DEBUG`-suffixed runtime version back to the plain
-            // package version so the emitted KDL (consumed by `mise render`
-            // and the CLI docs build) stays byte-stable across profiles.
-            let mut cmd = Cli::command().version(env!("CARGO_PKG_VERSION"));
-            clap_usage::generate(&mut cmd, aube_util::embedder().name, &mut std::io::stdout());
-        }
         Some(Commands::External(args)) => {
             // Implicit run: `aube dev` = `aube run dev`.
             //

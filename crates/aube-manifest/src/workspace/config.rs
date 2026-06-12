@@ -15,17 +15,26 @@ use std::path::{Path, PathBuf};
 /// tool's branded YAML first (if it has one), then the shared
 /// `pnpm-workspace.yaml` compatibility surface. Standalone aube:
 /// `["aube-workspace.yaml", "pnpm-workspace.yaml"]`.
-pub fn workspace_yaml_names() -> Vec<&'static str> {
-    let mut names: Vec<&'static str> = Vec::with_capacity(2);
-    if let Some(branded) = aube_util::embedder().workspace_yaml {
-        names.push(branded);
-    }
-    names.push("pnpm-workspace.yaml");
-    names
+///
+/// Memoized: the names derive from `embedder().workspace_yaml` (a fixed
+/// `&'static` per process) plus the literal `pnpm-workspace.yaml`, so the
+/// `Vec` is built once and the slice returned on every later call. This is
+/// hit on hot-ish discovery paths (workspace-root detection), so the old
+/// per-call allocation was pure waste.
+pub fn workspace_yaml_names() -> &'static [&'static str] {
+    static NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    NAMES.get_or_init(|| {
+        let mut names: Vec<&'static str> = Vec::with_capacity(2);
+        if let Some(branded) = aube_util::embedder().workspace_yaml {
+            names.push(branded);
+        }
+        names.push("pnpm-workspace.yaml");
+        names
+    })
 }
 
 fn find_and_read(project_dir: &Path) -> Result<Option<(PathBuf, String)>, crate::Error> {
-    for name in workspace_yaml_names() {
+    for name in workspace_yaml_names().iter().copied() {
         let path = project_dir.join(name);
         if path.exists() {
             let content =
@@ -740,7 +749,7 @@ pub fn load_both(
 /// callers (catalog cleanup, ancestor walks) treat that as "nothing
 /// to read or rewrite".
 pub fn workspace_yaml_existing(project_dir: &Path) -> Option<PathBuf> {
-    for name in workspace_yaml_names() {
+    for name in workspace_yaml_names().iter().copied() {
         let path = project_dir.join(name);
         if path.exists() {
             return Some(path);
