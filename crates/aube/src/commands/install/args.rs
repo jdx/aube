@@ -69,7 +69,7 @@ pub struct InstallArgs {
     ///
     /// Overrides `network-concurrency` from `.npmrc` /
     /// `aube-workspace.yaml` when set. Falls back to an auto-scaled
-    /// default of worker count x3, clamped to 16-64.
+    /// default of worker count x3, clamped to 64-96.
     #[arg(long, value_name = "N")]
     pub network_concurrency: Option<u64>,
     /// Skip optionalDependencies; don't install optional native modules

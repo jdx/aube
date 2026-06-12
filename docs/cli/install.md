@@ -69,7 +69,7 @@ Combines every `aube-lock.<branch>.yaml` file in the project into `aube-lock.yam
 
 Cap concurrent tarball downloads.
 
-Overrides `network-concurrency` from `.npmrc` / `aube-workspace.yaml` when set. Falls back to an auto-scaled default of worker count x3, clamped to 16-64.
+Overrides `network-concurrency` from `.npmrc` / `aube-workspace.yaml` when set. Falls back to an auto-scaled default of worker count x3, clamped to 64-96.
 
 ### `--no-optional`
 

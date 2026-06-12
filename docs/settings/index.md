@@ -1596,7 +1596,7 @@ regardless of which strategy produced it.
 Maximum concurrent HTTP(S) requests.
 
 - Type: `int`
-- Default: `auto (workers x3 clamped to 16-64)`
+- Default: `auto (workers x3 clamped to 64-96)`
 - CLI flags: `network-concurrency`
 - Environment: `npm_config_network_concurrency`, `NPM_CONFIG_NETWORK_CONCURRENCY`, `AUBE_NETWORK_CONCURRENCY`
 - .npmrc keys: `network-concurrency`, `networkConcurrency`
@@ -1604,7 +1604,7 @@ Maximum concurrent HTTP(S) requests.
 
 Caps the tokio semaphores that gate concurrent tarball downloads
 inside `crates/aube/src/commands/install.rs`. When unset, aube
-matches pnpm's dynamic default: worker count x3, clamped to 16-64.
+matches pnpm's dynamic default: worker count x3, clamped to 64-96.
 Set this value explicitly to override the automatic scaling. The
 resolver's packument fetcher still uses its own internal cap for now;
 plumbing that cap through is tracked as a follow-up.
@@ -2947,4 +2947,3 @@ Examples:
 
 - `AUBE_NO_AUTO_INSTALL=1 aube run dev`
 - `echo 'aubeNoAutoInstall=true' >> .npmrc`
-

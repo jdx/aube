@@ -4960,7 +4960,7 @@
             "name": "network-concurrency",
             "usage": "--network-concurrency <N>",
             "help": "Cap concurrent tarball downloads",
-            "help_long": "Cap concurrent tarball downloads.\n\nOverrides `network-concurrency` from `.npmrc` / `aube-workspace.yaml` when set. Falls back to an auto-scaled default of worker count x3, clamped to 16-64.",
+            "help_long": "Cap concurrent tarball downloads.\n\nOverrides `network-concurrency` from `.npmrc` / `aube-workspace.yaml` when set. Falls back to an auto-scaled default of worker count x3, clamped to 64-96.",
             "help_first_line": "Cap concurrent tarball downloads",
             "short": [],
             "long": [
