@@ -526,6 +526,11 @@ enum Commands {
 /// `&aube_util::AUBE` and no defaults, reproducing standalone behavior.
 /// This is the whole embedding API: register-then-run in one call, so a host
 /// never has to separately wire identity and defaults.
+///
+/// **Takes over the process.** This is intended to be the program's entire
+/// `main`: it parses argv, runs the selected command, and may terminate the
+/// process directly (e.g. `std::process::exit` on a non-zero command result).
+/// Do not call it expecting control to return normally for further work.
 pub fn cli_main(embedder: &'static aube_util::Embedder) {
     cli_main_with_defaults(embedder, Vec::new());
 }
@@ -1009,7 +1014,7 @@ async fn async_main(cli: Cli) -> miette::Result<Option<i32>> {
             // package version so the emitted KDL (consumed by `mise render`
             // and the CLI docs build) stays byte-stable across profiles.
             let mut cmd = Cli::command().version(env!("CARGO_PKG_VERSION"));
-            clap_usage::generate(&mut cmd, "aube", &mut std::io::stdout());
+            clap_usage::generate(&mut cmd, aube_util::embedder().name, &mut std::io::stdout());
         }
         Some(Commands::External(args)) => {
             // Implicit run: `aube dev` = `aube run dev`.

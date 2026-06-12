@@ -29,10 +29,12 @@ use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-/// The aube version reported for `engines.aube` checks. Compiled in
-/// via `env!` so it always matches the running binary.
+/// The version reported for `engines.<self>` checks. Reads the active
+/// embedder's `version` so guardrails here match the version used elsewhere.
+/// Standalone aube's profile sets `version = env!("CARGO_PKG_VERSION")`, so
+/// this is byte-identical to the running binary's package version.
 pub fn aube_version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
+    aube_util::embedder().version
 }
 
 /// Which `engines.<key>` field a mismatch was found on. Carried on

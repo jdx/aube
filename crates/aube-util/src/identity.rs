@@ -17,11 +17,15 @@
 //! `self_update_enabled`). Genuinely *user-tunable* knobs do not belong here;
 //! those stay settings.
 //!
-//! An embedder selects its profile by passing a `&'static Embedder` to the
-//! library entry point (`aube::cli_main`). Internally the chosen profile is
-//! stored once in a private [`OnceLock`]; [`embedder`] returns it, falling
-//! back to [`AUBE`] when nothing was registered, so any caller or test that
-//! never sets one transparently gets standalone-aube behavior.
+//! An embedder selects its profile by registering it with [`set_embedder`].
+//! A host that goes through the library entry point `aube::cli_main` passes
+//! its `&'static Embedder` there and `cli_main` registers it; a host that
+//! drives the command layer in-process (`aube::commands::*::run`, bypassing
+//! `cli_main` — the headline embedding use case) calls [`set_embedder`] itself
+//! at startup. Internally the chosen profile is stored once in a private
+//! [`OnceLock`]; [`embedder`] returns it, falling back to [`AUBE`] when nothing
+//! was registered, so any caller or test that never sets one transparently
+//! gets standalone-aube behavior.
 
 use std::sync::OnceLock;
 
@@ -59,6 +63,14 @@ pub struct Embedder {
     /// guardrail. Standalone aube: `["pnpm"]`.
     pub compatible_names: &'static [&'static str],
     /// Canonical lockfile filename, e.g. `"aube-lock.yaml"`.
+    ///
+    /// Invariant (checked in [`set_embedder`]): must contain a `.` (so the
+    /// stem/extension split the lockfile-candidate machinery relies on holds)
+    /// and must not collide with a foreign package manager's lockfile name
+    /// (`pnpm-lock.yaml`, `package-lock.json`, `bun.lock`, `yarn.lock`,
+    /// `npm-shrinkwrap.json`). Aliasing a foreign name would make aube's own
+    /// lockfile indistinguishable from the incumbent's in the
+    /// lockfile-candidate set (`io.rs` / `clean.rs` / `pack.rs`).
     pub lockfile_basename: &'static str,
     /// The *branded* workspace-config YAML this tool reads and writes, e.g.
     /// `"aube-workspace.yaml"`. `None` disables the tool's own branded YAML
@@ -66,7 +78,12 @@ pub struct Embedder {
     /// handled separately and is not configured here).
     pub workspace_yaml: Option<&'static str>,
     /// The `package.json` object key this tool reads its own config under,
-    /// e.g. `"aube"`. `""` means the manifest root itself.
+    /// e.g. `"aube"`. `""` means this tool has *no own* branded manifest
+    /// namespace: config reads fold only the
+    /// [`compatible_names`](Self::compatible_names) namespaces plus any
+    /// top-level (manifest-root) entry, and setting *writes* go to the
+    /// manifest **root** as top-level `package.json` keys — never under a
+    /// foreign brand's namespace, and never as a literal `""` key.
     pub manifest_namespace: &'static str,
     /// Env-var prefix for tool-specific variables, e.g. `Some("AUBE")` →
     /// `AUBE_*`. `None` means the tool reads no branded env family.
@@ -128,14 +145,50 @@ pub const AUBE: Embedder = Embedder {
 
 static ACTIVE: OnceLock<&'static Embedder> = OnceLock::new();
 
-/// Register the active embedder profile. Idempotent — the first registration
-/// wins; later calls are silently ignored (so a binary's entry point sets it
-/// once and tests that don't set it fall back to [`AUBE`]). Not part of the
-/// public embedding API: embedders select their profile by passing it to
-/// `aube::cli_main`, which calls this internally before any command runs.
+/// Register the active embedder profile.
+///
+/// Call this **once at startup**, before invoking any `aube::commands`
+/// directly. `aube::cli_main` calls it for you, so binaries that go through
+/// `cli_main` don't need to; embedders that drive the command layer in-process
+/// — calling `aube::commands::*::run` directly, bypassing `cli_main` (the
+/// headline embedding use case) — call it themselves to register their
+/// profile before the first command runs.
+///
+/// Set-once / first-wins: the first registration is the active profile for the
+/// process; later calls are silently ignored. A process that never registers
+/// one transparently gets standalone-aube behavior ([`AUBE`]) — which is also
+/// why tests that don't register a profile see `AUBE`.
+///
+/// Validates the profile's lockfile invariant in debug builds: a profile whose
+/// `lockfile_basename` has no extension or aliases a foreign package manager's
+/// lockfile would silently corrupt the lockfile-candidate set, so it trips a
+/// `debug_assert!` here — at registration, the single choke point — rather than
+/// misbehaving deep inside `io.rs` / `clean.rs` / `pack.rs`.
 pub fn set_embedder(embedder: &'static Embedder) {
+    debug_assert!(
+        embedder.lockfile_basename.contains('.'),
+        "embedder lockfile_basename {:?} must contain a `.` (stem/extension split is load-bearing)",
+        embedder.lockfile_basename,
+    );
+    debug_assert!(
+        !FOREIGN_LOCKFILE_NAMES.contains(&embedder.lockfile_basename),
+        "embedder lockfile_basename {:?} aliases a foreign package manager's lockfile; \
+         pick a distinct name so aube's lockfile stays distinguishable in the candidate set",
+        embedder.lockfile_basename,
+    );
     let _ = ACTIVE.set(embedder);
 }
+
+/// Foreign package-manager lockfile names an embedder's `lockfile_basename`
+/// must not alias. Aliasing one would make aube's own lockfile collide with
+/// the incumbent's in the lockfile-candidate machinery.
+const FOREIGN_LOCKFILE_NAMES: &[&str] = &[
+    "pnpm-lock.yaml",
+    "package-lock.json",
+    "bun.lock",
+    "yarn.lock",
+    "npm-shrinkwrap.json",
+];
 
 /// The active embedder profile, or [`AUBE`] when none was registered. Never
 /// panics: an unset profile transparently yields standalone-aube behavior.
@@ -151,6 +204,11 @@ mod tests {
     /// reproduces aube's standalone branding and behavior defaults verbatim.
     /// This is the behavior-neutrality contract: an embedder that sets nothing
     /// gets aube.
+    ///
+    /// Relies on no other test in this binary calling `set_embedder` — the
+    /// `ACTIVE` `OnceLock` is process-global and first-write-wins, so a test
+    /// that registers a non-aube profile would flip the fallback this asserts.
+    /// Keep profile registration out of this crate's unit tests.
     #[test]
     fn embedder_unset_is_aube() {
         let id = embedder();
