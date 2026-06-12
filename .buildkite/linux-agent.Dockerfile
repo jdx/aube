@@ -1,4 +1,4 @@
-FROM buildkite/hosted-agent-base:latest
+FROM buildkite/hosted-agent-base:latest@sha256:db770041c55b13a92ddb8365dc601a0141add0459dfd1d804f3e28926d4770da
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV MISE_EXPERIMENTAL=true
