@@ -204,6 +204,10 @@ _setup_workspace_fixture() {
 	{
 		echo "packageManagerStrictVersion=true"
 		echo "verifyDepsBeforeRun=false"
+		# With managePackageManagerVersions on (the default), a
+		# mismatched aube pin is *switched to*, not rejected — see
+		# self_version.bats. This test pins the validation-only path.
+		echo "manage-package-manager-versions=false"
 	} >.npmrc
 
 	run aube run ok

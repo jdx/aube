@@ -373,7 +373,7 @@ fn clamped_completed(snap: Snap) -> usize {
 /// Format a byte count using the same SI units pnpm / npm show: `B`,
 /// `kB`, `MB`, `GB`. Decimal (1000-based) because that's what every
 /// package manager uses for on-the-wire sizes.
-pub(super) fn format_bytes(bytes: u64) -> String {
+pub(crate) fn format_bytes(bytes: u64) -> String {
     const KB: u64 = 1_000;
     const MB: u64 = 1_000_000;
     const GB: u64 = 1_000_000_000;

@@ -1,5 +1,7 @@
+pub mod dev_engines;
 pub mod workspace;
 
+pub use dev_engines::{DevEngineDependency, DevEngines, OnFail, dev_engines_tolerant};
 pub use workspace::{JailBuildPermission, WorkspaceConfig};
 
 use serde::{Deserialize, Deserializer, Serialize};
@@ -178,6 +180,16 @@ pub struct PackageJson {
         skip_serializing_if = "BTreeMap::is_empty"
     )]
     pub engines: BTreeMap<String, String>,
+    /// `devEngines` field — development-environment requirements per
+    /// the OpenJS spec. aube acts on `devEngines.runtime` entries named
+    /// `node` (version switching); see [`dev_engines`] for the shape
+    /// and tolerance rules.
+    #[serde(
+        default,
+        deserialize_with = "dev_engines_tolerant",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub dev_engines: Option<DevEngines>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspaces: Option<Workspaces>,
     #[serde(flatten)]
@@ -222,6 +234,8 @@ struct PackageJsonRaw {
     scripts: BTreeMap<String, String>,
     #[serde(default, deserialize_with = "engines_tolerant")]
     engines: BTreeMap<String, String>,
+    #[serde(default, deserialize_with = "dev_engines_tolerant")]
+    dev_engines: Option<DevEngines>,
     #[serde(default)]
     workspaces: Option<Workspaces>,
     #[serde(flatten)]
@@ -241,6 +255,7 @@ impl From<PackageJsonRaw> for PackageJson {
             bundled_dependencies: raw.bundled_dependencies.or(raw.bundle_dependencies_alias),
             scripts: raw.scripts,
             engines: raw.engines,
+            dev_engines: raw.dev_engines,
             workspaces: raw.workspaces,
             extra: raw.extra,
         }

@@ -541,6 +541,7 @@ pub(crate) fn dedupe_peer_variants(graph: LockfileGraph) -> LockfileGraph {
         bun_config_version,
         patched_dependencies,
         trusted_dependencies,
+        runtimes,
         extra_fields,
         workspace_extra_fields,
     } = graph;
@@ -587,6 +588,7 @@ pub(crate) fn dedupe_peer_variants(graph: LockfileGraph) -> LockfileGraph {
         bun_config_version,
         patched_dependencies,
         trusted_dependencies,
+        runtimes,
         extra_fields,
         workspace_extra_fields,
     }
@@ -711,6 +713,7 @@ fn apply_peer_contexts_once(
         settings: canonical.settings,
         overrides: canonical.overrides,
         ignored_optional_dependencies: canonical.ignored_optional_dependencies,
+        runtimes: canonical.runtimes,
         times: canonical.times,
         skipped_optional_dependencies: canonical.skipped_optional_dependencies,
         catalogs: canonical.catalogs,
@@ -1181,6 +1184,7 @@ fn propagate_peer_suffixes_to_ancestors(
         bun_config_version,
         patched_dependencies,
         trusted_dependencies,
+        runtimes,
         extra_fields,
         workspace_extra_fields,
     } = graph;
@@ -1237,6 +1241,7 @@ fn propagate_peer_suffixes_to_ancestors(
         bun_config_version,
         patched_dependencies,
         trusted_dependencies,
+        runtimes,
         extra_fields,
         workspace_extra_fields,
     }
@@ -1397,6 +1402,7 @@ pub(crate) fn dedupe_peer_suffixes(graph: LockfileGraph) -> LockfileGraph {
         settings: graph.settings,
         overrides: graph.overrides,
         ignored_optional_dependencies: graph.ignored_optional_dependencies,
+        runtimes: graph.runtimes,
         times: graph.times,
         skipped_optional_dependencies: graph.skipped_optional_dependencies,
         catalogs: graph.catalogs,

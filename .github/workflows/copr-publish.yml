@@ -25,7 +25,7 @@ jobs:
     runs-on: namespace-profile-endev-linux-amd64
     timeout-minutes: 150
     container:
-      image: fedora:45
+      image: fedora:45@sha256:0c1f63ed8fb818fad16cf6ae091598c410a21d2e1a9adf183beb93189299bfba
     permissions:
       contents: read
     steps:

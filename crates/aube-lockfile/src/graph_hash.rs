@@ -38,7 +38,7 @@ use aube_util::collections::FxSet as FxHashSet;
 /// scripts. Implemented by `aube-scripts::BuildPolicy` in practice,
 /// but the hasher stays oblivious to the policy crate so the lockfile
 /// crate doesn't depend on it.
-pub type AllowBuildFn<'a> = &'a dyn Fn(&str, &str) -> bool;
+pub type AllowBuildFn<'a> = &'a dyn Fn(&LockedPackage) -> bool;
 
 /// Engine fingerprint folded into a node's hash when any of its
 /// transitive deps are allowed to build. Callers compute this once
@@ -148,12 +148,7 @@ pub fn compute_graph_hashes_with_patches(
     // allowed to run its scripts. This is the "builds" set.
     let mut builds: FxHashSet<String> = FxHashSet::default();
     for (dep_path, pkg) in &graph.packages {
-        // Feed registry_name to allow_build, not pkg.name. pkg.name
-        // could be an npm: alias from the manifest. Allowlist pins
-        // the real name. Without this, an aliased import smuggles
-        // past the allowlist. Same fix applied at every policy.decide
-        // callsite in aube/ (install/mod.rs, ignored_builds.rs).
-        if allow_build(pkg.registry_name(), &pkg.version) {
+        if allow_build(pkg) {
             builds.insert(dep_path.clone());
         }
     }
@@ -290,16 +285,23 @@ fn transitively_requires_build(
 }
 
 /// `full_pkg_id` — pnpm uses `${pkgIdWithPatchHash}:${resolution}`; we
-/// use `${name}@${version}[:patch:<hex>]:${integrity}`. Packages
-/// without integrity (workspace or git deps in pnpm's lockfile) fall
-/// back to `<no-integrity>` which keeps the hash deterministic
-/// without perfectly encoding identity — good enough until those
-/// sources actually matter.
+/// use `${name}@${version}[:patch:<hex>]:${source?}:${integrity}`.
+/// Source-backed packages fold in their stable specifier so two local
+/// or git dependencies with the same manifest version don't collapse
+/// onto the same graph hash when they point at different bytes.
 fn full_pkg_id(pkg: &LockedPackage, patch_hash: PatchHashFn<'_>) -> String {
     let integrity = pkg.integrity.as_deref().unwrap_or("<no-integrity>");
+    let source = pkg
+        .local_source
+        .as_ref()
+        .map(|source| format!(":source:{}", source.specifier()))
+        .unwrap_or_default();
     match patch_hash(&pkg.name, &pkg.version) {
-        Some(hex) => format!("{}@{}:patch:{hex}:{integrity}", pkg.name, pkg.version),
-        None => format!("{}@{}:{}", pkg.name, pkg.version, integrity),
+        Some(hex) => format!(
+            "{}@{}:patch:{hex}{source}:{integrity}",
+            pkg.name, pkg.version
+        ),
+        None => format!("{}@{}{source}:{}", pkg.name, pkg.version, integrity),
     }
 }
 
@@ -327,7 +329,8 @@ struct DepsHashInput<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DirectDep, LockedPackage, LockfileGraph};
+    use crate::{DirectDep, LocalSource, LockedPackage, LockfileGraph};
+    use std::path::PathBuf;
 
     fn mk_pkg(name: &str, ver: &str, integrity: Option<&str>) -> LockedPackage {
         LockedPackage {
@@ -359,8 +362,8 @@ mod tests {
             "foo@1.0.0".into(),
             mk_pkg("foo", "1.0.0", Some("sha512-ABC")),
         );
-        let h1 = compute_graph_hashes(&g, &|_, _| false, None);
-        let h2 = compute_graph_hashes(&g, &|_, _| false, None);
+        let h1 = compute_graph_hashes(&g, &|_| false, None);
+        let h2 = compute_graph_hashes(&g, &|_| false, None);
         assert_eq!(h1.node_hash, h2.node_hash);
     }
 
@@ -372,8 +375,8 @@ mod tests {
         let mut g2 = empty_graph();
         g2.packages
             .insert("foo@1.0.0".into(), mk_pkg("foo", "1.0.0", Some("sha512-B")));
-        let h1 = compute_graph_hashes(&g1, &|_, _| false, None);
-        let h2 = compute_graph_hashes(&g2, &|_, _| false, None);
+        let h1 = compute_graph_hashes(&g1, &|_| false, None);
+        let h2 = compute_graph_hashes(&g2, &|_| false, None);
         assert_ne!(h1.node_hash["foo@1.0.0"], h2.node_hash["foo@1.0.0"]);
     }
 
@@ -396,10 +399,44 @@ mod tests {
             mk_pkg("bar", "1.0.0", Some("sha512-B2")),
         );
 
-        let h1 = compute_graph_hashes(&g1, &|_, _| false, None);
-        let h2 = compute_graph_hashes(&g2, &|_, _| false, None);
+        let h1 = compute_graph_hashes(&g1, &|_| false, None);
+        let h2 = compute_graph_hashes(&g2, &|_| false, None);
         assert_ne!(h1.node_hash["foo@1.0.0"], h2.node_hash["foo@1.0.0"]);
         assert_ne!(h1.node_hash["bar@1.0.0"], h2.node_hash["bar@1.0.0"]);
+    }
+
+    #[test]
+    fn source_change_cascades_to_parent() {
+        let mut g1 = empty_graph();
+        let mut parent = mk_pkg("parent", "1.0.0", Some("sha512-P"));
+        parent
+            .dependencies
+            .insert("child".into(), "file+aaa".into());
+        g1.packages.insert("parent@1.0.0".into(), parent);
+        let mut child = mk_pkg("child", "1.0.0", None);
+        child.dep_path = "child@file+aaa".into();
+        child.local_source = Some(LocalSource::Directory(PathBuf::from("vendor/a")));
+        g1.packages.insert("child@file+aaa".into(), child);
+
+        let mut g2 = empty_graph();
+        let mut parent = mk_pkg("parent", "1.0.0", Some("sha512-P"));
+        parent
+            .dependencies
+            .insert("child".into(), "file+bbb".into());
+        g2.packages.insert("parent@1.0.0".into(), parent);
+        let mut child = mk_pkg("child", "1.0.0", None);
+        child.dep_path = "child@file+bbb".into();
+        child.local_source = Some(LocalSource::Directory(PathBuf::from("vendor/b")));
+        g2.packages.insert("child@file+bbb".into(), child);
+
+        let h1 = compute_graph_hashes(&g1, &|_| false, None);
+        let h2 = compute_graph_hashes(&g2, &|_| false, None);
+
+        assert_ne!(
+            h1.node_hash["child@file+aaa"],
+            h2.node_hash["child@file+bbb"]
+        );
+        assert_ne!(h1.node_hash["parent@1.0.0"], h2.node_hash["parent@1.0.0"]);
     }
 
     #[test]
@@ -419,7 +456,7 @@ mod tests {
             .insert("native".into(), "1.0.0".into());
         g.packages.insert("consumer@1.0.0".into(), consumer);
 
-        let allow_native = |name: &str, _v: &str| name == "native";
+        let allow_native = |pkg: &LockedPackage| pkg.registry_name() == "native";
         let engine_a = EngineName("linux-x64-node20".into());
         let engine_b = EngineName("linux-x64-node22".into());
 
@@ -447,7 +484,7 @@ mod tests {
         g.packages.insert("a@1.0.0".into(), a);
         g.packages.insert("b@1.0.0".into(), b);
 
-        let h = compute_graph_hashes(&g, &|_, _| false, None);
+        let h = compute_graph_hashes(&g, &|_| false, None);
         assert!(h.node_hash.contains_key("a@1.0.0"));
         assert!(h.node_hash.contains_key("b@1.0.0"));
     }

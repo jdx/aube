@@ -31,6 +31,8 @@ pub const WARN_AUBE_GVS_MODE_CHANGED: &str = "WARN_AUBE_GVS_MODE_CHANGED";
 pub const WARN_AUBE_INVALID_CONCURRENCY: &str = "WARN_AUBE_INVALID_CONCURRENCY";
 pub const WARN_AUBE_INVALID_TRUST_POLICY: &str = "WARN_AUBE_INVALID_TRUST_POLICY";
 pub const WARN_AUBE_OVERRIDE_MISSING_DEP: &str = "WARN_AUBE_OVERRIDE_MISSING_DEP";
+pub const WARN_AUBE_OVERRIDE_DOLLAR_REF_DEPRECATED: &str =
+    "WARN_AUBE_OVERRIDE_DOLLAR_REF_DEPRECATED";
 pub const WARN_AUBE_INVALID_PEER_PATTERN: &str = "WARN_AUBE_INVALID_PEER_PATTERN";
 pub const WARN_AUBE_INVALID_SAVE_PREFIX: &str = "WARN_AUBE_INVALID_SAVE_PREFIX";
 pub const WARN_AUBE_CONCURRENCY_ENV_INVALID: &str = "WARN_AUBE_CONCURRENCY_ENV_INVALID";
@@ -99,6 +101,11 @@ pub const WARN_AUBE_OSV_MIRROR_REFRESH_FAILED: &str = "WARN_AUBE_OSV_MIRROR_REFR
 pub const WARN_AUBE_OSV_BLOOM_REFRESH_FAILED: &str = "WARN_AUBE_OSV_BLOOM_REFRESH_FAILED";
 pub const WARN_AUBE_SECURITY_SCANNER_FINDING: &str = "WARN_AUBE_SECURITY_SCANNER_FINDING";
 
+// ── node runtime ────────────────────────────────────────────────────
+#[rustfmt::skip] pub const WARN_AUBE_RUNTIME_VERSION_MISMATCH: &str = "WARN_AUBE_RUNTIME_VERSION_MISMATCH";
+pub const WARN_AUBE_RUNTIME_MISE_FALLBACK: &str = "WARN_AUBE_RUNTIME_MISE_FALLBACK";
+#[rustfmt::skip] pub const WARN_AUBE_RUNTIME_PIN_NOT_RECORDED: &str = "WARN_AUBE_RUNTIME_PIN_NOT_RECORDED";
+
 /// Stable category labels that group codes in the generated docs.
 /// Public so the docs generator can iterate them deterministically.
 pub mod category {
@@ -116,6 +123,7 @@ pub mod category {
     pub const PROGRESS_UI: &str = "Progress UI";
     pub const WORKSPACE_RECURSION: &str = "Workspace recursion";
     pub const SUPPLY_CHAIN: &str = "Supply chain (add-time)";
+    pub const NODE_RUNTIME: &str = "Node runtime";
 }
 
 /// Registry of every warning code with its category and description.
@@ -237,6 +245,12 @@ pub const ALL: &[CodeMeta] = &[
         name: WARN_AUBE_OVERRIDE_MISSING_DEP,
         category: category::SETTINGS_CONFIG,
         description: "An `overrides` `$ref` pointed at a package not in any of the importer's dependency lists.",
+        exit_code: None,
+    },
+    CodeMeta {
+        name: WARN_AUBE_OVERRIDE_DOLLAR_REF_DEPRECATED,
+        category: category::SETTINGS_CONFIG,
+        description: "An `overrides` entry used pnpm's deprecated `$` version reference syntax.",
         exit_code: None,
     },
     CodeMeta {
@@ -512,6 +526,25 @@ pub const ALL: &[CodeMeta] = &[
         name: WARN_AUBE_SECURITY_SCANNER_FINDING,
         category: category::SUPPLY_CHAIN,
         description: "User-configured `securityScanner` returned a `warn`-level advisory. Install continues — only `fatal`-level advisories block.",
+        exit_code: None,
+    },
+    // Node runtime
+    CodeMeta {
+        name: WARN_AUBE_RUNTIME_VERSION_MISMATCH,
+        category: category::NODE_RUNTIME,
+        description: "The active Node.js doesn't satisfy the project's runtime requirement and `onFail: \"warn\"` keeps execution on the unsatisfying version.",
+        exit_code: None,
+    },
+    CodeMeta {
+        name: WARN_AUBE_RUNTIME_MISE_FALLBACK,
+        category: category::NODE_RUNTIME,
+        description: "`runtimeInstaller=auto` tried delegating a Node.js install to mise but mise failed; aube fell back to its own nodejs.org download.",
+        exit_code: None,
+    },
+    CodeMeta {
+        name: WARN_AUBE_RUNTIME_PIN_NOT_RECORDED,
+        category: category::NODE_RUNTIME,
+        description: "`devEngines.runtime` resolved to an exact Node.js version but the project's lockfile format (npm/yarn/bun) has no runtime entry shape, so the pin wasn't recorded. Subsequent runs re-resolve the range.",
         exit_code: None,
     },
 ];

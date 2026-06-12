@@ -3,7 +3,7 @@
 
 **Usage**: `aube [FLAGS] <SUBCOMMAND>`
 
-**Version**: 1.18.2
+**Version**: 1.19.0
 
 - **Usage**: `aube [FLAGS] <SUBCOMMAND>`
 
@@ -178,6 +178,9 @@ Run from the workspace root regardless of the current package
 - [`aube restart [FLAGS] [ARGS]…`](/cli/restart.md)
 - [`aube root [-g --global]`](/cli/root.md)
 - [`aube run [FLAGS] [SCRIPT] [ARGS]…`](/cli/run.md)
+- [`aube runtime <SUBCOMMAND>`](/cli/runtime.md)
+- [`aube runtime list`](/cli/runtime/list.md)
+- [`aube runtime set [FLAGS] <NAME> <VERSION>`](/cli/runtime/set.md)
 - [`aube sbom [FLAGS]`](/cli/sbom.md)
 - [`aube sponsors`](/cli/sponsors.md)
 - [`aube stage [FLAGS]`](/cli/stage.md)

@@ -61,6 +61,17 @@ aube install --lockfile-only
 Use this when CI or automation needs to update dependency metadata without
 touching `node_modules`.
 
+## Runtime pins
+
+When `package.json` pins Node through `devEngines.runtime`, the
+resolved exact version (plus per-platform download URLs and SHA-256
+checksums) is recorded in the lockfile using pnpm 10.14+'s
+`node@runtime:` entry shape — a synthetic dep on the root importer and
+a `packages:` entry with a `variations` resolution. aube and pnpm read
+each other's pins. Formats without a runtime shape (npm / yarn / bun)
+skip the pin and re-resolve the range at run time. See
+[Node runtime switching](/package-manager/node-runtime).
+
 ## Branch lockfiles
 
 When `gitBranchLockfile` is enabled, aube writes branch-specific lockfile names

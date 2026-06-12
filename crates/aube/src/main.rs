@@ -8,6 +8,8 @@ mod engines;
 mod patches;
 mod pnpmfile;
 mod progress;
+mod runtime;
+mod self_version;
 mod startup;
 mod state;
 mod update_check;
@@ -454,6 +456,9 @@ enum Commands {
     /// Run a script defined in package.json
     #[command(alias = "run-script")]
     Run(commands::run::RunArgs),
+    /// Manage the project's Node.js runtime (pin, install, inspect)
+    #[command(visible_alias = "rt")]
+    Runtime(commands::runtime::RuntimeArgs),
     /// Generate a Software Bill of Materials (CycloneDX or SPDX)
     Sbom(commands::sbom::SbomArgs),
     /// Search the registry for packages (not implemented — use `npm search`)
@@ -739,6 +744,11 @@ async fn async_main(cli: Cli) -> miette::Result<Option<i32>> {
 
     commands::set_skip_auto_install_on_package_manager_mismatch(false);
     if command_needs_package_manager_guard(cli.command.as_ref()) {
+        // Self-version switch first: when the project pins aube and
+        // the pinned version resolves, this re-execs and never
+        // returns. The guard below then only sees matching (or
+        // policy-softened) states.
+        self_version::maybe_switch(&settings).await?;
         let guard = enforce_package_manager_guardrails(&settings, cli.command.as_ref())?;
         commands::set_skip_auto_install_on_package_manager_mismatch(
             guard == PackageManagerGuard::WarnRunOnly,
@@ -911,6 +921,7 @@ async fn async_main(cli: Cli) -> miette::Result<Option<i32>> {
         }
         Some(Commands::Root(args)) => commands::root::run(args).await?,
         Some(Commands::Run(args)) => commands::run::run(args, effective_filter.clone()).await?,
+        Some(Commands::Runtime(args)) => commands::runtime::run(args).await?,
         Some(Commands::Sbom(args)) => commands::sbom::run(args).await?,
         Some(Commands::Search(args)) => {
             return Ok(Some(commands::npm_fallback::run("search", &args)?));

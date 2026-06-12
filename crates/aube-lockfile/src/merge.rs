@@ -264,6 +264,53 @@ fn merge_into(dst: &mut LockfileGraph, src: LockfileGraph, report: &mut MergeRep
             }
         }
     }
+    for (name, incoming) in src.runtimes {
+        use std::collections::btree_map::Entry;
+        match dst.runtimes.entry(name) {
+            Entry::Vacant(slot) => {
+                slot.insert(incoming);
+            }
+            Entry::Occupied(mut slot) => {
+                if slot.get().version != incoming.version {
+                    report.conflicts.push(format!(
+                        "runtime `{}`: kept {} over {}",
+                        slot.key(),
+                        slot.get().version,
+                        incoming.version
+                    ));
+                    continue;
+                }
+                // Same resolved version: a silently-kept dst would
+                // drop the incoming side's metadata. Surface specifier
+                // disagreements and union the per-platform variants
+                // (dst wins on target collisions) so a pin written on
+                // another platform keeps its artifacts after a merge.
+                if slot.get().specifier != incoming.specifier {
+                    report.conflicts.push(format!(
+                        "runtime `{}` specifier: kept {} over {}",
+                        slot.key(),
+                        slot.get().specifier,
+                        incoming.specifier
+                    ));
+                }
+                let dst_pin = slot.get_mut();
+                for variant in incoming.variants {
+                    // Push unless *every* target is already covered —
+                    // `.any()` here would drop a multi-target variant
+                    // whose targets are only partially covered.
+                    let fully_covered = variant.targets.iter().all(|t| {
+                        dst_pin
+                            .variants
+                            .iter()
+                            .any(|dv| dv.targets.iter().any(|dt| dt == t))
+                    });
+                    if !fully_covered {
+                        dst_pin.variants.push(variant);
+                    }
+                }
+            }
+        }
+    }
     let mut seen: aube_util::collections::FxSet<String> =
         dst.trusted_dependencies.iter().cloned().collect();
     for name in src.trusted_dependencies {

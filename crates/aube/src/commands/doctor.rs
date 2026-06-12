@@ -46,7 +46,17 @@ pub async fn run(args: DoctorArgs) -> miette::Result<()> {
     let project_root = crate::dirs::find_project_root(&cwd);
     let anchor = project_root.clone().unwrap_or_else(|| cwd.clone());
 
-    let report = build_report(&anchor, project_root.is_some())?;
+    // Resolve the project's runtime so the report shows what scripts
+    // would actually run on. A resolution failure is a finding, not a
+    // crash — doctor exists to surface exactly these problems.
+    let runtime_error = crate::runtime::ensure_for_cwd(&cwd).await.err();
+
+    let mut report = build_report(&anchor, project_root.is_some())?;
+    if let Some(e) = runtime_error {
+        report
+            .errors
+            .push(format!("node runtime resolution failed: {e}"));
+    }
 
     if args.json {
         print_json(&report);
@@ -133,7 +143,7 @@ fn version_section() -> Section {
 
 fn runtime_section(warnings: &mut Vec<String>) -> Section {
     let mut s = Section::new("runtime");
-    match crate::engines::resolve_node_version(None) {
+    match crate::engines::effective_node_version(None) {
         Some(v) => s.push("node", format!("v{v}")),
         None => {
             s.push("node", "(not found)");
@@ -141,6 +151,22 @@ fn runtime_section(warnings: &mut Vec<String>) -> Section {
                 "`node` is not available on PATH — lifecycle scripts and `aube run` will fail"
                     .to_string(),
             );
+        }
+    }
+    if let Some(ctx) = crate::runtime::current() {
+        s.push("node-source", ctx.source.label());
+        if let Some(requested) = &ctx.requested {
+            s.push("node-requested", requested.clone());
+            s.push("node-provenance", ctx.provenance.label());
+            if ctx.version.is_none() {
+                warnings.push(format!(
+                    "the project requests node {requested} (via {}) but the requirement is unsatisfied",
+                    ctx.source.label()
+                ));
+            }
+        }
+        if let Some(bin) = &ctx.node_bin {
+            s.push("node-bin", display_path_owned(bin.clone()));
         }
     }
     if let Some(shell) = std::env::var_os("SHELL")
@@ -184,8 +210,26 @@ fn project_section(anchor: &Path, report: &mut Report) -> Section {
                 _ => "(unnamed)".into(),
             };
             s.push("package", label);
+            // Self-version pin (packageManager / devEngines.packageManager).
+            let self_pin = manifest
+                .dev_engines
+                .as_ref()
+                .and_then(|d| d.aube_package_manager())
+                .and_then(|e| e.version.clone())
+                .map(|v| (v, "devEngines.packageManager"))
+                .or_else(|| {
+                    manifest
+                        .extra
+                        .get("packageManager")
+                        .and_then(|v| v.as_str())
+                        .and_then(|raw| raw.strip_prefix("aube@"))
+                        .map(|v| (v.to_string(), "packageManager"))
+                });
+            if let Some((pin, source)) = self_pin {
+                s.push("aube-pin", format!("{pin} (via {source})"));
+            }
             if let Some(range) = manifest.engines.get("node")
-                && let Some(node) = crate::engines::resolve_node_version(None)
+                && let Some(node) = crate::engines::effective_node_version(None)
             {
                 match (
                     node_semver::Version::parse(&node),

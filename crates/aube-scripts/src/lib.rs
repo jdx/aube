@@ -36,6 +36,14 @@ pub struct ScriptSettings {
     pub script_shell: Option<PathBuf>,
     pub unsafe_perm: Option<bool>,
     pub shell_emulator: bool,
+    /// Directory of the project's resolved Node runtime, prepended to
+    /// PATH after the project `.bin` so the switched node beats the
+    /// system one while project-local binaries still win. `None` when
+    /// no runtime switching is active.
+    pub node_bin_dir: Option<PathBuf>,
+    /// The resolved node executable, exported as `npm_node_execpath` /
+    /// `NODE` (npm parity) for every script.
+    pub node_exe: Option<PathBuf>,
 }
 
 /// Native build jail applied to dependency lifecycle scripts.
@@ -129,8 +137,13 @@ fn script_settings() -> ScriptSettings {
 /// Prepend `bin_dir` to the current `PATH` using the platform's path
 /// separator (`:` on Unix, `;` on Windows).
 pub fn prepend_path(bin_dir: &Path) -> std::ffi::OsString {
+    prepend_paths(std::slice::from_ref(&bin_dir.to_path_buf()))
+}
+
+/// [`prepend_path`] for multiple directories, prepended in order.
+pub fn prepend_paths(bin_dirs: &[PathBuf]) -> std::ffi::OsString {
     let path = std::env::var_os("PATH").unwrap_or_default();
-    let mut entries = vec![bin_dir.to_path_buf()];
+    let mut entries: Vec<PathBuf> = bin_dirs.to_vec();
     entries.extend(std::env::split_paths(&path));
     std::env::join_paths(entries).unwrap_or(path)
 }
@@ -842,16 +855,22 @@ pub async fn run_script(
     // `"node_modules"` at the call site, but a workspace may have
     // configured something else.
     let project_bin = project_root.join(modules_dir_name).join(".bin");
+    let settings = script_settings();
     let path = std::env::var_os("PATH").unwrap_or_default();
-    let mut entries: Vec<PathBuf> = Vec::with_capacity(extra_bin_dirs.len() + 1);
+    let mut entries: Vec<PathBuf> = Vec::with_capacity(extra_bin_dirs.len() + 2);
     for dir in extra_bin_dirs {
         entries.push(dir.to_path_buf());
     }
     entries.push(project_bin);
+    // The switched Node runtime sits between project bins and the
+    // inherited PATH: scripts spawning `node` (directly or via
+    // `#!/usr/bin/env node`) get the project's pinned version, while
+    // anything installed into `.bin` still wins.
+    if let Some(dir) = &settings.node_bin_dir {
+        entries.push(dir.clone());
+    }
     entries.extend(std::env::split_paths(&path));
     let new_path = std::env::join_paths(entries).unwrap_or(path);
-
-    let settings = script_settings();
     let jail_home = jail.map(|j| jail_home(&j.package_dir));
     if let Some(home) = &jail_home {
         std::fs::create_dir_all(home)
@@ -865,6 +884,11 @@ pub async fn run_script(
         .stderr(child_stderr())
         .env("PATH", &new_path)
         .env("npm_lifecycle_event", script_name);
+    // Set after the jail's env_clear (builder env calls compose in
+    // order), so jailed builds see the pinned node too.
+    if let Some(node_exe) = &settings.node_exe {
+        cmd.env("npm_node_execpath", node_exe).env("NODE", node_exe);
+    }
 
     // Pass INIT_CWD the way npm/pnpm do — the directory the user
     // invoked the package manager from, *not* the script's own cwd.

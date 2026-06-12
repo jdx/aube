@@ -241,11 +241,16 @@ impl LockfileGraph {
             workspace_catalogs,
         );
         let locked = resolve_catalog_refs_in_overrides(&self.overrides, workspace_catalogs);
-        overrides_drift_reason(&locked, &effective).or_else(|| {
-            let mut effective_ignored = manifest.pnpm_ignored_optional_dependencies();
-            effective_ignored.extend(workspace_ignored_optional.iter().cloned());
-            ignored_optional_drift_reason(&self.ignored_optional_dependencies, &effective_ignored)
-        })
+        overrides_drift_reason(&locked, &effective)
+            .or_else(|| {
+                let mut effective_ignored = manifest.pnpm_ignored_optional_dependencies();
+                effective_ignored.extend(workspace_ignored_optional.iter().cloned());
+                ignored_optional_drift_reason(
+                    &self.ignored_optional_dependencies,
+                    &effective_ignored,
+                )
+            })
+            .or_else(|| runtime_drift_reason(&self.runtimes, manifest))
     }
 
     /// Compare this lockfile's catalog snapshot against the current
@@ -661,6 +666,51 @@ fn ignored_optional_drift_reason(
     None
 }
 
+/// Compare recorded runtime pins against the manifest's
+/// `devEngines.runtime` declarations.
+///
+/// Only an *existing* pin can drift here: the requested range changed,
+/// or the manifest dropped the devEngines entry the pin came from. The
+/// inverse case — devEngines present but no pin recorded yet — is
+/// deliberately not drift, because formats that can't record runtime
+/// pins (npm/yarn/bun) would read as permanently stale. The install
+/// driver adds the missing pin on formats that support it.
+fn runtime_drift_reason(
+    runtimes: &BTreeMap<String, crate::RuntimePin>,
+    manifest: &aube_manifest::PackageJson,
+) -> Option<String> {
+    for (name, pin) in runtimes {
+        let entry = manifest
+            .dev_engines
+            .as_ref()
+            .and_then(|d| d.runtime.iter().find(|r| r.name == *name));
+        match entry {
+            None => {
+                return Some(format!(
+                    "devEngines.runtime: manifest no longer pins {name} (lockfile records {})",
+                    pin.version
+                ));
+            }
+            // An entry that names the runtime but declares no
+            // `version` carries no concrete range — resolution treats
+            // it as "no requirement", so it can't contradict the pin.
+            // Flagging it would hard-fail frozen installs over a
+            // field that changes nothing.
+            Some(entry) => match entry.version.as_deref() {
+                None => {}
+                Some(range) if range != pin.specifier => {
+                    return Some(format!(
+                        "devEngines.runtime: {name} changed ({} → {range})",
+                        pin.specifier
+                    ));
+                }
+                Some(_) => {}
+            },
+        }
+    }
+    None
+}
+
 /// Result of comparing a lockfile against a manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DriftStatus {
@@ -696,6 +746,7 @@ mod drift_tests {
             update_config: None,
             scripts: BTreeMap::new(),
             engines: BTreeMap::new(),
+            dev_engines: None,
             workspaces: None,
             bundled_dependencies: None,
             extra: BTreeMap::new(),

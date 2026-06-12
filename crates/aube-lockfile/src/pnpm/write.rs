@@ -106,6 +106,25 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
             }
         }
 
+        // Runtime pins render as synthetic deps on the root importer
+        // (pnpm 10.14+ shape): `node: {specifier: runtime:^24.4.0,
+        // version: runtime:24.4.1}`. Only the root carries them — the
+        // pin comes from the root manifest's devEngines.
+        if importer_path == "." {
+            for (name, pin) in &graph.runtimes {
+                let spec = WritableDepSpec {
+                    specifier: format!("runtime:{}", pin.specifier),
+                    version: format!("runtime:{}", pin.version),
+                };
+                let slot = if pin.dev {
+                    importer.dev_dependencies.get_or_insert_with(BTreeMap::new)
+                } else {
+                    importer.dependencies.get_or_insert_with(BTreeMap::new)
+                };
+                slot.insert(name.clone(), spec);
+            }
+        }
+
         if let Some(skipped) = graph.skipped_optional_dependencies.get(importer_path)
             && !skipped.is_empty()
         {
@@ -229,6 +248,7 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                 repo: None,
                 type_: Some("directory".to_string()),
                 path: None,
+                variants: None,
             }),
             Some(local @ LocalSource::Tarball(_)) => Some(WritableResolution {
                 integrity: None,
@@ -239,6 +259,7 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                 repo: None,
                 type_: None,
                 path: None,
+                variants: None,
             }),
             Some(LocalSource::Link(_)) | Some(LocalSource::Exec(_)) => None,
             Some(local @ LocalSource::Portal(_)) => Some(WritableResolution {
@@ -250,6 +271,7 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                 repo: None,
                 type_: Some("directory".to_string()),
                 path: None,
+                variants: None,
             }),
             Some(LocalSource::Git(g)) => Some(WritableResolution {
                 integrity: g.integrity.clone().or_else(|| pkg.integrity.clone()),
@@ -264,6 +286,7 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                 // with a `&path:/<sub>` selector. Keep the same shape
                 // so byte-identical round-trips survive.
                 path: g.subpath.as_ref().map(|s| format!("/{s}")),
+                variants: None,
             }),
             Some(LocalSource::RemoteTarball(t)) => Some(WritableResolution {
                 integrity: if t.integrity.is_empty() {
@@ -278,6 +301,7 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                 repo: None,
                 type_: None,
                 path: None,
+                variants: None,
             }),
             None if url_keyed => {
                 // URL-keyed transitive entries (github overrides, etc.)
@@ -298,6 +322,7 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                     repo: None,
                     type_: None,
                     path: None,
+                    variants: None,
                 })
             }
             None if pkg.integrity.is_some() || preserve_tarball_url => Some(WritableResolution {
@@ -323,6 +348,7 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                 repo: None,
                 type_: None,
                 path: None,
+                variants: None,
             }),
             None => None,
         };
@@ -352,6 +378,75 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                 alias_of: (!native_pnpm_aliases)
                     .then(|| pkg.alias_of.clone())
                     .flatten(),
+            },
+        );
+    }
+
+    // Runtime pin packages entries: `node@runtime:24.4.1` with a
+    // `variations` resolution carrying one binary artifact per
+    // platform (pnpm 10.14+ shape). The matching snapshot entry is
+    // empty — runtimes have no dependencies.
+    for (name, pin) in &graph.runtimes {
+        let variants: Vec<WritableRuntimeVariant> = pin
+            .variants
+            .iter()
+            .map(|v| WritableRuntimeVariant {
+                resolution: WritableRuntimeBinaryResolution {
+                    archive: v.archive.clone(),
+                    bin: if v.bin_is_bare_string && v.bin.len() == 1 {
+                        WritableRuntimeBin::Single(
+                            v.bin
+                                .values()
+                                .next()
+                                .expect("bin.len() == 1 checked above")
+                                .clone(),
+                        )
+                    } else {
+                        WritableRuntimeBin::Map(v.bin.clone())
+                    },
+                    integrity: if v.integrity.is_empty() {
+                        None
+                    } else {
+                        Some(v.integrity.clone())
+                    },
+                    prefix: v.prefix.clone(),
+                    type_: "binary",
+                    url: v.url.clone(),
+                },
+                targets: v
+                    .targets
+                    .iter()
+                    .map(|t| WritableRuntimeTarget {
+                        cpu: t.cpu.clone(),
+                        libc: t.libc.clone(),
+                        os: t.os.clone(),
+                    })
+                    .collect(),
+            })
+            .collect();
+        packages.insert(
+            format!("{name}@runtime:{}", pin.version),
+            WritablePackageInfo {
+                resolution: Some(WritableResolution {
+                    integrity: None,
+                    git_hosted: false,
+                    directory: None,
+                    tarball: None,
+                    commit: None,
+                    repo: None,
+                    type_: Some("variations".to_string()),
+                    path: None,
+                    variants: Some(variants),
+                }),
+                version: Some(pin.version.clone()),
+                engines: None,
+                os: Vec::new(),
+                cpu: Vec::new(),
+                libc: Vec::new(),
+                has_bin: pin.has_bin,
+                peer_dependencies: None,
+                peer_dependencies_meta: None,
+                alias_of: None,
             },
         );
     }
@@ -432,6 +527,21 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
                 } else {
                     Some(pkg.bundled_dependencies.clone())
                 },
+            },
+        );
+    }
+
+    // Empty snapshot entries for runtime pins (`node@runtime:24.4.1: {}`),
+    // matching pnpm's writer.
+    for (name, pin) in &graph.runtimes {
+        snapshots.insert(
+            format!("{name}@runtime:{}", pin.version),
+            WritableSnapshot {
+                dependencies: None,
+                optional_dependencies: None,
+                transitive_peer_dependencies: None,
+                optional: None,
+                bundled_dependencies: None,
             },
         );
     }
@@ -693,6 +803,51 @@ struct WritableResolution {
     /// match pnpm's own writer.
     #[serde(skip_serializing_if = "Option::is_none")]
     path: Option<String>,
+    /// `type: variations` artifact list for runtime pins. `None` for
+    /// every ordinary package resolution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    variants: Option<Vec<WritableRuntimeVariant>>,
+}
+
+/// One `variants:` entry of a runtime pin's `variations` resolution.
+/// Field order is alphabetical (`resolution` before `targets`),
+/// matching pnpm's sorted-key lockfile emitter.
+#[derive(Debug, Serialize)]
+struct WritableRuntimeVariant {
+    resolution: WritableRuntimeBinaryResolution,
+    targets: Vec<WritableRuntimeTarget>,
+}
+
+/// pnpm `BinaryResolution` — alphabetical field order to match pnpm's
+/// sorted-key emitter.
+#[derive(Debug, Serialize)]
+struct WritableRuntimeBinaryResolution {
+    archive: String,
+    bin: WritableRuntimeBin,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    integrity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prefix: Option<String>,
+    #[serde(rename = "type")]
+    type_: &'static str,
+    url: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum WritableRuntimeBin {
+    /// Bare-string form (`bin: bin/node`) — a single executable named
+    /// after the runtime itself.
+    Single(String),
+    Map(BTreeMap<String, String>),
+}
+
+#[derive(Debug, Serialize)]
+struct WritableRuntimeTarget {
+    cpu: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    libc: Option<String>,
+    os: String,
 }
 
 #[derive(Debug, Serialize)]

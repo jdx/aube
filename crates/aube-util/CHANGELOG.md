@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.19.0](https://github.com/jdx/aube/compare/aube-util-v1.18.2...aube-util-v1.19.0) - 2026-06-11
+
+### Added
+
+- *(runtime)* node version switching and aube self-version management ([#861](https://github.com/jdx/aube/pull/861))
+
+### Other
+
+- refresh benchmarks for v1.18.2 ([#851](https://github.com/jdx/aube/pull/851))
+
 ## [1.18.2](https://github.com/jdx/aube/compare/aube-util-v1.18.1...aube-util-v1.18.2) - 2026-06-08
 
 ### Other

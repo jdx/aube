@@ -161,6 +161,12 @@ pub async fn run(
         None => prompt_for_script()?,
     };
     let node_args = node_args_from_run_flags(inspect, inspect_brk);
+    // Resolve the project's Node runtime before anything spawns —
+    // covers the warm path where no install runs (the install path
+    // re-enters ensure() with the lockfile pin, but the OnceCell makes
+    // that a no-op if we already resolved here; both read the same
+    // version sources so they agree).
+    crate::runtime::ensure_for_cwd(&crate::dirs::cwd()?).await?;
     let recursive = RecursiveOpts {
         // pnpm parity: topo sort is on by default. `--sort` and
         // `--no-sort` use clap `overrides_with`, so only one can land
@@ -878,12 +884,18 @@ async fn build_script_command(
 
     let bin_dir = super::project_modules_dir(cwd).join(".bin");
     let node_gyp_bin_dir = super::install::node_gyp_bootstrap::lazy_shim_bin_dir(&bin_dir)?;
+    let runtime_bin_dirs = crate::runtime::path_entries();
     let path = std::env::var_os("PATH").unwrap_or_default();
-    let mut entries = Vec::with_capacity(2 + usize::from(node_gyp_bin_dir.is_some()));
+    let mut entries =
+        Vec::with_capacity(2 + usize::from(node_gyp_bin_dir.is_some()) + runtime_bin_dirs.len());
     entries.push(bin_dir);
     if let Some(dir) = node_gyp_bin_dir {
         entries.push(dir);
     }
+    // The switched Node runtime beats the inherited PATH but loses to
+    // project-local bins — scripts running `node` get the pinned
+    // version.
+    entries.extend(runtime_bin_dirs);
     entries.extend(std::env::split_paths(&path));
     let new_path = std::env::join_paths(entries).unwrap_or(path);
     let script_dir = if cwd.is_absolute() {
@@ -901,6 +913,7 @@ async fn build_script_command(
     // while working fine under `aube install` postinstall. npm
     // and pnpm set these on every script exec.
     let mut command = aube_scripts::spawn_shell(&shell_cmd);
+    crate::runtime::apply_child_env(&mut command);
     command
         .env("PATH", &new_path)
         .current_dir(cwd)

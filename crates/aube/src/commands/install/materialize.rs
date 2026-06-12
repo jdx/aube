@@ -147,9 +147,13 @@ pub(super) async fn run_gvs_prewarm_materializer(
             aube_util::diag::Category::Materialize,
             "graph_hash_compute",
         );
-        let allow = |name: &str, version: &str| {
+        let allow = |pkg: &aube_lockfile::LockedPackage| {
             matches!(
-                build_policy_for_hash.decide(name, version),
+                build_policy_for_hash.decide_package(
+                    pkg.registry_name(),
+                    &pkg.version,
+                    pkg.source_approval_key().as_deref(),
+                ),
                 aube_scripts::AllowDecision::Allow
             )
         };

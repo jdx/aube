@@ -505,6 +505,18 @@ fn merge_string_map_setting(
     }
 }
 
+fn deprecated_dollar_override_refs(overrides: &BTreeMap<String, String>) -> Vec<(&str, &str)> {
+    overrides
+        .iter()
+        .filter_map(|(key, value)| {
+            value
+                .strip_prefix('$')
+                .filter(|dep| !dep.is_empty())
+                .map(|dep| (key.as_str(), dep))
+        })
+        .collect()
+}
+
 fn object_setting_from_npmrc(
     setting: &str,
     entries: &[(String, String)],
@@ -727,6 +739,12 @@ pub(crate) fn configure_resolver(
     };
     let mut effective_overrides = manifest.overrides_map();
     merge_string_map_setting(settings_ctx, "overrides", &mut effective_overrides);
+    for (key, dep) in deprecated_dollar_override_refs(&effective_overrides) {
+        tracing::warn!(
+            code = aube_codes::warnings::WARN_AUBE_OVERRIDE_DOLLAR_REF_DEPRECATED,
+            "override {key:?} uses deprecated $ reference ${dep}; use a catalog entry instead"
+        );
+    }
     let unresolved_refs = manifest.resolve_override_refs(&mut effective_overrides);
     for key in &unresolved_refs {
         tracing::warn!(
@@ -956,6 +974,25 @@ fn compile_peer_patterns(field: &str, raw: &[String]) -> Vec<glob::Pattern> {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod override_tests {
+    use super::*;
+
+    #[test]
+    fn deprecated_dollar_override_refs_reports_only_ref_values() {
+        let overrides = BTreeMap::from([
+            ("left-pad".to_string(), "$left-pad".to_string()),
+            ("react".to_string(), "^19.0.0".to_string()),
+            ("empty".to_string(), "$".to_string()),
+        ]);
+
+        assert_eq!(
+            deprecated_dollar_override_refs(&overrides),
+            vec![("left-pad", "left-pad")]
+        );
+    }
 }
 
 #[cfg(test)]

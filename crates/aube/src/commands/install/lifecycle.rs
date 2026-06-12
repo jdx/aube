@@ -155,10 +155,10 @@ impl JailBuildPolicy {
         )
     }
 
-    fn should_jail(&self, name: &str, version: &str) -> bool {
+    fn should_jail(&self, name: &str, version: &str, source_key: Option<&str>) -> bool {
         self.enabled
             && !matches!(
-                self.denylist.decide(name, version),
+                self.denylist.decide_package(name, version, source_key),
                 aube_scripts::AllowDecision::Deny
             )
     }
@@ -167,10 +167,11 @@ impl JailBuildPolicy {
         &self,
         name: &str,
         version: &str,
+        source_key: Option<&str>,
         package_dir: &std::path::Path,
         project_dir: &std::path::Path,
     ) -> Option<aube_scripts::ScriptJail> {
-        if !self.should_jail(name, version) {
+        if !self.should_jail(name, version, source_key) {
             return None;
         }
         let mut env = Vec::new();
@@ -390,6 +391,7 @@ pub(crate) async fn run_dep_lifecycle_scripts(
         name: String,
         registry_name: String,
         version: String,
+        source_key: Option<String>,
         package_dir: std::path::PathBuf,
         /// Directory containing the dep package and its sibling
         /// symlinks — i.e. `package_dir`'s enclosing `node_modules/`.
@@ -418,7 +420,8 @@ pub(crate) async fn run_dep_lifecycle_scripts(
             // writes `"h3-safe": "npm:h3@0.19.0"` to sneak a denied pkg
             // through the allowlist. registry_name() strips alias back to
             // real name.
-            match policy.decide(pkg.registry_name(), &pkg.version) {
+            let source_key = pkg.source_approval_key();
+            match policy.decide_package(pkg.registry_name(), &pkg.version, source_key.as_deref()) {
                 aube_scripts::AllowDecision::Allow => {}
                 aube_scripts::AllowDecision::Deny | aube_scripts::AllowDecision::Unspecified => {
                     continue;
@@ -496,6 +499,7 @@ pub(crate) async fn run_dep_lifecycle_scripts(
             name: pkg.name.clone(),
             registry_name: pkg.registry_name().to_string(),
             version: pkg.version.clone(),
+            source_key: pkg.source_approval_key(),
             package_dir,
             dep_modules_dir,
             manifest: dep_manifest,
@@ -577,6 +581,7 @@ pub(crate) async fn run_dep_lifecycle_scripts(
             let jail = jail_policy.jail_for(
                 &job.registry_name,
                 &job.version,
+                job.source_key.as_deref(),
                 &job.package_dir,
                 &project_dir,
             );
@@ -1103,8 +1108,9 @@ pub(super) fn unreviewed_dep_builds(
 ) -> miette::Result<Vec<UnreviewedBuild>> {
     let mut unreviewed = Vec::new();
     for (dep_path, pkg) in &graph.packages {
+        let source_key = pkg.source_approval_key();
         if !matches!(
-            policy.decide(pkg.registry_name(), &pkg.version),
+            policy.decide_package(pkg.registry_name(), &pkg.version, source_key.as_deref()),
             aube_scripts::AllowDecision::Unspecified
         ) {
             continue;
@@ -1143,7 +1149,7 @@ pub(super) fn unreviewed_dep_builds(
             })?;
         if aube_scripts::has_dep_lifecycle_work(&package_dir, &dep_manifest) {
             unreviewed.push(UnreviewedBuild {
-                spec_key: pkg.spec_key(),
+                spec_key: pkg.source_approval_key().unwrap_or_else(|| pkg.spec_key()),
                 suspicions: aube_scripts::sniff_lifecycle(&dep_manifest),
             });
         }

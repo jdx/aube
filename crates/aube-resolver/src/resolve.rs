@@ -124,6 +124,7 @@ impl Resolver {
             // them back from the prior lockfile when round-tripping.
             patched_dependencies: BTreeMap::new(),
             trusted_dependencies: Vec::new(),
+            runtimes: BTreeMap::new(),
             extra_fields: BTreeMap::new(),
             workspace_extra_fields: BTreeMap::new(),
         };
