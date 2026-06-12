@@ -680,12 +680,15 @@ Registry URLs, including scoped registry overrides.
 Maps `default` and `@scope` keys to registry URLs. aube reads these from
 `.npmrc` via `aube_registry::config::NpmConfig` (see
 `crates/aube-registry/src/config.rs`). Bearer tokens and basic auth per
-registry are also parsed from `.npmrc`.
+registry are parsed from `.npmrc` and URL-scoped `npm_config_//...` /
+`pnpm_config_//...` environment variables. `tokenHelper` is only accepted
+from trusted user-level config, not from URL-scoped environment variables.
 
 Examples:
 
 - `registry=https://registry.npmmirror.com/`
 - `@mycorp:registry=https://npm.mycorp.internal/`
+- `pnpm_config_//registry.example.com/:_authToken=$NPM_TOKEN aube install`
 
 ## Dependency Hoisting
 

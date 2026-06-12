@@ -1832,6 +1832,51 @@ fn translate_npm_config_env_passes_uri_auth_through_verbatim() {
 }
 
 #[test]
+fn translate_npm_config_env_passes_pnpm_uri_auth_through_verbatim() {
+    assert_eq!(
+        translate_npm_config_env(
+            "PNPM_CONFIG_//registry.example.com/:_authToken",
+            "secret-token"
+        ),
+        Some((
+            "//registry.example.com/:_authToken".to_string(),
+            "secret-token".to_string()
+        ))
+    );
+}
+
+#[test]
+fn npm_config_env_entries_pnpm_uri_auth_wins_over_npm_uri_auth() {
+    let entries = npm_config_env_entries_from(&[
+        (
+            "npm_config_//registry.example.com/:_authToken".to_string(),
+            "npm-token".to_string(),
+        ),
+        (
+            "pnpm_config_//registry.example.com/:_authToken".to_string(),
+            "pnpm-token".to_string(),
+        ),
+    ]);
+    let mut config = NpmConfig::default();
+    config.apply(entries);
+    assert_eq!(
+        config.auth_token_for("https://registry.example.com/"),
+        Some("pnpm-token")
+    );
+}
+
+#[test]
+fn translate_npm_config_env_ignores_uri_token_helper() {
+    assert_eq!(
+        translate_npm_config_env(
+            "pnpm_config_//registry.example.com/:tokenHelper",
+            "/tmp/helper"
+        ),
+        None
+    );
+}
+
+#[test]
 fn load_with_env_npm_config_registry_overrides_project_file() {
     // Integration-ish: `load_with_env` stitches file config and
     // env together. Project `.npmrc` sets one registry URL; the
