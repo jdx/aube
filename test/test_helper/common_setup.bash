@@ -11,14 +11,23 @@ _common_setup() {
 	# Ensure the multicall shims (`aubr`, `aubx`) exist alongside `aube`.
 	# Local `cargo build` produces all three as real binaries, but CI only
 	# uploads `target/debug/aube` as an artifact; the bats shards then
-	# download just that one file. Materialize the shims as hardlinks to
-	# the shared `aube` inode so the argv[0] dispatch in `main.rs` resolves
-	# correctly. `ln -f` is idempotent — it refreshes if `aube` was rebuilt
-	# and is a no-op if the hardlinks already point at the same inode.
+	# download just that one file. Materialize the shims via temp files and
+	# atomic renames so parallel BATS workers never observe a missing shim.
 	local _aube_bin="$PROJECT_ROOT/target/debug/aube"
 	if [ -x "$_aube_bin" ]; then
-		ln -f "$_aube_bin" "$PROJECT_ROOT/target/debug/aubr" 2>/dev/null || true
-		ln -f "$_aube_bin" "$PROJECT_ROOT/target/debug/aubx" 2>/dev/null || true
+		for _shim in aubr aubx; do
+			local _shim_bin="$PROJECT_ROOT/target/debug/$_shim"
+			local _shim_tmp="$PROJECT_ROOT/target/debug/.$_shim.$$.$RANDOM"
+			if ! ln "$_aube_bin" "$_shim_tmp" 2>/dev/null; then
+				cp "$_aube_bin" "$_shim_tmp"
+			fi
+			chmod +x "$_shim_tmp"
+			if [ "$_shim_tmp" -ef "$_shim_bin" ]; then
+				rm -f "$_shim_tmp"
+			else
+				mv -f "$_shim_tmp" "$_shim_bin"
+			fi
+		done
 	fi
 
 	TEST_TEMP_DIR="$(temp_make)"
