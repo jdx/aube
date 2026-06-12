@@ -10,6 +10,14 @@ homepage.workspace = true
 readme.workspace = true
 include = ["src/**/*.rs", "src/**/*.mjs", "build.rs"]
 
+# The command layer is a library so it can be embedded (construct
+# `commands::install::InstallOptions`, call `commands::install::run`)
+# without shelling out. The three bins below are thin wrappers over
+# `aube::cli_main`.
+[lib]
+name = "aube"
+path = "src/lib.rs"
+
 [[bin]]
 name = "aube"
 path = "src/main.rs"

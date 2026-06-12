@@ -56,7 +56,7 @@ pub enum ConfigCommand {
 }
 
 #[derive(Debug, Args)]
-pub(crate) struct KeyArgs {
+pub struct KeyArgs {
     /// The setting key.
     ///
     /// Accepts either a pnpm canonical name (e.g. `autoInstallPeers`)
@@ -89,7 +89,7 @@ impl KeyArgs {
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
-pub(crate) enum Location {
+pub enum Location {
     /// User config (`~/.config/aube/config.toml` for known aube
     /// settings, `~/.npmrc` for registry/auth and unknown keys)
     User,
@@ -100,7 +100,7 @@ pub(crate) enum Location {
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
-pub(crate) enum ListLocation {
+pub enum ListLocation {
     /// Merge `~/.npmrc`, user aube config, and project `.npmrc`,
     /// last-write-wins (same precedence install uses).
     Merged,
