@@ -18,5 +18,8 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn main() {
-    aube::cli_main()
+    // The standalone `aube` binary runs with aube's own embedder profile.
+    // Embedders call `aube::cli_main` with their own `&'static Embedder`
+    // instead (and `cli_main_with_defaults` to also seed setting defaults).
+    aube::cli_main(&aube_util::identity::AUBE)
 }

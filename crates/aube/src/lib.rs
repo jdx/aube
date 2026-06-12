@@ -521,7 +521,33 @@ enum Commands {
     External(Vec<String>),
 }
 
-pub fn cli_main() {
+/// Library entry point. An embedder calls this with its own `&'static
+/// Embedder` (and optional setting defaults); the `aube` binary passes
+/// `&aube_util::AUBE` and no defaults, reproducing standalone behavior.
+/// This is the whole embedding API: register-then-run in one call, so a host
+/// never has to separately wire identity and defaults.
+pub fn cli_main(embedder: &'static aube_util::Embedder) {
+    cli_main_with_defaults(embedder, Vec::new());
+}
+
+/// [`cli_main`] plus embedder-supplied setting defaults. The `defaults` are
+/// `(canonical_setting_name, raw_value)` pairs registered at the lowest
+/// precedence tier — below every user- and project-level source — for the
+/// genuinely user-overridable knobs an embedder wants to re-default.
+/// (Embedder-*fixed* behavior lives on [`aube_util::Embedder`] itself, not
+/// here.) Standalone aube passes an empty vec, so per-setting built-in
+/// defaults apply unchanged.
+pub fn cli_main_with_defaults(
+    embedder: &'static aube_util::Embedder,
+    defaults: Vec<(String, String)>,
+) {
+    // Register the binary's embedder profile before anything reads branding,
+    // and its setting defaults before anything resolves settings. Both are
+    // idempotent — a no-op if already set (e.g. a test harness that
+    // registered one first).
+    aube_util::set_embedder(embedder);
+    aube_settings::set_embedder_defaults(defaults);
+
     // Two-phase wrapper: `inner_main` runs the real CLI and returns
     // `Result<(), miette::Report>`. On Err we render via miette's
     // fancy handler (matching the previous `Termination` behavior),
@@ -574,7 +600,19 @@ fn inner_main() -> miette::Result<()> {
     // through the process-global slot in `aube_settings`.
     let config_overrides = extract_config_overrides(&mut argv);
     aube_settings::set_global_cli_overrides(config_overrides);
-    let cli = Cli::parse_from(lift_per_subcommand_flags(rewrite_multicall_argv(argv)));
+    // Override the clap command name at runtime with the active embedder's
+    // name. The `#[command(name = "aube")]` attribute is a compile-time
+    // constant and can't read `embedder()`, so help/usage/error output would
+    // otherwise always say "aube" even under an embedder. `get_matches_from`
+    // keeps clap's parse-error / `--help` / `--version` print-and-exit
+    // behavior, matching the previous `parse_from`.
+    let cli = {
+        use clap::{CommandFactory, FromArgMatches};
+        let matches = Cli::command()
+            .name(aube_util::embedder().name)
+            .get_matches_from(lift_per_subcommand_flags(rewrite_multicall_argv(argv)));
+        Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit())
+    };
 
     // `--color` / `--no-color` take effect before anything else touches
     // color state: we translate the flags into the env vars that miette,

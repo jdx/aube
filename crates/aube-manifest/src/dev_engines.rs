@@ -63,9 +63,12 @@ impl DevEngines {
         self.runtime.iter().find(|r| r.name == "node")
     }
 
-    /// The `packageManager` entry named `aube`, if any.
+    /// The `packageManager` entry naming this tool itself, if any.
     pub fn aube_package_manager(&self) -> Option<&DevEngineDependency> {
-        self.package_manager.iter().find(|r| r.name == "aube")
+        let self_names = aube_util::embedder().self_names;
+        self.package_manager
+            .iter()
+            .find(|r| self_names.contains(&r.name.as_str()))
     }
 
     /// Names of `runtime` entries aube does not act on (anything but

@@ -198,12 +198,20 @@ impl CiState {
     /// first heartbeat-emitted progress line. Plain whitespace
     /// alignment, no frame: `aube VERSION by jdx.dev`.
     fn render_header() -> String {
-        format!(
-            "{} {} {}",
-            style::emagenta("aube").bold(),
-            style::edim(crate::version::VERSION.as_str()),
-            style::edim("by jdx.dev"),
-        )
+        let id = aube_util::embedder();
+        match id.vendor {
+            Some(vendor) => format!(
+                "{} {} {}",
+                style::emagenta(id.display_name).bold(),
+                style::edim(crate::version::VERSION.as_str()),
+                style::edim(vendor),
+            ),
+            None => format!(
+                "{} {}",
+                style::emagenta(id.display_name).bold(),
+                style::edim(crate::version::VERSION.as_str()),
+            ),
+        }
     }
 
     pub(super) fn spawn_heartbeat(state: &Arc<Self>) {

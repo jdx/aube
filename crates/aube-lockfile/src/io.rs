@@ -29,7 +29,7 @@ pub enum LockfileKind {
 impl LockfileKind {
     pub fn filename(self) -> &'static str {
         match self {
-            LockfileKind::Aube => "aube-lock.yaml",
+            LockfileKind::Aube => aube_util::embedder().lockfile_basename,
             LockfileKind::Pnpm => "pnpm-lock.yaml",
             LockfileKind::Npm => "package-lock.json",
             LockfileKind::Yarn | LockfileKind::YarnBerry => "yarn.lock",
@@ -197,12 +197,16 @@ pub fn aube_lock_filename(project_dir: &Path) -> String {
     {
         return hit.clone();
     }
+    let basename = aube_util::embedder().lockfile_basename;
+    // basename is "<stem>.<ext>" (e.g. "aube-lock.yaml"); branch lockfiles
+    // splice the branch in as "<stem>.<branch>.<ext>".
+    let (stem, ext) = basename.rsplit_once('.').unwrap_or((basename, "yaml"));
     let resolved = if !git_branch_lockfile_enabled(project_dir) {
-        "aube-lock.yaml".to_string()
+        basename.to_string()
     } else {
         match current_git_branch(project_dir) {
-            Some(branch) => format!("aube-lock.{}.yaml", branch.replace('/', "!")),
-            None => "aube-lock.yaml".to_string(),
+            Some(branch) => format!("{stem}.{}.{ext}", branch.replace('/', "!")),
+            None => basename.to_string(),
         }
     };
     if let Ok(mut map) = cache.lock() {
@@ -218,10 +222,12 @@ pub fn aube_lock_filename(project_dir: &Path) -> String {
 /// keep writing to pnpm's file.
 pub fn pnpm_lock_filename(project_dir: &Path) -> String {
     let aube_name = aube_lock_filename(project_dir);
-    // `aube_lock_filename` always returns "aube-lock.<rest>", so strip_prefix
+    // `aube_lock_filename` always returns "<stem>.<rest>", so strip_prefix
     // always succeeds. The fallback is purely defensive.
+    let basename = aube_util::embedder().lockfile_basename;
+    let stem = basename.rsplit_once('.').map_or(basename, |(s, _)| s);
     aube_name
-        .strip_prefix("aube-lock.")
+        .strip_prefix(&format!("{stem}."))
         .map(|rest| format!("pnpm-lock.{rest}"))
         .unwrap_or_else(|| "pnpm-lock.yaml".to_string())
 }
@@ -330,39 +336,58 @@ fn reject_bun_binary(project_dir: &Path) -> Result<(), Error> {
 }
 
 fn lockfile_candidates(project_dir: &Path, include_aube: bool) -> Vec<(PathBuf, LockfileKind)> {
-    let mut out = Vec::new();
+    let basename = aube_util::embedder().lockfile_basename;
+    let stem = basename.rsplit_once('.').map_or(basename, |(s, _)| s);
+
+    // The canonical (Aube) candidates: the branch-specific lockfile (if
+    // `gitBranchLockfile` is on and we resolve a branch) then the plain
+    // canonical lockfile, so a freshly-enabled branch still picks up the base.
+    let mut aube_entries: Vec<(PathBuf, LockfileKind)> = Vec::new();
     if include_aube {
-        // Prefer the branch-specific lockfile (if `gitBranchLockfile` is on
-        // and we resolve a branch); fall through to plain `aube-lock.yaml`
-        // so a freshly-enabled branch still picks up the base lockfile.
         let branch_name = aube_lock_filename(project_dir);
-        if branch_name != "aube-lock.yaml" {
-            out.push((project_dir.join(&branch_name), LockfileKind::Aube));
+        if branch_name != basename {
+            aube_entries.push((project_dir.join(&branch_name), LockfileKind::Aube));
         }
-        out.push((project_dir.join("aube-lock.yaml"), LockfileKind::Aube));
+        aube_entries.push((project_dir.join(basename), LockfileKind::Aube));
     }
-    // Preserve pnpm lockfiles in place. Branch-specific
-    // `pnpm-lock.<branch>.yaml` mirrors the aube branch lockfile naming
-    // logic, so a project that already uses pnpm branch lockfiles keeps
-    // writing through that file.
+
+    // The foreign candidates, in their fixed precedence order. Preserve pnpm
+    // lockfiles in place; the branch-specific `pnpm-lock.<branch>.yaml`
+    // mirrors the aube branch naming so a project already on pnpm branch
+    // lockfiles keeps writing through that file.
+    let mut foreign: Vec<(PathBuf, LockfileKind)> = Vec::new();
     let pnpm_branch = {
         let mut s = aube_lock_filename(project_dir);
-        if let Some(rest) = s.strip_prefix("aube-lock.") {
+        if let Some(rest) = s.strip_prefix(&format!("{stem}.")) {
             s = format!("pnpm-lock.{rest}");
         }
         s
     };
     if pnpm_branch != "pnpm-lock.yaml" {
-        out.push((project_dir.join(&pnpm_branch), LockfileKind::Pnpm));
+        foreign.push((project_dir.join(&pnpm_branch), LockfileKind::Pnpm));
     }
-    out.push((project_dir.join("pnpm-lock.yaml"), LockfileKind::Pnpm));
-    out.push((project_dir.join("bun.lock"), LockfileKind::Bun));
-    out.push((project_dir.join("yarn.lock"), LockfileKind::Yarn));
-    out.push((
+    foreign.push((project_dir.join("pnpm-lock.yaml"), LockfileKind::Pnpm));
+    foreign.push((project_dir.join("bun.lock"), LockfileKind::Bun));
+    foreign.push((project_dir.join("yarn.lock"), LockfileKind::Yarn));
+    foreign.push((
         project_dir.join("npm-shrinkwrap.json"),
         LockfileKind::NpmShrinkwrap,
     ));
-    out.push((project_dir.join("package-lock.json"), LockfileKind::Npm));
+    foreign.push((project_dir.join("package-lock.json"), LockfileKind::Npm));
+
+    // `Embedder::canonical_lockfile_always_wins` (aube default true) controls
+    // whether the canonical lockfile outranks any foreign one present: when
+    // true the Aube candidates lead, when false a foreign lockfile that also
+    // exists wins instead (the Aube candidates still trail so a lone canonical
+    // lockfile remains usable). Embedder-fixed, not a per-project setting.
+    let mut out = Vec::with_capacity(aube_entries.len() + foreign.len());
+    if aube_util::embedder().canonical_lockfile_always_wins {
+        out.append(&mut aube_entries);
+        out.append(&mut foreign);
+    } else {
+        out.append(&mut foreign);
+        out.append(&mut aube_entries);
+    }
     out
 }
 

@@ -137,6 +137,11 @@ pub struct RuntimeSettings {
     /// registry fetches (caches still serve). `--prefer-offline` maps
     /// to Online — the runtime caches are already consulted first.
     pub network: aube_runtime::NetworkMode,
+    /// `Embedder::runtime_switching` (aube default true). When false the
+    /// resolver is inert: no version-file probe, no provisioning, `PATH`
+    /// untouched. An embedder that owns Node provisioning itself sets this
+    /// off. Embedder-fixed, not a per-project setting.
+    pub switching: bool,
 }
 
 impl RuntimeSettings {
@@ -158,6 +163,7 @@ impl RuntimeSettings {
             on_fail_override,
             mirror: release_mirror(ctx),
             network: aube_runtime::NetworkMode::Online,
+            switching: aube_util::embedder().runtime_switching,
         }
     }
 }
@@ -179,11 +185,13 @@ pub(crate) fn lockfile_node_pin(
     project_dir: &Path,
     manifest: &PackageJson,
 ) -> Option<aube_lockfile::RuntimePin> {
-    let pinned = ["aube-lock.yaml", "pnpm-lock.yaml"].iter().any(|name| {
-        std::fs::read_to_string(project_dir.join(name))
-            .map(|s| s.contains("specifier: runtime:"))
-            .unwrap_or(false)
-    });
+    let pinned = [aube_util::embedder().lockfile_basename, "pnpm-lock.yaml"]
+        .iter()
+        .any(|name| {
+            std::fs::read_to_string(project_dir.join(name))
+                .map(|s| s.contains("specifier: runtime:"))
+                .unwrap_or(false)
+        });
     if !pinned {
         return None;
     }
@@ -234,6 +242,13 @@ async fn resolve_context(
     settings: RuntimeSettings,
     lock_pin: Option<aube_lockfile::RuntimePin>,
 ) -> miette::Result<RuntimeContext> {
+    // `Embedder::runtime_switching == false` makes the resolver inert: no
+    // version-file probe, no provisioning, PATH untouched. Returns the same fallback the
+    // no-pin path produces, so every downstream `current()` consumer sees an
+    // unswitched runtime.
+    if !settings.switching {
+        return Ok(RuntimeContext::path_fallback());
+    }
     let project_dir = project_dir.as_path();
     let manifest = manifest.as_ref();
     let lock_pin = lock_pin.as_ref();

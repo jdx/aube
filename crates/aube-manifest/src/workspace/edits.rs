@@ -11,6 +11,18 @@ use super::config::{ConfigWriteTarget, config_write_target, workspace_yaml_exist
 use super::yaml_patch;
 use std::path::{Path, PathBuf};
 
+/// The manifest config namespaces, compatible first (lower precedence),
+/// this tool's own namespace last (wins on conflict). Standalone aube:
+/// `["pnpm", "aube"]`.
+fn config_namespaces() -> Vec<&'static str> {
+    let id = aube_util::embedder();
+    let mut ns: Vec<&'static str> = id.compatible_names.to_vec();
+    if !id.manifest_namespace.is_empty() {
+        ns.push(id.manifest_namespace);
+    }
+    ns
+}
+
 /// Drop `entry_key` from `pnpm.<key>` and `aube.<key>` in
 /// `package.json`. Returns `Ok(true)` when at least one namespace held
 /// it. Empty inner maps and empty namespaces are scrubbed too. The
@@ -34,7 +46,7 @@ pub fn remove_setting_entry(cwd: &Path, key: &str, entry_key: &str) -> Result<bo
     let before = obj.clone();
 
     let mut existed = false;
-    for ns in ["pnpm", "aube"] {
+    for ns in config_namespaces() {
         let mut ns_empty = false;
         if let Some(ns_obj) = obj.get_mut(ns).and_then(|v| v.as_object_mut()) {
             if let Some(inner) = ns_obj.get_mut(key).and_then(|v| v.as_object_mut()) {
@@ -100,7 +112,7 @@ where
     // before mutating, so the closure sees the same map the install
     // path would.
     let mut merged: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
-    for ns in ["pnpm", "aube"] {
+    for ns in config_namespaces() {
         if let Some(inner) = obj
             .get(ns)
             .and_then(serde_json::Value::as_object)
@@ -115,12 +127,20 @@ where
 
     f(&mut merged);
 
-    let chosen_ns = if obj.contains_key("pnpm") {
-        "pnpm"
+    // Write to a compatible namespace if the manifest already declares
+    // one (`pnpm` for standalone aube), else this tool's own namespace.
+    let id = aube_util::embedder();
+    let chosen_ns = id
+        .compatible_names
+        .iter()
+        .copied()
+        .find(|ns| obj.contains_key(*ns))
+        .unwrap_or(id.manifest_namespace);
+    let other_ns = if chosen_ns == id.manifest_namespace {
+        id.compatible_names.first().copied().unwrap_or("")
     } else {
-        "aube"
+        id.manifest_namespace
     };
-    let other_ns = if chosen_ns == "pnpm" { "aube" } else { "pnpm" };
 
     // Drop `<key>` from the other namespace so the post-write state
     // has one source of truth.

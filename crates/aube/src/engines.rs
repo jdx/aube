@@ -382,6 +382,7 @@ pub fn run_checks(
     node_version: Option<&str>,
     strict: bool,
     virtual_store_dir_max_length: usize,
+    self_engines_check: bool,
 ) -> miette::Result<()> {
     let mut mismatches = Vec::new();
 
@@ -392,6 +393,14 @@ pub fn run_checks(
     // against aube's own version.
     mismatches.extend(check_root(manifest, node_version));
     mismatches.extend(check_workspace_importers(workspace_manifests, node_version));
+
+    // `Embedder::self_engines_check == false` drops the `engines.<self>`
+    // validation (the `engines.node` check is unaffected). An embedder whose
+    // version isn't in aube's version namespace turns this off to avoid
+    // spurious mismatches.
+    if !self_engines_check {
+        mismatches.retain(|m| m.engine != Engine::Aube);
+    }
 
     // Transitive deps only get checked when we have a real Node
     // version — that scan is `engines.node`-only and there's nothing

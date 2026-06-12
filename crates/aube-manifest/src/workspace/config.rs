@@ -11,10 +11,21 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-pub(super) const WORKSPACE_YAML_NAMES: &[&str] = &["aube-workspace.yaml", "pnpm-workspace.yaml"];
+/// Workspace-config YAML filenames, in probe/write precedence order: this
+/// tool's branded YAML first (if it has one), then the shared
+/// `pnpm-workspace.yaml` compatibility surface. Standalone aube:
+/// `["aube-workspace.yaml", "pnpm-workspace.yaml"]`.
+pub fn workspace_yaml_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = Vec::with_capacity(2);
+    if let Some(branded) = aube_util::embedder().workspace_yaml {
+        names.push(branded);
+    }
+    names.push("pnpm-workspace.yaml");
+    names
+}
 
 fn find_and_read(project_dir: &Path) -> Result<Option<(PathBuf, String)>, crate::Error> {
-    for name in WORKSPACE_YAML_NAMES {
+    for name in workspace_yaml_names() {
         let path = project_dir.join(name);
         if path.exists() {
             let content =
@@ -729,7 +740,7 @@ pub fn load_both(
 /// callers (catalog cleanup, ancestor walks) treat that as "nothing
 /// to read or rewrite".
 pub fn workspace_yaml_existing(project_dir: &Path) -> Option<PathBuf> {
-    for name in WORKSPACE_YAML_NAMES {
+    for name in workspace_yaml_names() {
         let path = project_dir.join(name);
         if path.exists() {
             return Some(path);
@@ -758,7 +769,15 @@ pub fn workspace_yaml_existing(project_dir: &Path) -> Option<PathBuf> {
 /// needs a workspace yaml path even on a fresh project (e.g. the
 /// node-gyp bootstrap dummy file).
 pub fn workspace_yaml_target(project_dir: &Path) -> PathBuf {
-    workspace_yaml_existing(project_dir).unwrap_or_else(|| project_dir.join("aube-workspace.yaml"))
+    workspace_yaml_existing(project_dir).unwrap_or_else(|| {
+        // First preferred name (branded YAML if this tool has one, else the
+        // shared `pnpm-workspace.yaml`).
+        let fresh = workspace_yaml_names()
+            .first()
+            .copied()
+            .unwrap_or("pnpm-workspace.yaml");
+        project_dir.join(fresh)
+    })
 }
 
 /// Where the next mutation of a workspace-level setting should land.
