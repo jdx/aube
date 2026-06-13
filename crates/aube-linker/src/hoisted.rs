@@ -319,7 +319,7 @@ pub(crate) fn plan_importer(
             // spec but keyed under the short `name@git+<hash>` /
             // `name@url+<hash>` form, so the verbatim `name@tail` key would
             // miss `graph.packages` and silently drop the dep's subtree.
-            let child_dep_path = crate::materialize::shared_local_dep_path(dep_name, dep_tail)
+            let child_dep_path = aube_lockfile::shared_local_dep_path(dep_name, dep_tail)
                 .unwrap_or_else(|| format!("{dep_name}@{dep_tail}"));
             if !graph.packages.contains_key(&child_dep_path) {
                 continue;

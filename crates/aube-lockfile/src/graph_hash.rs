@@ -26,9 +26,30 @@
 //! gives us alphabetized keys for free. BLAKE3 is the project default
 //! for non-crypto-verifying hashes (3-5x faster than SHA-256).
 
-use crate::{LockedPackage, LockfileGraph};
+use crate::{LockedPackage, LockfileGraph, shared_local_dep_path};
 use serde::Serialize;
 use std::collections::BTreeMap;
+
+/// Resolve a child dependency's recorded `(alias, tail)` to the graph
+/// key the target package is stored under.
+///
+/// Registry deps record their version verbatim, so `alias@tail` is the
+/// key. Git / remote-tarball deps record their *resolved URL* as the
+/// tail while the package is keyed under the hashed
+/// `alias@git+<hash>` / `alias@url+<hash>` form; [`shared_local_dep_path`]
+/// performs that translation. Falling back to the raw `alias@tail`
+/// keeps the common case allocation-light and behaves identically to
+/// the pre-canonicalization lookup for everything that isn't a
+/// content-pinned source.
+///
+/// Keeping this in lockstep with the linker's sibling-symlink keying
+/// (which calls the same helper) is load-bearing: if the hasher skipped
+/// a URL-shaped git child, the parent's GVS hash would omit that child's
+/// content fingerprint and build/engine taint, and two materially
+/// different trees would collide on one virtual-store path.
+fn child_dep_path(alias: &str, tail: &str) -> String {
+    shared_local_dep_path(alias, tail).unwrap_or_else(|| format!("{alias}@{tail}"))
+}
 
 use aube_util::collections::FxMap as FxHashMap;
 use aube_util::collections::FxSet as FxHashSet;
@@ -263,7 +284,7 @@ fn calc_deps_hash(
             let id = full_pkg_id(pkg, patch_hash, content_hash(dep_path).as_deref());
             let mut deps: BTreeMap<String, String> = BTreeMap::new();
             for (alias, child_tail) in &pkg.dependencies {
-                let child_dep_path = format!("{alias}@{child_tail}");
+                let child_dep_path = child_dep_path(alias, child_tail);
                 // The child might not be in the graph if the lockfile
                 // has a dangling reference (e.g. after manual edits);
                 // skip rather than panic.
@@ -314,7 +335,7 @@ fn transitively_requires_build(
     }
     let result = match graph.packages.get(dep_path) {
         Some(pkg) => pkg.dependencies.iter().any(|(alias, tail)| {
-            let child_dep_path = format!("{alias}@{tail}");
+            let child_dep_path = child_dep_path(alias, tail);
             transitively_requires_build(graph, builds, &child_dep_path, cache, parents)
         }),
         None => false,
@@ -580,6 +601,109 @@ mod tests {
             (dp == "gitdep@git+abc").then(|| "raw".to_string())
         });
         assert_ne!(a.node_hash["parent@1.0.0"], b.node_hash["parent@1.0.0"]);
+    }
+
+    const URL_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
+
+    #[test]
+    fn url_shaped_git_child_content_cascades_to_parent() {
+        // Real pnpm lockfiles record a git dependency by its *resolved
+        // URL* in the parent's `dependencies:` map, while the package is
+        // keyed under the hashed `name@git+<hash>` form. The hasher must
+        // canonicalize that URL-shaped value — a raw `name@<url>` lookup
+        // misses the child, so its content fingerprint never reaches the
+        // parent and two materially different trees collide on one GVS
+        // path. (Distinct from `content_hash_cascades_to_parent`, which
+        // feeds the already-canonical synthetic `git+abc` value.)
+        let url = format!("https://github.com/request/request.git#{URL_SHA}");
+        let child_key = shared_local_dep_path("request", &url).expect("git url is shareable");
+        assert!(
+            child_key.starts_with("request@git+"),
+            "unexpected: {child_key}"
+        );
+
+        let mut g = empty_graph();
+        let mut parent = mk_pkg("parent", "1.0.0", Some("sha512-P"));
+        parent.dependencies.insert("request".into(), url);
+        g.packages.insert("parent@1.0.0".into(), parent);
+        let mut child = mk_pkg("request", "2.88.0", None);
+        child.dep_path = child_key.clone();
+        child.local_source = Some(LocalSource::Directory(PathBuf::from("clone")));
+        g.packages.insert(child_key.clone(), child);
+
+        let prepared = compute_graph_hashes_full(&g, &|_| false, None, &|_, _| None, &|dp| {
+            (dp == child_key.as_str()).then(|| "prepared".to_string())
+        });
+        let raw = compute_graph_hashes_full(&g, &|_| false, None, &|_, _| None, &|dp| {
+            (dp == child_key.as_str()).then(|| "raw".to_string())
+        });
+        assert_ne!(
+            prepared.node_hash["parent@1.0.0"], raw.node_hash["parent@1.0.0"],
+            "URL-shaped git child fingerprint must cascade into the parent hash"
+        );
+    }
+
+    #[test]
+    fn url_shaped_tarball_child_content_cascades_to_parent() {
+        // The codeload-archive form pnpm records for a `github:` dep that
+        // resolves to a tarball. Keyed under `name@url+<hash>`; the raw
+        // `name@<url>` lookup would skip it just like the git case.
+        let url = format!("https://codeload.github.com/request/request/tar.gz/{URL_SHA}");
+        let child_key = shared_local_dep_path("request", &url).expect("tarball url is shareable");
+        assert!(
+            child_key.starts_with("request@url+"),
+            "unexpected: {child_key}"
+        );
+
+        let mut g = empty_graph();
+        let mut parent = mk_pkg("parent", "1.0.0", Some("sha512-P"));
+        parent.dependencies.insert("request".into(), url);
+        g.packages.insert("parent@1.0.0".into(), parent);
+        let mut child = mk_pkg("request", "2.88.0", None);
+        child.dep_path = child_key.clone();
+        child.local_source = Some(LocalSource::Directory(PathBuf::from("clone")));
+        g.packages.insert(child_key.clone(), child);
+
+        let prepared = compute_graph_hashes_full(&g, &|_| false, None, &|_, _| None, &|dp| {
+            (dp == child_key.as_str()).then(|| "prepared".to_string())
+        });
+        let raw = compute_graph_hashes_full(&g, &|_| false, None, &|_, _| None, &|dp| {
+            (dp == child_key.as_str()).then(|| "raw".to_string())
+        });
+        assert_ne!(
+            prepared.node_hash["parent@1.0.0"], raw.node_hash["parent@1.0.0"],
+            "URL-shaped tarball child fingerprint must cascade into the parent hash"
+        );
+    }
+
+    #[test]
+    fn url_shaped_git_child_engine_taint_cascades_to_parent() {
+        // An allowlisted (building) git child recorded by URL must make
+        // the parent engine-sensitive too; otherwise a parent installed
+        // under a different engine reuses a GVS path built for the wrong
+        // ABI. Requires the same canonical child lookup in
+        // `transitively_requires_build`.
+        let url = format!("https://github.com/request/request.git#{URL_SHA}");
+        let child_key = shared_local_dep_path("request", &url).expect("git url is shareable");
+
+        let mut g = empty_graph();
+        let mut parent = mk_pkg("parent", "1.0.0", Some("sha512-P"));
+        parent.dependencies.insert("request".into(), url);
+        g.packages.insert("parent@1.0.0".into(), parent);
+        let mut child = mk_pkg("request", "2.88.0", None);
+        child.dep_path = child_key.clone();
+        child.local_source = Some(LocalSource::Directory(PathBuf::from("clone")));
+        g.packages.insert(child_key, child);
+
+        let allow_request = |pkg: &LockedPackage| pkg.registry_name() == "request";
+        let engine_a = EngineName("linux-x64-node20".into());
+        let engine_b = EngineName("linux-x64-node22".into());
+        let h_a = compute_graph_hashes(&g, &allow_request, Some(&engine_a));
+        let h_b = compute_graph_hashes(&g, &allow_request, Some(&engine_b));
+        assert_ne!(
+            h_a.node_hash["parent@1.0.0"], h_b.node_hash["parent@1.0.0"],
+            "URL-shaped building git child must make the parent engine-sensitive"
+        );
     }
 
     #[test]

@@ -22,7 +22,7 @@ pub use merge::{MergeReport, merge_branch_lockfiles};
 pub(crate) use source::normalize_git_fragment;
 pub use source::{
     GitSource, HostedGit, HostedGitHost, LocalSource, RemoteTarballSource, git_commits_match,
-    parse_git_spec, parse_hosted_git,
+    parse_git_spec, parse_hosted_git, shared_local_dep_path,
 };
 
 use smallvec::SmallVec;
