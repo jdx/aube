@@ -3025,7 +3025,10 @@ fn effective_peer_suffix_hashes_to_pnpm_parenthesized_form() {
     // `createPeerDepGraphHash` wraps the short hash in a single
     // `(...)`, never a bare `_<hex>` marker.
     let out = effective_peer_suffix("(react@18.2.0)", 0);
-    assert!(out.starts_with('(') && out.ends_with(')'), "parens: {out:?}");
+    assert!(
+        out.starts_with('(') && out.ends_with(')'),
+        "parens: {out:?}"
+    );
     let inner = &out[1..out.len() - 1];
     // `createShortHash` = sha256 hex truncated to 32 chars.
     assert_eq!(inner.len(), 32, "expected 32 hex chars: {out:?}");
