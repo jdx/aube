@@ -339,6 +339,15 @@ impl CiState {
         // complete and the bar should reflect that before the summary
         // line lands.
         snap.phase = 4;
+        // Defensive: keep `reused + downloaded <= resolved` so the final
+        // bar *and* the summary line below stay internally consistent
+        // even if a counter race over-credited `reused`. Trim reused,
+        // never downloaded — downloaded reflects real network work.
+        // Mirrors the live bar's `clamped_completed` clamp and the
+        // `clamp_reused_to` rebase `set_total` applies.
+        snap.reused = snap
+            .reused
+            .min(snap.resolved.saturating_sub(snap.downloaded));
         // Emit one final bar so CI logs end on a complete snapshot
         // even when the last heartbeat was skipped (fast fetch+link
         // between ticks). Skipped if it would duplicate the previous
