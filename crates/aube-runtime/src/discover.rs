@@ -161,21 +161,19 @@ pub(crate) const fn node_exe_name() -> &'static str {
 /// `bin/`, Windows puts `node.exe` at the root (mise mirrors both).
 pub(crate) fn node_paths_in(dir: &Path) -> (PathBuf, PathBuf) {
     let exe_name = node_exe_name();
+    // Windows zips put node.exe at the archive root; mise (and some
+    // mirror layouts) use bin\node.exe instead. Prefer the root copy
+    // when it exists, otherwise fall through to the shared bin/ layout
+    // used on every OS.
     if cfg!(windows) {
-        // Windows zips have node.exe at the archive root, but mise
-        // (and some mirrors' layouts) use bin\node.exe — accept both.
         let root_exe = dir.join(exe_name);
         if root_exe.is_file() {
             return (dir.to_path_buf(), root_exe);
         }
-        let bin = dir.join("bin");
-        let exe = bin.join(exe_name);
-        (bin, exe)
-    } else {
-        let bin = dir.join("bin");
-        let exe = bin.join(exe_name);
-        (bin, exe)
     }
+    let bin = dir.join("bin");
+    let exe = bin.join(exe_name);
+    (bin, exe)
 }
 
 /// Find `node` on PATH and probe its version (`node --version`).
