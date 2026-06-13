@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.0](https://github.com/jdx/aube/compare/aube-codes-v1.19.0...aube-codes-v1.20.0) - 2026-06-13
+
+### Other
+
+- link to all sponsors ([#876](https://github.com/jdx/aube/pull/876))
+- refresh benchmarks for v1.19.0 ([#866](https://github.com/jdx/aube/pull/866))
+
 ## [1.19.0](https://github.com/jdx/aube/compare/aube-codes-v1.18.2...aube-codes-v1.19.0) - 2026-06-11
 
 ### Added

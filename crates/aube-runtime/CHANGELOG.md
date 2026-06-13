@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.0](https://github.com/jdx/aube/compare/aube-runtime-v1.19.0...aube-runtime-v1.20.0) - 2026-06-13
+
+### Added
+
+- *(scripts)* match pnpm's full npm_* env for lifecycle & run scripts ([#879](https://github.com/jdx/aube/pull/879))
+
+### Other
+
+- link to all sponsors ([#876](https://github.com/jdx/aube/pull/876))
+- refresh benchmarks for v1.19.0 ([#866](https://github.com/jdx/aube/pull/866))
+
 ## [1.19.0](https://github.com/jdx/aube/compare/aube-runtime-v1.18.2...aube-runtime-v1.19.0) - 2026-06-11
 
 ### Added
