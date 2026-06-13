@@ -56,14 +56,13 @@ impl Resolver {
         // resolver walks them. The registry-package hook still runs in
         // the BFS loop, so a dep *added* by the importer hook is itself
         // hooked when resolved, just like pnpm.
-        let hooked_manifests: Option<Vec<(String, PackageJson)>> =
-            if let Some(hook) = self.read_package_hook.as_deref_mut() {
-                let mut owned = manifests.to_vec();
-                apply_read_package_to_importers(hook, &mut owned).await?;
-                Some(owned)
-            } else {
-                None
-            };
+        let hooked_manifests = if let Some(hook) = self.read_package_hook.as_deref_mut() {
+            let mut owned = manifests.to_vec();
+            apply_read_package_to_importers(hook, &mut owned).await?;
+            Some(owned)
+        } else {
+            None
+        };
         let manifests = hooked_manifests.as_deref().unwrap_or(manifests);
         driver::ResolveDriver::new(self, manifests, existing, workspace_packages)
             .run()
@@ -185,20 +184,37 @@ impl Resolver {
 /// manifests, not just resolved registry packages. Honored edits are the
 /// dependency maps (`dependencies`, `devDependencies`,
 /// `optionalDependencies`, `peerDependencies`, and `peerDependenciesMeta`);
-/// identity (`name`/`version`) edits are ignored, matching the
-/// registry-package contract in the BFS loop.
+/// identity (`name`/`version`) edits are ignored — and, like the
+/// registry-package path in the BFS loop, an identity rewrite emits a
+/// `WARN_AUBE_HOOK_IDENTITY_REWRITTEN` warning so the discarded edit isn't
+/// silent.
 async fn apply_read_package_to_importers(
     hook: &mut dyn ReadPackageHook,
     manifests: &mut [(String, PackageJson)],
 ) -> Result<(), Error> {
     for (importer_path, manifest) in manifests.iter_mut() {
         let input = importer_to_version_metadata(manifest, importer_path)?;
+        // Capture the (possibly synthesized) identity we hand the hook so an
+        // attempted rewrite can be reported rather than dropped silently.
+        let before_name = input.name.clone();
+        let before_version = input.version.clone();
         let after = hook.read_package(input).await.map_err(|e| {
             Error::Registry(
                 importer_label(importer_path, manifest),
                 format!("readPackage hook: {e}"),
             )
         })?;
+        if after.name != before_name || after.version != before_version {
+            tracing::warn!(
+                code = aube_codes::warnings::WARN_AUBE_HOOK_IDENTITY_REWRITTEN,
+                "[pnpmfile] readPackage rewrote importer {}@{} identity to {}@{}; \
+                         aube ignores identity edits",
+                before_name,
+                before_version,
+                after.name,
+                after.version,
+            );
+        }
         apply_version_metadata_to_importer(manifest, after);
     }
     Ok(())
@@ -223,7 +239,10 @@ fn importer_to_version_metadata(
     if !value.get("name").is_some_and(serde_json::Value::is_string) {
         value["name"] = serde_json::Value::String(String::new());
     }
-    if !value.get("version").is_some_and(serde_json::Value::is_string) {
+    if !value
+        .get("version")
+        .is_some_and(serde_json::Value::is_string)
+    {
         value["version"] = serde_json::Value::String("0.0.0".to_string());
     }
     serde_json::from_value(value).map_err(|e| {
@@ -262,7 +281,7 @@ fn importer_label(importer_path: &str, manifest: &PackageJson) -> String {
 }
 
 #[cfg(test)]
-mod importer_hook_tests {
+mod tests {
     use super::*;
     use std::future::Future;
     use std::pin::Pin;
@@ -306,7 +325,11 @@ mod importer_hook_tests {
             .await
             .unwrap();
         assert_eq!(
-            manifests[0].1.dependencies.get("is-odd").map(String::as_str),
+            manifests[0]
+                .1
+                .dependencies
+                .get("is-odd")
+                .map(String::as_str),
             Some("3.0.1")
         );
     }
@@ -332,7 +355,11 @@ mod importer_hook_tests {
             .await
             .unwrap();
         assert_eq!(
-            manifests[1].1.dependencies.get("@scope/lib").map(String::as_str),
+            manifests[1]
+                .1
+                .dependencies
+                .get("@scope/lib")
+                .map(String::as_str),
             Some("link:../lib")
         );
         assert!(manifests[0].1.dependencies.is_empty());
@@ -372,6 +399,35 @@ mod importer_hook_tests {
         }
     }
 
+    #[tokio::test]
+    async fn importer_identity_rewrite_is_ignored_but_deps_apply() {
+        // A hook that rewrites the importer's identity (name/version) while
+        // also editing deps: the identity edit is discarded (and warned
+        // about, mirroring the registry path), but the dep edit still lands.
+        let mut manifests = vec![(".".to_string(), manifest(Some("orig")))];
+        let mut hook = MockHook(|mut pkg: VersionMetadata| {
+            pkg.name = format!("{}-local", pkg.name);
+            pkg.version = "9.9.9".to_string();
+            pkg.dependencies
+                .insert("is-odd".to_string(), "3.0.1".to_string());
+            Ok(pkg)
+        });
+        apply_read_package_to_importers(&mut hook, &mut manifests)
+            .await
+            .unwrap();
+        // Identity rewrite is ignored — the importer keeps its own name.
+        assert_eq!(manifests[0].1.name.as_deref(), Some("orig"));
+        // The dependency edit is still honored.
+        assert_eq!(
+            manifests[0]
+                .1
+                .dependencies
+                .get("is-odd")
+                .map(String::as_str),
+            Some("3.0.1")
+        );
+    }
+
     #[test]
     fn importer_to_version_metadata_injects_defaults_for_nameless_root() {
         let vm = importer_to_version_metadata(&manifest(None), ".").unwrap();
@@ -393,7 +449,10 @@ mod importer_hook_tests {
             vm.optional_dependencies.get("c").map(String::as_str),
             Some("*")
         );
-        assert_eq!(vm.peer_dependencies.get("d").map(String::as_str), Some(">=3"));
+        assert_eq!(
+            vm.peer_dependencies.get("d").map(String::as_str),
+            Some(">=3")
+        );
     }
 
     #[test]
