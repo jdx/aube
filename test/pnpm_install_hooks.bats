@@ -319,11 +319,19 @@ EOF
 }
 JSON
 
+	# A "bad" hook that forgets to return the manifest. Scoped to the
+	# dependency on purpose: aube now also fires readPackage on the root
+	# importer manifest (pnpm parity), so an unconditional bad hook would
+	# fail against the root package first. Targeting is-even keeps the
+	# assertion focused on the dependency-level failure this test ports.
 	cat >.pnpmfile.cjs <<'EOF'
 'use strict'
 module.exports = {
   hooks: {
-    readPackage (pkg) {}
+    readPackage (pkg) {
+      if (pkg.name === 'is-even') return
+      return pkg
+    }
   }
 }
 EOF
@@ -335,10 +343,9 @@ EOF
 }
 
 @test "pnpmfile: readPackage hook can mutate the root project's dependencies" {
-	skip "aube divergence: aube does not run readPackage on the root project's manifest, so deps added by the hook are not installed. pnpm does. File a Discussion before un-skipping."
 	# Ported from pnpm/test/install/hooks.ts:551 ('readPackage hook
-	# overrides project package'). Skipped pending
-	# https://github.com/jdx/aube/discussions
+	# overrides project package'). aube now fires readPackage on importer
+	# manifests too (not just resolved registry packages), matching pnpm.
 	cat >package.json <<'JSON'
 {
   "name": "test-read-package-hook",
@@ -877,16 +884,13 @@ EOF
 }
 
 @test "pnpmfile: readPackage with shared workspace lockfile rewrites importer deps" {
-	skip "aube divergence: aube does not run readPackage on importer (root or workspace project) manifests; pnpm does. Same root cause as the line 336 single-project skip — file a Discussion before un-skipping."
 	# Ported from pnpm/test/install/hooks.ts:661 ('pass readPackage with
 	# shared lockfile'). Two-project workspace, each declaring
 	# is-negative@1.0.0. The unconditional readPackage hook rewrites
-	# *every* package's dependencies to `{ is-positive: '1.0.0' }`. pnpm
-	# fires the hook on importer manifests too, so each project's direct
-	# dep map is rewritten — node_modules/is-negative drops out,
-	# node_modules/is-positive shows up. aube only fires readPackage on
-	# resolved (registry-fetched) packages, so the importers keep their
-	# is-negative direct dep and is-positive only enters as a transitive.
+	# *every* package's dependencies to `{ is-positive: '1.0.0' }`. aube
+	# now fires the hook on importer manifests too (pnpm parity), so each
+	# project's direct dep map is rewritten — node_modules/is-negative
+	# drops out and node_modules/is-positive shows up.
 	mkdir -p project-1 project-2
 	cat >project-1/package.json <<'JSON'
 { "name": "project-1", "version": "1.0.0", "dependencies": { "is-negative": "1.0.0" } }

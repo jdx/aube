@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.0](https://github.com/jdx/aube/compare/aube-util-v1.19.0...aube-util-v1.20.0) - 2026-06-13
+
+### Added
+
+- embeddable Embedder profile (compile-time pluggability) ([#862](https://github.com/jdx/aube/pull/862))
+
+### Other
+
+- link to all sponsors ([#876](https://github.com/jdx/aube/pull/876))
+- refresh benchmarks for v1.19.0 ([#866](https://github.com/jdx/aube/pull/866))
+
 ## [1.19.0](https://github.com/jdx/aube/compare/aube-util-v1.18.2...aube-util-v1.19.0) - 2026-06-11
 
 ### Added
