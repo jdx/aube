@@ -150,6 +150,42 @@ pub(super) fn filter_graph_to_workspace_selection(
     Ok(filtered.filter_deps(|_| true))
 }
 
+/// The set of importer keys whose per-project lockfiles a filtered
+/// install should (re)write, or `None` for an unfiltered install (write
+/// every importer).
+///
+/// pnpm parity: `pnpm --filter <pkg> install` under
+/// `sharedWorkspaceLockfile=false` only writes the selected project(s)'
+/// lockfiles — it does not create or rewrite the workspace root's
+/// lockfile (nor unrelated members') as a side effect of a scoped
+/// command. The link pass still keeps the root importer for its own
+/// dependencies (see [`filter_graph_to_workspace_selection`]), but the
+/// lockfile write must stay scoped to exactly what the selector matched,
+/// so the root's lockfile is only written when the root itself is
+/// selected (`select_workspace_packages` adds it only on a matching
+/// filter). Keys use the same `.`/relative form as the importer keys in
+/// `manifests` (see [`crate::commands::workspace_importer_path`]).
+pub(super) fn per_project_write_selection(
+    workspace_root: &Path,
+    workspace_packages: &[PathBuf],
+    workspace_filter: &aube_workspace::selector::EffectiveFilter,
+) -> miette::Result<Option<std::collections::BTreeSet<String>>> {
+    if workspace_filter.is_empty() {
+        return Ok(None);
+    }
+    let selected = aube_workspace::selector::select_workspace_packages(
+        workspace_root,
+        workspace_packages,
+        workspace_filter,
+    )
+    .map_err(|e| miette!("invalid --filter selector: {e}"))?;
+    let mut keys = std::collections::BTreeSet::new();
+    for pkg in &selected {
+        keys.insert(workspace_importer_path(workspace_root, &pkg.dir)?);
+    }
+    Ok(Some(keys))
+}
+
 pub(super) fn importer_project_dir(
     workspace_root: &std::path::Path,
     importer_path: &str,
@@ -281,14 +317,33 @@ pub(super) fn order_lifecycle_manifests(
 /// resolver should never produce one, but defensive skipping keeps a
 /// stale graph entry from triggering a write into a directory that
 /// doesn't exist on disk.
+///
+/// `write_selection` scopes the write to a subset of importer keys for
+/// filtered installs (`aube install --filter <pkg>`); `None` writes every
+/// importer. See [`per_project_write_selection`] for how the selection is
+/// derived and why a filtered command must not touch the root lockfile.
 pub(super) fn write_per_project_lockfiles(
     workspace_root: &std::path::Path,
     graph: &aube_lockfile::LockfileGraph,
     workspace_manifests: &[(String, aube_manifest::PackageJson)],
     fallback_kind: aube_lockfile::LockfileKind,
+    write_selection: Option<&std::collections::BTreeSet<String>>,
 ) -> miette::Result<()> {
     use miette::IntoDiagnostic;
     for (importer_path, pkg_manifest) in workspace_manifests {
+        // Filtered install: only (re)write the selected importers'
+        // lockfiles. Without this an `aube install --filter <member>`
+        // would rewrite the root and every unrelated member lockfile as
+        // a side effect, diverging from pnpm (which touches only the
+        // selected project's lockfile).
+        if let Some(selection) = write_selection
+            && !selection.contains(importer_path)
+        {
+            tracing::debug!(
+                "sharedWorkspaceLockfile=false: skipping {importer_path} (not in --filter selection)"
+            );
+            continue;
+        }
         // The workspace root (`.`) gets its own lockfile only when it is
         // itself a project — i.e. it ships a package.json. pnpm under
         // sharedWorkspaceLockfile=false writes the root project's lockfile
@@ -309,12 +364,12 @@ pub(super) fn write_per_project_lockfiles(
             continue;
         };
         // The root importer (`.`) writes its lockfile at the workspace
-        // root itself; members nest under their relative path.
-        let pkg_dir = if importer_path == "." {
-            workspace_root.to_path_buf()
-        } else {
-            workspace_root.join(importer_path)
-        };
+        // root itself; members nest under their relative path. Reuse
+        // `importer_project_dir` so a parent-relative importer key
+        // (`../sibling`, produced when `pnpm-workspace.yaml#packages`
+        // uses `../**`) is lexically normalized rather than left as
+        // `<root>/../sibling`.
+        let pkg_dir = importer_project_dir(workspace_root, importer_path);
         // Honor the member's own on-disk lockfile format; only members
         // without one fall back to the workspace default. Without this,
         // a `pnpm-lock.yaml`-based member gets a redundant `aube-lock.yaml`
@@ -442,7 +497,8 @@ mod per_project_lockfile_tests {
 
         // Fallback kind is the workspace default (aube's own) — what an
         // install with no root lockfile would pass.
-        write_per_project_lockfiles(root.path(), &graph, &manifests, LockfileKind::Aube).unwrap();
+        write_per_project_lockfiles(root.path(), &graph, &manifests, LockfileKind::Aube, None)
+            .unwrap();
 
         // `lib`: pnpm lockfile is rewritten in place, no aube-lock.yaml.
         assert!(
@@ -477,13 +533,67 @@ mod per_project_lockfile_tests {
             ("packages/fresh".to_string(), manifest("@test/fresh")),
         ];
 
-        write_per_project_lockfiles(root.path(), &graph, &manifests, LockfileKind::Pnpm).unwrap();
+        write_per_project_lockfiles(root.path(), &graph, &manifests, LockfileKind::Pnpm, None)
+            .unwrap();
 
         assert!(
             pkg_dir.join("pnpm-lock.yaml").exists(),
             "fallback kind (pnpm) must be used for a member with no lockfile"
         );
         assert!(!pkg_dir.join("aube-lock.yaml").exists());
+    }
+
+    /// A filtered install (`aube install --filter <pkg>`) passes a
+    /// `write_selection` so only the selected importers' lockfiles are
+    /// (re)written. The workspace root and unrelated members must be left
+    /// untouched, matching pnpm's scoped-command behavior. Regression for
+    /// the per-project write iterating every importer regardless of filter.
+    #[test]
+    fn write_selection_scopes_filtered_install_to_selected_importers() {
+        let root = tempfile::tempdir().unwrap();
+        let lib_dir = root.path().join("packages/lib");
+        let app_dir = root.path().join("packages/app");
+        std::fs::create_dir_all(&lib_dir).unwrap();
+        std::fs::create_dir_all(&app_dir).unwrap();
+
+        // Root is a project too, so without scoping it would also get a
+        // lockfile — the selection must keep it out.
+        std::fs::write(
+            root.path().join("package.json"),
+            r#"{ "name": "root", "version": "1.0.0" }"#,
+        )
+        .unwrap();
+
+        let graph = graph_with_importers(&[".", "packages/lib", "packages/app"]);
+        let manifests = vec![
+            (".".to_string(), manifest("root")),
+            ("packages/lib".to_string(), manifest("@test/lib")),
+            ("packages/app".to_string(), manifest("@test/app")),
+        ];
+
+        let selection: std::collections::BTreeSet<String> =
+            std::iter::once("packages/lib".to_string()).collect();
+        write_per_project_lockfiles(
+            root.path(),
+            &graph,
+            &manifests,
+            LockfileKind::Aube,
+            Some(&selection),
+        )
+        .unwrap();
+
+        assert!(
+            lib_dir.join("aube-lock.yaml").exists(),
+            "the selected member's lockfile must be written"
+        );
+        assert!(
+            !app_dir.join("aube-lock.yaml").exists(),
+            "an unselected member's lockfile must not be written"
+        );
+        assert!(
+            !root.path().join("aube-lock.yaml").exists(),
+            "the workspace root's lockfile must not be written by a filtered install"
+        );
     }
 
     /// Under `sharedWorkspaceLockfile=false`, pnpm writes the root
@@ -518,7 +628,8 @@ mod per_project_lockfile_tests {
             ("packages/lib".to_string(), manifest("@test/lib")),
         ];
 
-        write_per_project_lockfiles(root.path(), &graph, &manifests, LockfileKind::Aube).unwrap();
+        write_per_project_lockfiles(root.path(), &graph, &manifests, LockfileKind::Aube, None)
+            .unwrap();
 
         // Root: its own pnpm-lock.yaml is (re)written at the workspace
         // root, format preserved — no aube-lock.yaml beside it.
@@ -559,7 +670,8 @@ mod per_project_lockfile_tests {
             ("packages/lib".to_string(), manifest("@test/lib")),
         ];
 
-        write_per_project_lockfiles(root.path(), &graph, &manifests, LockfileKind::Aube).unwrap();
+        write_per_project_lockfiles(root.path(), &graph, &manifests, LockfileKind::Aube, None)
+            .unwrap();
 
         // No root lockfile of any kind — the root isn't a project.
         assert!(

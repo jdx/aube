@@ -71,7 +71,7 @@ use startup::{
 use summary::print_already_up_to_date;
 use workspace::{
     discover_workspace_plan, filter_graph_to_importers, filter_graph_to_workspace_selection,
-    importer_project_dir, write_per_project_lockfiles,
+    importer_project_dir, per_project_write_selection, write_per_project_lockfiles,
 };
 
 #[derive(Default)]
@@ -306,6 +306,12 @@ pub async fn run(opts: InstallOptions) -> miette::Result<()> {
     let ws_package_versions = workspace_plan.ws_package_versions;
     let ws_dirs = workspace_plan.ws_dirs;
     let lifecycle_manifests = workspace_plan.lifecycle_manifests;
+    // Importer keys whose per-project lockfiles a filtered install may
+    // (re)write. `None` for an unfiltered install (write every importer).
+    // Computed once and shared by the `--lockfile-only` short-circuit and
+    // the streaming-install write so both paths stay scoped identically.
+    let per_project_write_selection =
+        per_project_write_selection(&cwd, &workspace_packages, &opts.workspace_filter)?;
     let (build_policy, policy_warnings) =
         if let Some(override_policy) = opts.build_policy_override.as_deref() {
             (override_policy.clone(), Vec::new())
@@ -428,6 +434,7 @@ pub async fn run(opts: InstallOptions) -> miette::Result<()> {
             lockfile_importer_key: &lockfile_importer_key,
             manifest: &manifest,
             manifests: &manifests,
+            per_project_write_selection: per_project_write_selection.as_ref(),
             ws_config: &ws_config_shared,
             workspace_catalogs: &workspace_catalogs,
             settings_ctx: &settings_ctx,
@@ -1518,7 +1525,13 @@ pub async fn run(opts: InstallOptions) -> miette::Result<()> {
                             .unwrap_or_else(|| written_path.display().to_string())
                     );
                 } else {
-                    write_per_project_lockfiles(&cwd, &graph, &manifests, write_kind)?;
+                    write_per_project_lockfiles(
+                        &cwd,
+                        &graph,
+                        &manifests,
+                        write_kind,
+                        per_project_write_selection.as_ref(),
+                    )?;
                 }
             } else {
                 tracing::debug!("lockfile=false: skipping lockfile write");

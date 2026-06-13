@@ -39,6 +39,7 @@ pub(super) struct LockfileOnlyInput<'a> {
     pub lockfile_importer_key: &'a str,
     pub manifest: &'a aube_manifest::PackageJson,
     pub manifests: &'a [(String, aube_manifest::PackageJson)],
+    pub per_project_write_selection: Option<&'a std::collections::BTreeSet<String>>,
     pub ws_config: &'a aube_manifest::workspace::WorkspaceConfig,
     pub workspace_catalogs: &'a crate::commands::CatalogMap,
     pub settings_ctx: &'a aube_settings::ResolveCtx<'a>,
@@ -69,6 +70,7 @@ pub(super) async fn run_lockfile_only(input: LockfileOnlyInput<'_>) -> miette::R
         lockfile_importer_key,
         manifest,
         manifests,
+        per_project_write_selection,
         ws_config,
         workspace_catalogs,
         settings_ctx,
@@ -285,7 +287,13 @@ pub(super) async fn run_lockfile_only(input: LockfileOnlyInput<'_>) -> miette::R
                 .unwrap_or_else(|| lo_written.display().to_string())
         );
     } else {
-        write_per_project_lockfiles(cwd, &graph, manifests, lo_write_kind)?;
+        write_per_project_lockfiles(
+            cwd,
+            &graph,
+            manifests,
+            lo_write_kind,
+            per_project_write_selection,
+        )?;
     }
     // Prune unused catalog entries *after* the lockfile hits disk —
     // same ordering as the main install path below, so a

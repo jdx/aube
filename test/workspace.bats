@@ -689,6 +689,41 @@ _setup_shared_direct_dep_workspace() {
 	assert_file_exists packages/app/node_modules/is-even/index.js
 }
 
+@test "aube install --filter: sharedWorkspaceLockfile=false writes only the selected member's lockfile" {
+	# pnpm parity: `pnpm --filter <pkg> install` under
+	# shared-workspace-lockfile=false rewrites only the selected
+	# project's lockfile — it must not create or rewrite the workspace
+	# root's lockfile (nor unrelated members') as a side effect of a
+	# scoped command. Regression for the per-project write path
+	# iterating every importer regardless of the active --filter.
+	cat >package.json <<-'JSON'
+		{ "name": "swl-root", "version": "0.0.0", "private": true, "dependencies": { "is-odd": "^3.0.1" } }
+	JSON
+	cat >pnpm-workspace.yaml <<-'YAML'
+		sharedWorkspaceLockfile: false
+		packages:
+		  - packages/*
+	YAML
+
+	mkdir -p packages/lib packages/app
+	cat >packages/lib/package.json <<-'JSON'
+		{ "name": "@test/lib", "version": "1.0.0", "dependencies": { "is-odd": "^3.0.1" } }
+	JSON
+	cat >packages/app/package.json <<-'JSON'
+		{ "name": "@test/app", "version": "1.0.0", "dependencies": { "is-even": "^1.0.0" } }
+	JSON
+
+	run aube install --filter @test/lib
+	assert_success
+
+	# Only the selected member's lockfile is written…
+	assert_file_exists packages/lib/aube-lock.yaml
+	# …the root (itself a project with its own deps) is left untouched…
+	assert [ ! -e aube-lock.yaml ]
+	# …and the unrelated member gets no lockfile either.
+	assert [ ! -e packages/app/aube-lock.yaml ]
+}
+
 @test "aube install: sharedWorkspaceLockfile=false preserves each member's pnpm-lock.yaml" {
 	# pnpm parity: when a workspace member already ships its own
 	# pnpm-lock.yaml (the per-project layout pnpm writes under
