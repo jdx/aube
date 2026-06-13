@@ -258,6 +258,16 @@ pub(super) fn order_lifecycle_manifests(
 /// closure reachable from them. The workspace-root lockfile is not
 /// written under this layout.
 ///
+/// Each member's existing lockfile format is preserved: a package that
+/// already ships a `pnpm-lock.yaml` (or any other supported lockfile)
+/// keeps getting that file rewritten in place instead of gaining a
+/// surprise `aube-lock.yaml` next to it. This mirrors the single-project
+/// write path ([`aube_lockfile::write_lockfile_preserving_existing`]) and
+/// pnpm's own `sharedWorkspaceLockfile=false` behavior, where each
+/// member keeps its own `pnpm-lock.yaml`. `fallback_kind` is only used
+/// for members that have no lockfile yet (the workspace default, derived
+/// from the root's lockfile format or aube's own when none exists).
+///
 /// Importers without a corresponding manifest entry are skipped — the
 /// resolver should never produce one, but defensive skipping keeps a
 /// stale graph entry from triggering a write into a directory that
@@ -266,7 +276,7 @@ pub(super) fn write_per_project_lockfiles(
     workspace_root: &std::path::Path,
     graph: &aube_lockfile::LockfileGraph,
     workspace_manifests: &[(String, aube_manifest::PackageJson)],
-    write_kind: aube_lockfile::LockfileKind,
+    fallback_kind: aube_lockfile::LockfileKind,
 ) -> miette::Result<()> {
     use miette::IntoDiagnostic;
     for (importer_path, pkg_manifest) in workspace_manifests {
@@ -283,6 +293,12 @@ pub(super) fn write_per_project_lockfiles(
             continue;
         };
         let pkg_dir = workspace_root.join(importer_path);
+        // Honor the member's own on-disk lockfile format; only members
+        // without one fall back to the workspace default. Without this,
+        // a `pnpm-lock.yaml`-based member gets a redundant `aube-lock.yaml`
+        // written alongside its (preserved) pnpm lockfile.
+        let write_kind =
+            aube_lockfile::detect_existing_lockfile_kind(&pkg_dir).unwrap_or(fallback_kind);
         let written = aube_lockfile::write_lockfile_as(&pkg_dir, &subset, pkg_manifest, write_kind)
             .into_diagnostic()
             .wrap_err_with(|| format!("failed to write per-project lockfile at {importer_path}"))?;
@@ -350,5 +366,101 @@ mod lifecycle_manifest_order_tests {
             .dependencies
             .insert(dep.to_string(), "workspace:*".to_string());
         manifest
+    }
+}
+
+#[cfg(test)]
+mod per_project_lockfile_tests {
+    use super::write_per_project_lockfiles;
+    use aube_lockfile::{DirectDep, LockfileGraph, LockfileKind};
+    use std::collections::BTreeMap;
+
+    fn graph_with_importers(importers: &[&str]) -> LockfileGraph {
+        let importers: BTreeMap<String, Vec<DirectDep>> = importers
+            .iter()
+            .map(|importer| ((*importer).to_string(), Vec::new()))
+            .collect();
+        LockfileGraph {
+            importers,
+            ..Default::default()
+        }
+    }
+
+    fn manifest(name: &str) -> aube_manifest::PackageJson {
+        aube_manifest::PackageJson {
+            name: Some(name.to_string()),
+            version: Some("1.0.0".to_string()),
+            ..Default::default()
+        }
+    }
+
+    /// `sharedWorkspaceLockfile=false` must preserve each member's own
+    /// lockfile format: a member that already ships `pnpm-lock.yaml` keeps
+    /// getting that file rewritten — no surprise `aube-lock.yaml` lands
+    /// beside it — while a member with no lockfile yet gets the workspace
+    /// default. Regression for per-project installs writing `aube-lock.yaml`
+    /// onto pnpm-based members.
+    #[test]
+    fn preserves_existing_member_lockfile_format() {
+        let root = tempfile::tempdir().unwrap();
+        let lib_dir = root.path().join("packages/lib");
+        let app_dir = root.path().join("packages/app");
+        std::fs::create_dir_all(&lib_dir).unwrap();
+        std::fs::create_dir_all(&app_dir).unwrap();
+
+        // `lib` already uses pnpm; `app` has no lockfile yet.
+        std::fs::write(lib_dir.join("pnpm-lock.yaml"), "lockfileVersion: '9.0'\n").unwrap();
+
+        let graph = graph_with_importers(&["packages/lib", "packages/app"]);
+        let manifests = vec![
+            (".".to_string(), manifest("root")),
+            ("packages/lib".to_string(), manifest("@test/lib")),
+            ("packages/app".to_string(), manifest("@test/app")),
+        ];
+
+        // Fallback kind is the workspace default (aube's own) — what an
+        // install with no root lockfile would pass.
+        write_per_project_lockfiles(root.path(), &graph, &manifests, LockfileKind::Aube).unwrap();
+
+        // `lib`: pnpm lockfile is rewritten in place, no aube-lock.yaml.
+        assert!(
+            lib_dir.join("pnpm-lock.yaml").exists(),
+            "existing pnpm-lock.yaml must be preserved"
+        );
+        assert!(
+            !lib_dir.join("aube-lock.yaml").exists(),
+            "no aube-lock.yaml must be created next to an existing pnpm-lock.yaml"
+        );
+
+        // `app`: no prior lockfile, so the workspace default (Aube) is used.
+        assert!(
+            app_dir.join("aube-lock.yaml").exists(),
+            "a member without a lockfile falls back to the workspace default"
+        );
+        assert!(!app_dir.join("pnpm-lock.yaml").exists());
+    }
+
+    /// The fallback kind is honored for members with no lockfile: when the
+    /// workspace default is pnpm (e.g. the root carries `pnpm-lock.yaml`),
+    /// fresh members get `pnpm-lock.yaml`, not `aube-lock.yaml`.
+    #[test]
+    fn fallback_kind_used_when_member_has_no_lockfile() {
+        let root = tempfile::tempdir().unwrap();
+        let pkg_dir = root.path().join("packages/fresh");
+        std::fs::create_dir_all(&pkg_dir).unwrap();
+
+        let graph = graph_with_importers(&["packages/fresh"]);
+        let manifests = vec![
+            (".".to_string(), manifest("root")),
+            ("packages/fresh".to_string(), manifest("@test/fresh")),
+        ];
+
+        write_per_project_lockfiles(root.path(), &graph, &manifests, LockfileKind::Pnpm).unwrap();
+
+        assert!(
+            pkg_dir.join("pnpm-lock.yaml").exists(),
+            "fallback kind (pnpm) must be used for a member with no lockfile"
+        );
+        assert!(!pkg_dir.join("aube-lock.yaml").exists());
     }
 }

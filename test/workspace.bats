@@ -679,3 +679,55 @@ _setup_shared_direct_dep_workspace() {
 	assert_file_exists packages/lib/node_modules/is-odd/index.js
 	assert_file_exists packages/app/node_modules/is-even/index.js
 }
+
+@test "aube install: sharedWorkspaceLockfile=false preserves each member's pnpm-lock.yaml" {
+	# pnpm parity: when a workspace member already ships its own
+	# pnpm-lock.yaml (the per-project layout pnpm writes under
+	# shared-workspace-lockfile=false), aube must rewrite *that* file
+	# in place rather than dropping a redundant aube-lock.yaml beside
+	# it. Regression for per-project installs forcing the workspace
+	# default format onto every member.
+	cat >package.json <<-'JSON'
+		{ "name": "swl-root", "version": "0.0.0", "private": true }
+	JSON
+	cat >pnpm-workspace.yaml <<-'YAML'
+		sharedWorkspaceLockfile: false
+		packages:
+		  - packages/*
+	YAML
+
+	mkdir -p packages/lib packages/app
+	cat >packages/lib/package.json <<-'JSON'
+		{ "name": "@test/lib", "version": "1.0.0", "dependencies": { "is-odd": "^3.0.1" } }
+	JSON
+	cat >packages/app/package.json <<-'JSON'
+		{ "name": "@test/app", "version": "1.0.0", "dependencies": { "is-even": "^1.0.0" } }
+	JSON
+
+	# Seed each member with a pre-existing pnpm-lock.yaml so detection
+	# has a foreign lockfile to preserve. `app` deliberately gets none
+	# so it still exercises the workspace-default fallback.
+	printf "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n" >packages/lib/pnpm-lock.yaml
+
+	run aube install
+	assert_success
+
+	# lib already had pnpm-lock.yaml -> rewritten in place, no aube-lock.yaml.
+	assert_file_exists packages/lib/pnpm-lock.yaml
+	assert [ ! -e packages/lib/aube-lock.yaml ]
+	# The rewritten pnpm lockfile carries the resolved dep.
+	run grep -qF "is-odd" packages/lib/pnpm-lock.yaml
+	assert_success
+
+	# app had no lockfile -> falls back to the workspace default (aube-lock.yaml).
+	assert_file_exists packages/app/aube-lock.yaml
+	assert [ ! -e packages/app/pnpm-lock.yaml ]
+
+	# No root lockfile under this layout.
+	assert [ ! -e aube-lock.yaml ]
+	assert [ ! -e pnpm-lock.yaml ]
+
+	# node_modules still get linked correctly per package.
+	assert_file_exists packages/lib/node_modules/is-odd/index.js
+	assert_file_exists packages/app/node_modules/is-even/index.js
+}
