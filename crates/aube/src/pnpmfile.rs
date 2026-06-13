@@ -926,6 +926,59 @@ async fn has_hook(pnpmfile: &Path, name: &str) -> Result<bool> {
     Ok(contents.contains(name))
 }
 
+/// Node shim that loads the pnpmfile the way pnpm does and prints `1`
+/// when it exports a `hooks` object, `0` otherwise. Reuses the shared
+/// [`LOAD_PNPMFILE_JS`] loader so default-vs-named export resolution
+/// matches the hook-execution path exactly.
+const HOOKS_GATE_SHIM: &str = r#"
+loadPnpmfile(process.env.AUBE_PNPMFILE)
+  .then((mod) => { process.stdout.write(mod != null && mod.hooks != null ? '1' : '0'); })
+  .catch((err) => {
+    console.error('[pnpmfile] failed to load for checksum gate:', (err && err.stack) || err);
+    process.exit(1);
+  });
+"#;
+
+/// Whether the pnpmfile, loaded the way pnpm loads it, exports a
+/// `hooks` object.
+///
+/// pnpm records `pnpmfileChecksum` in the lockfile **only** when a
+/// loaded pnpmfile actually exports hooks — `requireHooks` gates
+/// `calculatePnpmfileChecksum` on `entries.some((e) => e.hooks != null)`.
+/// A pnpmfile that exists but exports nothing or no hooks (e.g. an empty
+/// `.pnpmfile.cjs`) yields no checksum. Stamping one regardless makes
+/// pnpm abort a frozen install with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`,
+/// so this gate must look at the *export*, not at file existence.
+///
+/// Runs the module through [`LOAD_PNPMFILE_JS`] so
+/// `module.exports = { hooks }`, `export default { hooks }`, and
+/// `export const hooks = …` all count, mirroring pnpm's resolution.
+pub async fn exports_hooks(pnpmfile: &Path) -> Result<bool> {
+    let shim = format!("{LOAD_PNPMFILE_JS}{HOOKS_GATE_SHIM}");
+    let output = tokio::process::Command::new(crate::runtime::node_program())
+        .arg("-e")
+        .arg(shim)
+        .env("AUBE_PNPMFILE", pnpmfile)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .output()
+        .await
+        .into_diagnostic()
+        .wrap_err(
+            "failed to spawn `node` to inspect pnpmfile hooks — is node installed and on PATH?",
+        )?;
+    if !output.status.success() {
+        return Err(miette!(
+            "pnpmfile {} failed to load: {}",
+            pnpmfile.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(output.stdout.first() == Some(&b'1'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1066,5 +1119,79 @@ mod tests {
         let local = PathBuf::from("/l.cjs");
         assert_eq!(ordered_paths(None, Some(&local)), vec![local.clone()]);
         assert!(ordered_paths(None, None).is_empty());
+    }
+
+    /// True iff `node --version` exits 0. The `exports_hooks` tests gate
+    /// on this so CI runners without node skip rather than fail.
+    fn node_available() -> bool {
+        std::process::Command::new(crate::runtime::node_program())
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    #[tokio::test]
+    async fn exports_hooks_false_for_empty_pnpmfile() {
+        if !node_available() {
+            eprintln!("skipping: `node` not on PATH");
+            return;
+        }
+        // pnpm's repro: an empty `.pnpmfile.cjs` exports no hooks, so no
+        // pnpmfileChecksum is recorded.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join(PNPMFILE_CJS_NAME);
+        std::fs::write(&p, "").unwrap();
+        assert!(!exports_hooks(&p).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn exports_hooks_false_when_no_hooks_export() {
+        if !node_available() {
+            eprintln!("skipping: `node` not on PATH");
+            return;
+        }
+        // A pnpmfile that exports an object but no `hooks` key must not
+        // get a checksum either — file existence alone is not enough.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join(PNPMFILE_CJS_NAME);
+        std::fs::write(&p, "module.exports = { notHooks: 1 }\n").unwrap();
+        assert!(!exports_hooks(&p).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn exports_hooks_true_for_cjs_hooks_object() {
+        if !node_available() {
+            eprintln!("skipping: `node` not on PATH");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join(PNPMFILE_CJS_NAME);
+        std::fs::write(
+            &p,
+            "module.exports = { hooks: { readPackage: (pkg) => pkg } }\n",
+        )
+        .unwrap();
+        assert!(exports_hooks(&p).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn exports_hooks_true_for_esm_default_hooks() {
+        if !node_available() {
+            eprintln!("skipping: `node` not on PATH");
+            return;
+        }
+        // `.mjs` with a default export carrying hooks — the shared loader
+        // unwraps `default`, matching the hook-execution path.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join(PNPMFILE_MJS_NAME);
+        std::fs::write(
+            &p,
+            "export default { hooks: { readPackage(pkg) { return pkg } } }\n",
+        )
+        .unwrap();
+        assert!(exports_hooks(&p).await.unwrap());
     }
 }

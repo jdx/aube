@@ -284,7 +284,8 @@ pub(super) async fn run_lockfile_only(input: LockfileOnlyInput<'_>) -> miette::R
         manifest,
         settings_ctx,
         lo_local_pnpmfile.as_deref(),
-    );
+    )
+    .await;
     if shared_workspace_lockfile || !has_workspace {
         let lo_written = write_lockfile_dir_remapped(
             lockfile_dir,

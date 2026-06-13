@@ -1517,7 +1517,8 @@ pub async fn run(opts: InstallOptions) -> miette::Result<()> {
                     &manifest,
                     &settings_ctx,
                     local_pnpmfile.as_deref(),
-                );
+                )
+                .await;
                 if shared_workspace_lockfile || !has_workspace {
                     let written_path = write_lockfile_dir_remapped(
                         &lockfile_dir,

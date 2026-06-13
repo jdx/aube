@@ -478,7 +478,7 @@ pub(crate) fn effective_package_extensions(
 /// so this stays agnostic to `--ignore-pnpmfile` and the global-pnpmfile
 /// exclusion (pnpm hashes only the local file). Both checksums derive
 /// from the same inputs pnpm uses.
-pub(crate) fn stamp_pnpm_config_checksums(
+pub(crate) async fn stamp_pnpm_config_checksums(
     graph: &mut aube_lockfile::LockfileGraph,
     write_kind: aube_lockfile::LockfileKind,
     manifest: &aube_manifest::PackageJson,
@@ -492,17 +492,36 @@ pub(crate) fn stamp_pnpm_config_checksums(
     graph.package_extensions_checksum =
         aube_lockfile::pnpm::package_extensions_checksum(&package_extensions);
 
-    // Always reflect the *current* pnpmfile state: a missing or
-    // unreadable pnpmfile must clear any checksum the graph carried over
-    // (e.g. from a parsed lockfile), otherwise the written lockfile keeps
-    // a stale `pnpmfileChecksum` that pnpm would treat as config drift.
+    // Always reflect the *current* pnpmfile state: a missing, hook-less,
+    // or unreadable pnpmfile must clear any checksum the graph carried
+    // over (e.g. from a parsed lockfile), otherwise the written lockfile
+    // keeps a stale `pnpmfileChecksum` that pnpm treats as config drift.
+    //
+    // pnpm records the checksum only when the loaded pnpmfile actually
+    // exports a `hooks` object (`requireHooks` gates
+    // `calculatePnpmfileChecksum` on `entries.some(e => e.hooks != null)`).
+    // A pnpmfile that exists but exports no hooks — e.g. an empty
+    // `.pnpmfile.cjs` — gets no checksum from pnpm; stamping one anyway
+    // aborts pnpm's frozen install with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH.
+    // So gate on the export, not on file existence.
     graph.pnpmfile_checksum = match local_pnpmfile {
-        Some(path) => match aube_lockfile::pnpm::pnpmfile_checksum(&[path.to_path_buf()]) {
-            Ok(checksum) => checksum,
+        Some(path) => match crate::pnpmfile::exports_hooks(path).await {
+            Ok(true) => match aube_lockfile::pnpm::pnpmfile_checksum(&[path.to_path_buf()]) {
+                Ok(checksum) => checksum,
+                Err(e) => {
+                    tracing::warn!(
+                        code = aube_codes::warnings::WARN_AUBE_PNPMFILE_CHECKSUM_FAILED,
+                        "failed to read pnpmfile {} for checksum: {e}",
+                        path.display()
+                    );
+                    None
+                }
+            },
+            Ok(false) => None,
             Err(e) => {
                 tracing::warn!(
                     code = aube_codes::warnings::WARN_AUBE_PNPMFILE_CHECKSUM_FAILED,
-                    "failed to read pnpmfile {} for checksum: {e}",
+                    "failed to inspect pnpmfile {} for hooks: {e}",
                     path.display()
                 );
                 None
