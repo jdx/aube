@@ -1062,14 +1062,67 @@ pub(super) fn remap_indices_to_contextualized(
     let mut out = BTreeMap::new();
     for (dep_path, pkg) in &graph.packages {
         let canonical_key = pkg.spec_key();
+        // The peer-context pass appends a `(peer@ver)` suffix (or a
+        // hashed `_<hex>` marker when it exceeds the cap) onto a
+        // package's canonical dep_path. Source-backed deps (git /
+        // remote tarball / file) are streamed from the resolver — and
+        // therefore keyed in `canonical_indices` — under their
+        // *source-coordinate* dep_path (`name@git+<short>`), not their
+        // semver `spec_key()`. So once such a dep picks up a peer
+        // suffix, neither the contextualized `dep_path` (carries the
+        // suffix) nor `spec_key()` (semver, not the git coordinate)
+        // matches the streamed key, and the index would be silently
+        // dropped — later tripping `ERR_AUBE_MISSING_PACKAGE_INDEX` in
+        // the linker's global-virtual-store pass. Stripping the suffix
+        // recovers the exact canonical coordinate the index was stored
+        // under (the peer-context pass builds the key as
+        // `{canonical_base}{suffix}`, so this is its precise inverse).
+        let canonical_dep_path = strip_peer_context_suffix(dep_path);
         if let Some(idx) = canonical_indices
             .get(dep_path)
+            .or_else(|| canonical_indices.get(canonical_dep_path))
             .or_else(|| canonical_indices.get(&canonical_key))
         {
             out.insert(dep_path.clone(), idx.clone());
         }
     }
     out
+}
+
+/// Strip the peer-context suffix from a `dep_path`, recovering the
+/// canonical dep_path the resolver streamed it under (and that
+/// `canonical_indices` is keyed by). Mirrors the inverse of the suffix
+/// the peer-context pass appends in `aube-resolver`: either a
+/// parenthesized `(peer@ver)…` tail or, when that exceeds the length
+/// cap, a hashed `_<10-hex>` marker. The two forms are mutually
+/// exclusive, so drop the parenthesized tail first, then the hashed
+/// marker. A dep_path with no suffix is returned unchanged.
+fn strip_peer_context_suffix(dep_path: &str) -> &str {
+    let base = dep_path.split('(').next().unwrap_or(dep_path);
+    strip_hashed_peer_suffix(base)
+}
+
+/// Strip a trailing `_<10-hex>` peer-suffix marker (the form
+/// `hash_peer_suffix` emits in `aube-resolver` when a peer suffix
+/// exceeds `peersSuffixMaxLength`). Returns the input unchanged when no
+/// such marker is present. Operates on the last 11 bytes only, which
+/// for a canonical source dep_path is the `git+`/`url+`/`file+` hex
+/// coordinate — never a literal `_`, so a suffix-less key is never
+/// falsely truncated.
+fn strip_hashed_peer_suffix(s: &str) -> &str {
+    const MARKER_LEN: usize = 11; // `_` + 10 hex chars
+    if s.len() < MARKER_LEN {
+        return s;
+    }
+    let tail = &s[s.len() - MARKER_LEN..];
+    if !tail.starts_with('_') {
+        return s;
+    }
+    if tail[1..].chars().all(|c| c.is_ascii_hexdigit()) {
+        &s[..s.len() - MARKER_LEN]
+    } else {
+        s
+    }
 }
 
 #[cfg(test)]
@@ -1113,5 +1166,135 @@ mod tests {
             "https://example.com/is-odd/-/is-odd-3.0.1.tgz",
             "http://localhost:4873/is-odd/-/is-odd-3.0.1.tgz",
         ));
+    }
+
+    #[test]
+    fn strip_peer_context_suffix_recovers_canonical_base() {
+        use super::strip_peer_context_suffix;
+        // Plain parenthesized peer suffix.
+        assert_eq!(
+            strip_peer_context_suffix("a@git+abc1234567890123(react@18.0.0)"),
+            "a@git+abc1234567890123"
+        );
+        // Multiple / nested peer segments.
+        assert_eq!(
+            strip_peer_context_suffix("a@git+abc1234567890123(b@1.0.0)(c@2.0.0)"),
+            "a@git+abc1234567890123"
+        );
+        // Hashed suffix (`_` + 10 hex) emitted past the length cap.
+        assert_eq!(
+            strip_peer_context_suffix("a@git+abc1234567890123_0123456789"),
+            "a@git+abc1234567890123"
+        );
+        // Scoped name keeps its leading `@scope/` intact.
+        assert_eq!(
+            strip_peer_context_suffix("@scope/a@git+abc1234567890123(b@1)"),
+            "@scope/a@git+abc1234567890123"
+        );
+        // No suffix → unchanged.
+        assert_eq!(strip_peer_context_suffix("a@1.0.0"), "a@1.0.0");
+        // A trailing `_<non-hex>` is not a hashed marker → unchanged.
+        assert_eq!(
+            strip_peer_context_suffix("a@1.0.0_zzzzzzzzzz"),
+            "a@1.0.0_zzzzzzzzzz"
+        );
+    }
+
+    fn one_file_index() -> aube_store::PackageIndex {
+        let mut index = aube_store::PackageIndex::default();
+        index.insert(
+            "package.json".to_string(),
+            aube_store::StoredFile {
+                hex_hash: "deadbeef".to_string(),
+                store_path: std::path::PathBuf::from("/store/de/adbeef"),
+                executable: false,
+                size: Some(2),
+            },
+        );
+        index
+    }
+
+    fn git_pkg(dep_path: &str) -> aube_lockfile::LockedPackage {
+        aube_lockfile::LockedPackage {
+            name: "left-pad".to_string(),
+            version: "5.0.0".to_string(),
+            dep_path: dep_path.to_string(),
+            local_source: Some(aube_lockfile::LocalSource::Git(aube_lockfile::GitSource {
+                url: "git+https://github.com/x/left-pad.git".to_string(),
+                committish: None,
+                resolved: "3c803342e33ad8281122334455667788".to_string(),
+                integrity: None,
+                subpath: None,
+            })),
+            ..Default::default()
+        }
+    }
+
+    // Regression: a git dep that the peer-context pass tags with a
+    // `(peer@ver)` suffix must still resolve its streamed canonical
+    // index. Before the fix the contextualized dep_path missed both
+    // lookups (`dep_path` carries the suffix; `spec_key()` is the
+    // semver, not the git coordinate), so the linker's global-virtual-
+    // store pass tripped `ERR_AUBE_MISSING_PACKAGE_INDEX`.
+    #[test]
+    fn remap_recovers_git_dep_index_through_peer_suffix() {
+        let canonical = "left-pad@git+3c803342e33ad828";
+        let contextualized = format!("{canonical}(ramda@0.30.1)");
+
+        let mut canonical_indices = std::collections::BTreeMap::new();
+        canonical_indices.insert(canonical.to_string(), one_file_index());
+
+        let mut graph = aube_lockfile::LockfileGraph::default();
+        graph
+            .packages
+            .insert(contextualized.clone(), git_pkg(&contextualized));
+
+        let out = super::remap_indices_to_contextualized(&canonical_indices, &graph);
+        assert!(
+            out.contains_key(&contextualized),
+            "git dep with peer suffix should recover its canonical index; got {:?}",
+            out.keys().collect::<Vec<_>>()
+        );
+    }
+
+    // Same recovery for the hashed-suffix form the peer-context pass
+    // emits when the parenthesized suffix exceeds the length cap.
+    #[test]
+    fn remap_recovers_git_dep_index_through_hashed_peer_suffix() {
+        let canonical = "left-pad@git+3c803342e33ad828";
+        let contextualized = format!("{canonical}_0123456789");
+
+        let mut canonical_indices = std::collections::BTreeMap::new();
+        canonical_indices.insert(canonical.to_string(), one_file_index());
+
+        let mut graph = aube_lockfile::LockfileGraph::default();
+        graph
+            .packages
+            .insert(contextualized.clone(), git_pkg(&contextualized));
+
+        let out = super::remap_indices_to_contextualized(&canonical_indices, &graph);
+        assert!(
+            out.contains_key(&contextualized),
+            "git dep with hashed peer suffix should recover its canonical index; got {:?}",
+            out.keys().collect::<Vec<_>>()
+        );
+    }
+
+    // A suffix-less git dep keyed identically in both maps still maps
+    // straight through (guards against the strip changing the happy path).
+    #[test]
+    fn remap_maps_suffixless_git_dep_directly() {
+        let canonical = "left-pad@git+3c803342e33ad828";
+
+        let mut canonical_indices = std::collections::BTreeMap::new();
+        canonical_indices.insert(canonical.to_string(), one_file_index());
+
+        let mut graph = aube_lockfile::LockfileGraph::default();
+        graph
+            .packages
+            .insert(canonical.to_string(), git_pkg(canonical));
+
+        let out = super::remap_indices_to_contextualized(&canonical_indices, &graph);
+        assert!(out.contains_key(canonical));
     }
 }
