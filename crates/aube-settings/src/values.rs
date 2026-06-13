@@ -88,6 +88,14 @@ pub struct ResolveCtx<'a> {
     /// should already be normalized to the raw form the type-specific
     /// parser expects (`"true"`/`"false"` for bools, etc).
     pub cli: &'a [(String, String)],
+    /// Lowest-priority defaults supplied by an embedder. An embedding host
+    /// (a tool that drives aube's command layer as a library) feeds setting
+    /// defaults here through the normal settings path; every user- and
+    /// project-level source overrides them. Standalone aube leaves this
+    /// empty, so the per-setting built-in defaults from `settings.toml`
+    /// apply unchanged. Keyed by the same canonical setting names as the
+    /// file sources.
+    pub embedder_defaults: &'a [(String, String)],
 }
 
 impl<'a> ResolveCtx<'a> {
@@ -111,8 +119,31 @@ impl<'a> ResolveCtx<'a> {
             workspace_yaml,
             env: &[],
             cli: &[],
+            // Process-global embedder defaults still apply on this reduced
+            // path so embedder-fed setting defaults reach lockfile/workspace
+            // readers that build a `files_only` ctx.
+            embedder_defaults: embedder_defaults(),
         }
     }
+}
+
+/// Embedder-supplied setting defaults, registered once at startup by an
+/// embedding host. Standalone aube never registers any, so this stays empty
+/// and the per-setting built-in defaults from `settings.toml` apply. Each
+/// entry is a `(canonical_setting_name, raw_value)` pair, parsed by the same
+/// type-specific readers the file sources use.
+static EMBEDDER_DEFAULTS: OnceLock<Vec<(String, String)>> = OnceLock::new();
+
+/// Register embedder default settings. Idempotent — the first registration
+/// wins. Not part of standalone aube's path; an embedder calls this (via the
+/// library entry point) before any command resolves settings.
+pub fn set_embedder_defaults(defaults: Vec<(String, String)>) {
+    let _ = EMBEDDER_DEFAULTS.set(defaults);
+}
+
+/// The registered embedder defaults, or an empty slice when none were set.
+pub fn embedder_defaults() -> &'static [(String, String)] {
+    EMBEDDER_DEFAULTS.get().map_or(&[], Vec::as_slice)
 }
 
 /// Process-wide env snapshot. Captured once on first read so every
@@ -418,6 +449,15 @@ pub fn workspace_yaml_value<'a>(
 
 fn raw_from_env<'a>(meta: &meta::SettingMeta, env: &'a [(String, String)]) -> Option<&'a str> {
     for alias in meta.env_vars.iter().rev() {
+        // Gate the tool-branded alias (`AUBE_<NAME>`) on the active embedder's
+        // `env_prefix`: standalone aube (`Some("AUBE")`) reads it as before, an
+        // embedder with `None` reads no branded settings env vars. The neutral
+        // `npm_config_*` / `NPM_CONFIG_*` aliases and bare external vars are
+        // never gated. `env_prefix` is the single binary switch for the whole
+        // branded-env settings surface.
+        if !aube_util::env::branded_env_alias_enabled(alias) {
+            continue;
+        }
         for (key, raw) in env.iter().rev() {
             if key == alias {
                 return Some(raw);
@@ -955,6 +995,7 @@ mod tests {
             workspace_yaml: &ws,
             env: &env,
             cli: &cli,
+            embedder_defaults: &[],
         };
         assert!(resolved::auto_install_peers(&ctx));
     }
@@ -976,6 +1017,7 @@ mod tests {
             workspace_yaml: &ws,
             env: &env,
             cli: &[],
+            embedder_defaults: &[],
         };
         assert!(resolved::auto_install_peers(&ctx));
     }
@@ -997,6 +1039,7 @@ mod tests {
             workspace_yaml: &ws,
             env: &[],
             cli: &[],
+            embedder_defaults: &[],
         };
         assert_eq!(resolved::minimum_release_age(&ctx), 1440);
 
@@ -1009,6 +1052,7 @@ mod tests {
             workspace_yaml: &ws,
             env: &[],
             cli: &[],
+            embedder_defaults: &[],
         };
         assert_eq!(resolved::minimum_release_age(&ctx), 2880);
     }
@@ -1032,6 +1076,7 @@ mod tests {
             workspace_yaml: &ws,
             env: &[],
             cli: &[],
+            embedder_defaults: &[],
         };
         assert!(
             resolved::auto_install_peers(&ctx),
@@ -1055,6 +1100,7 @@ mod tests {
             workspace_yaml: &ws,
             env: &[],
             cli: &[],
+            embedder_defaults: &[],
         };
         assert!(
             !resolved::auto_install_peers(&ctx),
@@ -1078,6 +1124,7 @@ mod tests {
             workspace_yaml: &ws,
             env: &[],
             cli: &[],
+            embedder_defaults: &[],
         };
         assert!(
             resolved::auto_install_peers(&ctx),
@@ -1104,6 +1151,7 @@ mod tests {
             workspace_yaml: &ws,
             env: &[],
             cli: &[],
+            embedder_defaults: &[],
         };
         assert!(
             !resolved::auto_install_peers(&ctx),

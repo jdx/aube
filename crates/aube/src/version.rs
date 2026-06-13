@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 /// busy. Appends `-DEBUG` on non-release builds so a stray `cargo run`
 /// binary on `$PATH` is obvious.
 pub static VERSION: LazyLock<String> = LazyLock::new(|| {
-    let mut v = env!("CARGO_PKG_VERSION").to_string();
+    let mut v = aube_util::embedder().version.to_string();
     if cfg!(debug_assertions) {
         v.push_str("-DEBUG");
     }

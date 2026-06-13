@@ -146,6 +146,7 @@ impl FileSources {
             workspace_yaml,
             env,
             cli,
+            embedder_defaults: aube_settings::embedder_defaults(),
         }
     }
 }
@@ -565,6 +566,7 @@ mod resolve_virtual_store_dir_tests {
             workspace_yaml: ws,
             env,
             cli: &[],
+            embedder_defaults: &[],
         }
     }
 

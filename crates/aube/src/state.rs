@@ -4,10 +4,15 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 const DEFAULT_STATE_DIR: &str = "node_modules";
-const STATE_DIR_NAME: &str = ".aube-state";
 const INSTALL_STATE_FILE_NAME: &str = "state.json";
 const FRESH_STATE_FILE_NAME: &str = "fresh.json";
 const LOCKFILE_SNAPSHOT_FILE_NAME: &str = "lockfile";
+
+/// The install-state directory name, `.<name>-state`. Standalone aube:
+/// `.aube-state`.
+fn state_dir_name() -> String {
+    format!(".{}-state", aube_util::embedder().name)
+}
 
 /// Resolve the modules dir and state directory path for `project_dir` in a
 /// single settings-context load. `check_needs_install` and `write_state`
@@ -28,7 +33,7 @@ fn resolve_paths(project_dir: &Path) -> (PathBuf, PathBuf) {
             crate::commands::expand_setting_path(&raw_state, project_dir)
                 .unwrap_or_else(|| modules_dir.clone())
         };
-        let state_dir = state_parent.join(STATE_DIR_NAME);
+        let state_dir = state_parent.join(state_dir_name());
         (modules_dir, state_dir)
     })
 }
@@ -592,6 +597,8 @@ pub fn remove_state(project_dir: &Path) -> Result<(), std::io::Error> {
 /// Returns the display name (for messages) plus the resolved path, if
 /// any exists.
 fn active_lockfile(project_dir: &Path) -> (String, Option<PathBuf>) {
+    let basename = aube_util::embedder().lockfile_basename;
+    let stem = basename.rsplit_once('.').map_or(basename, |(s, _)| s);
     let preferred = aube_lockfile::aube_lock_filename(project_dir);
     let preferred_path = project_dir.join(&preferred);
     if preferred_path.exists() {
@@ -599,15 +606,15 @@ fn active_lockfile(project_dir: &Path) -> (String, Option<PathBuf>) {
     }
     // Freshly-enabled `gitBranchLockfile`: base file exists, branch
     // file does not. Pick up the base so we don't loop on every run.
-    if preferred != "aube-lock.yaml" {
-        let base = project_dir.join("aube-lock.yaml");
+    if preferred != basename {
+        let base = project_dir.join(basename);
         if base.exists() {
-            return ("aube-lock.yaml".to_string(), Some(base));
+            return (basename.to_string(), Some(base));
         }
     }
     // Preserve pnpm-lock.yaml (and its branch variant) as an active
     // lockfile when the project already uses it.
-    let pnpm_preferred = preferred.replacen("aube-lock.", "pnpm-lock.", 1);
+    let pnpm_preferred = preferred.replacen(&format!("{stem}."), "pnpm-lock.", 1);
     if pnpm_preferred != preferred {
         let pnpm_branch = project_dir.join(&pnpm_preferred);
         if pnpm_branch.exists() {
@@ -702,21 +709,20 @@ fn restore_lockfile_snapshot(
 }
 
 fn is_restorable_lockfile_name(name: &str) -> bool {
+    let basename = aube_util::embedder().lockfile_basename;
     matches!(
         name,
-        "aube-lock.yaml"
-            | "pnpm-lock.yaml"
-            | "bun.lock"
-            | "yarn.lock"
-            | "npm-shrinkwrap.json"
-            | "package-lock.json"
-    ) || is_branch_lockfile_name(name)
+        "pnpm-lock.yaml" | "bun.lock" | "yarn.lock" | "npm-shrinkwrap.json" | "package-lock.json"
+    ) || name == basename
+        || is_branch_lockfile_name(name)
 }
 
 fn is_branch_lockfile_name(name: &str) -> bool {
-    (name.starts_with("aube-lock.") || name.starts_with("pnpm-lock."))
+    let basename = aube_util::embedder().lockfile_basename;
+    let stem = basename.rsplit_once('.').map_or(basename, |(s, _)| s);
+    (name.starts_with(&format!("{stem}.")) || name.starts_with("pnpm-lock."))
         && name.ends_with(".yaml")
-        && name != "aube-lock.yaml"
+        && name != basename
         && name != "pnpm-lock.yaml"
 }
 
@@ -978,7 +984,13 @@ fn hash_settings(project_dir: &Path, cli_flags: &[(String, String)]) -> String {
     // catalog edits, overrides bumps, packageExtensions, allowBuilds list.
     // any of those mean re-resolve is needed, yaml bytes are the source.
     hasher.update(b"workspace_yaml=");
-    for name in ["pnpm-workspace.yaml", "aube-workspace.yaml"] {
+    // The shared `pnpm-workspace.yaml` compatibility surface first, then
+    // this tool's own branded YAML (if it has one). Standalone aube:
+    // `["pnpm-workspace.yaml", "aube-workspace.yaml"]`.
+    let workspace_yaml_files: Vec<&str> = std::iter::once("pnpm-workspace.yaml")
+        .chain(aube_util::embedder().workspace_yaml)
+        .collect();
+    for name in workspace_yaml_files {
         let path = project_dir.join(name);
         hasher.update(name.as_bytes());
         hasher.update(b"\x1f");
@@ -1034,9 +1046,11 @@ fn hash_settings(project_dir: &Path, cli_flags: &[(String, String)]) -> String {
     // did not hash either. User edits a patch file, next install
     // says up-to-date, node_modules still has old patched content.
     hasher.update(b"patches=");
-    let patches_sidecar = project_dir.join(".aube-patches.json");
+    let patches_sidecar_name = format!(".{}-patches.json", aube_util::embedder().name);
+    let patches_sidecar = project_dir.join(&patches_sidecar_name);
     if let Ok(bytes) = std::fs::read(&patches_sidecar) {
-        hasher.update(b".aube-patches.json\x1f");
+        hasher.update(patches_sidecar_name.as_bytes());
+        hasher.update(b"\x1f");
         hasher.update(&bytes);
         hasher.update(b"\x1e");
     }

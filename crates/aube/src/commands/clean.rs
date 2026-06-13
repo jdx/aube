@@ -30,14 +30,19 @@ pub struct CleanArgs {
 
 /// Lockfile basenames removed by `--lockfile`. Kept in one place so
 /// `clean` and any future `purge`-adjacent command see the same set.
-const LOCKFILE_NAMES: &[&str] = &[
-    "aube-lock.yaml",
-    "pnpm-lock.yaml",
-    "package-lock.json",
-    "npm-shrinkwrap.json",
-    "yarn.lock",
-    "bun.lock",
-];
+/// Lockfile names `aube clean --lockfile` removes: this tool's canonical
+/// lockfile plus every foreign format it round-trips. Standalone aube leads
+/// with `aube-lock.yaml`.
+fn lockfile_names() -> [&'static str; 6] {
+    [
+        aube_util::embedder().lockfile_basename,
+        "pnpm-lock.yaml",
+        "package-lock.json",
+        "npm-shrinkwrap.json",
+        "yarn.lock",
+        "bun.lock",
+    ]
+}
 
 pub async fn run(args: CleanArgs) -> miette::Result<()> {
     run_as("clean", args).await
@@ -121,7 +126,7 @@ async fn run_as(invoked_as: &str, args: CleanArgs) -> miette::Result<()> {
     }
 
     if args.lockfile {
-        for name in LOCKFILE_NAMES {
+        for name in lockfile_names() {
             let p = cwd.join(name);
             if p.symlink_metadata().is_ok() {
                 eprintln!("Removing {}", p.display());

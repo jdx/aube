@@ -28,7 +28,7 @@ pub use selector::{Selector, WorkspacePkg};
 /// pruning, workspace-yaml-only validation) need this stronger
 /// signal.
 pub fn is_workspace_project_root(project_dir: &Path) -> bool {
-    if WORKSPACE_YAML_NAMES
+    if aube_manifest::workspace::workspace_yaml_names()
         .iter()
         .any(|name| project_dir.join(name).is_file())
     {
@@ -38,8 +38,6 @@ pub fn is_workspace_project_root(project_dir: &Path) -> bool {
         .map(|patterns| !patterns.is_empty())
         .unwrap_or(false)
 }
-
-const WORKSPACE_YAML_NAMES: &[&str] = &["aube-workspace.yaml", "pnpm-workspace.yaml"];
 
 /// Discover workspace package directories.
 ///

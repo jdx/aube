@@ -1,7 +1,8 @@
 use tracing::trace;
 
 use crate::patches::{
-    current_patch_hashes, read_applied_patches, wipe_changed_patched_entries, write_applied_patches,
+    applied_patches_sidecar_name, current_patch_hashes, read_applied_patches,
+    wipe_changed_patched_entries, write_applied_patches,
 };
 use crate::pool::with_link_pool;
 use crate::sweep::{
@@ -389,9 +390,10 @@ impl Linker {
         if self.virtual_store_only {
             self.link_hidden_hoist(&aube_dir, graph)?;
             if let Err(e) = write_applied_patches(&nm, &curr_applied) {
+                let sidecar = applied_patches_sidecar_name();
                 tracing::error!(
                     code = aube_codes::errors::ERR_AUBE_PATCHES_TRACKING_WRITE,
-                    "failed to write .aube-applied-patches.json: {e}. next install may miss stale patched entries"
+                    "failed to write {sidecar}: {e}. next install may miss stale patched entries"
                 );
             }
             return Ok(stats);
@@ -509,9 +511,10 @@ impl Linker {
         self.link_hidden_hoist(&aube_dir, graph)?;
 
         if let Err(e) = write_applied_patches(&nm, &curr_applied) {
+            let sidecar = applied_patches_sidecar_name();
             tracing::error!(
                 code = aube_codes::errors::ERR_AUBE_PATCHES_TRACKING_WRITE,
-                "failed to write .aube-applied-patches.json: {e}. next install may miss stale patched entries"
+                "failed to write {sidecar}: {e}. next install may miss stale patched entries"
             );
         }
         Ok(stats)
@@ -912,9 +915,10 @@ impl Linker {
             }
             self.link_hidden_hoist(&aube_dir, graph)?;
             if let Err(e) = write_applied_patches(&root_nm, &curr_applied) {
+                let sidecar = applied_patches_sidecar_name();
                 tracing::error!(
                     code = aube_codes::errors::ERR_AUBE_PATCHES_TRACKING_WRITE,
-                    "failed to write .aube-applied-patches.json: {e}. next install may miss stale patched entries"
+                    "failed to write {sidecar}: {e}. next install may miss stale patched entries"
                 );
             }
             return Ok(stats);
@@ -1186,9 +1190,10 @@ impl Linker {
         self.link_hidden_hoist(&aube_dir, graph)?;
 
         if let Err(e) = write_applied_patches(&root_nm, &curr_applied) {
+            let sidecar = applied_patches_sidecar_name();
             tracing::error!(
                 code = aube_codes::errors::ERR_AUBE_PATCHES_TRACKING_WRITE,
-                "failed to write .aube-applied-patches.json: {e}. next install may miss stale patched entries"
+                "failed to write {sidecar}: {e}. next install may miss stale patched entries"
             );
         }
         Ok(stats)

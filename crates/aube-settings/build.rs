@@ -301,6 +301,7 @@ fn generate_resolved_accessors(settings: &BTreeMap<String, SettingDef>) -> Strin
                 "userAubeConfig" => (npmrc_call, "ctx.user_aube_config"),
                 "userNpmrc" => (npmrc_call, "ctx.user_npmrc"),
                 "workspaceYaml" => (ws_call, "ctx.workspace_yaml"),
+                "embedderDefaults" => (npmrc_call, "ctx.embedder_defaults"),
                 other => panic!("{name}: unknown source `{other}` in precedence"),
             };
             let is_last = i + 1 == order.len();
@@ -566,6 +567,11 @@ fn resolve_precedence(declared: &[String]) -> Vec<String> {
         "workspaceYaml",
         "userAubeConfig",
         "userNpmrc",
+        // Embedder-supplied defaults sit at the very bottom: below every
+        // user- and project-level source, so any real config overrides them.
+        // Empty for standalone aube, where the per-setting built-in default
+        // applies instead.
+        "embedderDefaults",
     ];
     let mut files: Vec<String> = Vec::with_capacity(file_default.len());
     for src in declared {

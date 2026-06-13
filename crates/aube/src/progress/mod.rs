@@ -88,11 +88,16 @@ fn env_truthy(name: &str) -> bool {
 /// header shape so the install-finished, already-up-to-date, and
 /// fast-mode-summary paths all read consistently.
 pub(crate) fn aube_prefix_line(msg: &str) -> String {
+    let id = aube_util::embedder();
+    let vendor = id
+        .vendor
+        .map(|v| format!("{} ", style::edim(v)))
+        .unwrap_or_default();
     format!(
-        "{} {} {} {} {msg}",
-        style::emagenta("aube").bold(),
+        "{} {} {}{} {msg}",
+        style::emagenta(id.display_name).bold(),
         style::edim(crate::version::VERSION.as_str()),
-        style::edim("by jdx.dev"),
+        vendor,
         style::edim("·"),
     )
 }
@@ -218,15 +223,24 @@ impl InstallProgress {
     }
 
     fn new_tty() -> Self {
-        // Colored header: magenta bold "aube", dim version, dim "by jdx.dev".
+        // Colored header: magenta bold display name, dim version, dim vendor.
         // Mirrors the `mise VERSION by @jdx` / `hk VERSION by @jdx` convention
-        // for visual parity across the trio.
-        let header = format!(
-            "{} {} {}",
-            style::emagenta("aube").bold(),
-            style::edim(crate::version::VERSION.as_str()),
-            style::edim("by jdx.dev"),
-        );
+        // for visual parity across the trio. An embedder with `vendor: None`
+        // drops the trailing attribution.
+        let id = aube_util::embedder();
+        let header = match id.vendor {
+            Some(vendor) => format!(
+                "{} {} {}",
+                style::emagenta(id.display_name).bold(),
+                style::edim(crate::version::VERSION.as_str()),
+                style::edim(vendor),
+            ),
+            None => format!(
+                "{} {}",
+                style::emagenta(id.display_name).bold(),
+                style::edim(crate::version::VERSION.as_str()),
+            ),
+        };
         // Layout: header, animated bar, count segment, optional bytes
         // segment (running download, with `/ ~estimated` when
         // available), phase-gated rate, ETA. Mirrors the CI-mode

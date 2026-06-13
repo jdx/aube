@@ -32,6 +32,12 @@ struct CacheEntry {
 
 /// Run the update check and print a notice if a newer version exists.
 pub async fn check_and_notify(cwd: &Path) {
+    // An embedder that owns its own upgrade path sets `self_update_enabled`
+    // false; aube's update notifier (and its `aube.jdx.dev` endpoints) must
+    // never run in that case. Standalone aube has it true.
+    if !aube_util::embedder().self_update_enabled {
+        return;
+    }
     if !should_check() {
         return;
     }
@@ -39,7 +45,7 @@ pub async fn check_and_notify(cwd: &Path) {
     if !enabled {
         return;
     }
-    let current = env!("CARGO_PKG_VERSION");
+    let current = aube_util::embedder().version;
     let Some(latest) = latest_version(cwd).await else {
         return;
     };

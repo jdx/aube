@@ -449,8 +449,8 @@ pub fn exit_code_from_status(status: std::process::ExitStatus) -> i32 {
 /// UA string identify the platform the same way npm/yarn/pnpm do.
 pub fn aube_user_agent() -> String {
     format!(
-        "aube/{} {} {}",
-        env!("CARGO_PKG_VERSION"),
+        "{} {} {}",
+        aube_util::embedder().user_agent,
         node_platform(),
         node_arch(),
     )

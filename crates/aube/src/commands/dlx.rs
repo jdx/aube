@@ -605,6 +605,7 @@ mod tests {
             workspace_yaml: &empty_workspace,
             env: &empty_env,
             cli: &opts.cli_flags,
+            embedder_defaults: &[],
         };
         assert_eq!(
             aube_settings::resolved::enable_global_virtual_store(&ctx),

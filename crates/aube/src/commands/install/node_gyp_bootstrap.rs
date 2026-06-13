@@ -191,8 +191,13 @@ fn bootstrap_blocking(
     // first marker check at the start of the walk, returns
     // `tool_dir`, and the install runs as a single-package install
     // (`workspace_packages` is empty so `has_workspace` is false).
-    aube_util::fs_atomic::atomic_write(&tool_dir.join("aube-workspace.yaml"), b"")
-        .into_diagnostic()?;
+    // Use whichever workspace-yaml name this tool's discovery recognizes
+    // first (its branded YAML, or the shared `pnpm-workspace.yaml`).
+    let marker = aube_manifest::workspace::workspace_yaml_names()
+        .first()
+        .copied()
+        .unwrap_or("pnpm-workspace.yaml");
+    aube_util::fs_atomic::atomic_write(&tool_dir.join(marker), b"").into_diagnostic()?;
     // Forward the outer project's `.npmrc` so private registries and
     // auth tokens configured at project scope carry through to the
     // recursive install. The subprocess's cwd is `tool_dir`, so

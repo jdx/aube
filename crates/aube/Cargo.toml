@@ -10,6 +10,14 @@ homepage.workspace = true
 readme.workspace = true
 include = ["src/**/*.rs", "src/**/*.mjs", "build.rs"]
 
+# The command layer is a library so it can be embedded (construct
+# `commands::install::InstallOptions`, call `commands::install::run`)
+# without shelling out. The three bins below are thin wrappers over
+# `aube::cli_main`.
+[lib]
+name = "aube"
+path = "src/lib.rs"
+
 [[bin]]
 name = "aube"
 path = "src/main.rs"
@@ -46,6 +54,10 @@ aube-workspace = { workspace = true }
 bytes = "1"
 xx = { workspace = true }
 clap = { workspace = true }
+# Only the aube binary (src/main.rs) uses this, for the aube-specific `usage`
+# (usage.jdx.dev KDL) command; the embeddable lib no longer carries it. Cargo
+# can't scope a dependency to bin-only within a crate that also has a lib, so
+# it stays here.
 clap_usage = "2"
 strum = { workspace = true }
 clx = { workspace = true }

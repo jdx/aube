@@ -11551,22 +11551,6 @@
         ],
         "examples": []
       },
-      "usage": {
-        "full_cmd": [
-          "usage"
-        ],
-        "usage": "usage",
-        "subcommands": {},
-        "args": [],
-        "flags": [],
-        "mounts": [],
-        "hide": true,
-        "help": "Print a usage.jdx.dev KDL spec for the CLI (internal)",
-        "name": "usage",
-        "aliases": [],
-        "hidden_aliases": [],
-        "examples": []
-      },
       "version": {
         "full_cmd": [
           "version"

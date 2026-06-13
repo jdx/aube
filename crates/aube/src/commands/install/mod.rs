@@ -1743,6 +1743,7 @@ pub async fn run(opts: InstallOptions) -> miette::Result<()> {
         node_version.as_deref(),
         engine_strict,
         virtual_store_dir_max_length,
+        aube_util::embedder().self_engines_check,
     )?;
 
     // Emit policy-config warnings regardless of `--ignore-scripts`.

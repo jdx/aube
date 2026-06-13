@@ -11,6 +11,18 @@ use super::config::{ConfigWriteTarget, config_write_target, workspace_yaml_exist
 use super::yaml_patch;
 use std::path::{Path, PathBuf};
 
+/// The manifest config namespaces, compatible first (lower precedence),
+/// this tool's own namespace last (wins on conflict). Standalone aube:
+/// `["pnpm", "aube"]`.
+fn config_namespaces() -> Vec<&'static str> {
+    let id = aube_util::embedder();
+    let mut ns: Vec<&'static str> = id.compatible_names.to_vec();
+    if !id.manifest_namespace.is_empty() {
+        ns.push(id.manifest_namespace);
+    }
+    ns
+}
+
 /// Drop `entry_key` from `pnpm.<key>` and `aube.<key>` in
 /// `package.json`. Returns `Ok(true)` when at least one namespace held
 /// it. Empty inner maps and empty namespaces are scrubbed too. The
@@ -34,7 +46,7 @@ pub fn remove_setting_entry(cwd: &Path, key: &str, entry_key: &str) -> Result<bo
     let before = obj.clone();
 
     let mut existed = false;
-    for ns in ["pnpm", "aube"] {
+    for ns in config_namespaces() {
         let mut ns_empty = false;
         if let Some(ns_obj) = obj.get_mut(ns).and_then(|v| v.as_object_mut()) {
             if let Some(inner) = ns_obj.get_mut(key).and_then(|v| v.as_object_mut()) {
@@ -100,7 +112,7 @@ where
     // before mutating, so the closure sees the same map the install
     // path would.
     let mut merged: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
-    for ns in ["pnpm", "aube"] {
+    for ns in config_namespaces() {
         if let Some(inner) = obj
             .get(ns)
             .and_then(serde_json::Value::as_object)
@@ -112,45 +124,101 @@ where
             }
         }
     }
+    // For a manifest-root embedder (`manifest_namespace == ""`), the setting's
+    // canonical home is a *top-level* `package.json` key — not in any namespace,
+    // so it isn't covered by `config_namespaces()`. Fold it into the merged view
+    // last (highest precedence) so an existing root-level map round-trips
+    // instead of being clobbered by the write below.
+    if aube_util::embedder().manifest_namespace.is_empty()
+        && let Some(inner) = obj.get(key).and_then(serde_json::Value::as_object)
+    {
+        for (k, v) in inner {
+            merged.insert(k.clone(), v.clone());
+        }
+    }
 
     f(&mut merged);
 
-    let chosen_ns = if obj.contains_key("pnpm") {
-        "pnpm"
+    // Pick the namespace to write into.
+    //
+    // An embedder whose `manifest_namespace` is `""` ("manifest root") writes
+    // the setting at the **manifest root** unconditionally — `allowBuilds` /
+    // `patchedDependencies` become top-level `package.json` keys, matching how
+    // the embedder's own migration writer emits them (e.g. nub's
+    // `apply_manifest_edits`) and where the read side looks. It must NOT divert
+    // to a pre-existing foreign-brand (`pnpm`) namespace, because under such an
+    // embedder the read side gates that namespace off, so a nested write would
+    // be orphaned. The empty namespace is signalled by `chosen_ns == None`.
+    //
+    // Otherwise: a compatible namespace already declared in the manifest wins
+    // (`pnpm` for standalone aube with a pre-existing `pnpm` key); failing that,
+    // this tool's own (non-empty) namespace. We never emit a literal `""` key.
+    let id = aube_util::embedder();
+    let chosen_ns: Option<&'static str> = if id.manifest_namespace.is_empty() {
+        None
     } else {
-        "aube"
+        id.compatible_names
+            .iter()
+            .copied()
+            .find(|ns| obj.contains_key(*ns))
+            .or(Some(id.manifest_namespace))
     };
-    let other_ns = if chosen_ns == "pnpm" { "aube" } else { "pnpm" };
 
-    // Drop `<key>` from the other namespace so the post-write state
-    // has one source of truth.
-    let mut other_ns_empty_after = false;
-    if let Some(other_obj) = obj.get_mut(other_ns).and_then(|v| v.as_object_mut()) {
-        other_obj.remove(key);
-        other_ns_empty_after = other_obj.is_empty();
-    }
-    if other_ns_empty_after {
-        obj.remove(other_ns);
+    // Drop `<key>` from every config namespace other than the chosen target so
+    // the post-write state has a single source of truth. When the target is the
+    // manifest root (`chosen_ns == None`), *every* namespace is an "other" and
+    // gets scrubbed — the value lives at top level instead.
+    for other_ns in config_namespaces() {
+        if chosen_ns == Some(other_ns) {
+            continue;
+        }
+        let mut other_ns_empty_after = false;
+        if let Some(other_obj) = obj.get_mut(other_ns).and_then(|v| v.as_object_mut()) {
+            other_obj.remove(key);
+            other_ns_empty_after = other_obj.is_empty();
+        }
+        if other_ns_empty_after {
+            obj.remove(other_ns);
+        }
     }
 
-    // Write merged into the chosen namespace, or scrub it if empty.
-    if merged.is_empty() {
-        let mut chosen_ns_empty_after = false;
-        if let Some(chosen_obj) = obj.get_mut(chosen_ns).and_then(|v| v.as_object_mut()) {
-            chosen_obj.remove(key);
-            chosen_ns_empty_after = chosen_obj.is_empty();
+    match chosen_ns {
+        // Manifest-root target: read/insert/remove the setting key directly at
+        // top level. Matches the embedder's migration writer (e.g. nub's
+        // `apply_manifest_edits`, which writes `allowBuilds`/`patchedDependencies`
+        // at root and removes the `pnpm` object) and the read side, which skips
+        // the empty self-namespace and (under a non-pnpm incumbent) the pnpm
+        // namespace too — so a nested write would orphan.
+        None => {
+            if merged.is_empty() {
+                obj.remove(key);
+            } else {
+                obj.insert(key.to_string(), serde_json::Value::Object(merged));
+            }
         }
-        if chosen_ns_empty_after {
-            obj.remove(chosen_ns);
+        // Namespaced target: write merged under the chosen namespace, or scrub
+        // it if empty. Standalone aube (`manifest_namespace="aube"`) and any
+        // embedder with a non-empty namespace land here unchanged.
+        Some(chosen_ns) => {
+            if merged.is_empty() {
+                let mut chosen_ns_empty_after = false;
+                if let Some(chosen_obj) = obj.get_mut(chosen_ns).and_then(|v| v.as_object_mut()) {
+                    chosen_obj.remove(key);
+                    chosen_ns_empty_after = chosen_obj.is_empty();
+                }
+                if chosen_ns_empty_after {
+                    obj.remove(chosen_ns);
+                }
+            } else {
+                let chosen_value = obj
+                    .entry(chosen_ns.to_string())
+                    .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+                let chosen_obj = chosen_value.as_object_mut().ok_or_else(|| {
+                    crate::Error::YamlParse(path.clone(), format!("`{chosen_ns}` is not an object"))
+                })?;
+                chosen_obj.insert(key.to_string(), serde_json::Value::Object(merged));
+            }
         }
-    } else {
-        let chosen_value = obj
-            .entry(chosen_ns.to_string())
-            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-        let chosen_obj = chosen_value.as_object_mut().ok_or_else(|| {
-            crate::Error::YamlParse(path.clone(), format!("`{chosen_ns}` is not an object"))
-        })?;
-        chosen_obj.insert(key.to_string(), serde_json::Value::Object(merged));
     }
 
     if *obj == before {
@@ -354,4 +422,79 @@ fn indent_block_sequences(input: &str) -> String {
         out.push_str(line);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_manifest(dir: &Path, body: &str) {
+        std::fs::write(dir.join("package.json"), body).unwrap();
+    }
+
+    fn read_manifest(dir: &Path) -> serde_json::Value {
+        let raw = std::fs::read_to_string(dir.join("package.json")).unwrap();
+        serde_json::from_str(&raw).unwrap()
+    }
+
+    /// `edit_setting_map` writes the merged map into a real config namespace
+    /// and never emits a literal empty-string key. Under the default (AUBE)
+    /// profile with no `pnpm` namespace declared, the write lands in `aube`;
+    /// `package.json[""]` must never exist. (The empty-`manifest_namespace`
+    /// case — where the write target is the manifest root, not a namespace — is
+    /// covered in the `root_namespace_write` integration test, since the active
+    /// identity is once-per-process and can't be flipped inside this binary.)
+    #[test]
+    fn writes_into_a_real_namespace_never_empty_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_manifest(tmp.path(), "{\n  \"name\": \"x\"\n}\n");
+
+        edit_setting_map(tmp.path(), "allowBuilds", |m| {
+            m.insert("esbuild".to_string(), serde_json::Value::Bool(true));
+        })
+        .unwrap();
+
+        let obj = read_manifest(tmp.path());
+        let obj = obj.as_object().unwrap();
+        assert!(
+            !obj.contains_key(""),
+            "edit_setting_map must never write an empty-string namespace key, got: {obj:#?}"
+        );
+        // Default profile, no pnpm namespace present → writes to `aube`.
+        assert_eq!(
+            obj["aube"]["allowBuilds"]["esbuild"],
+            serde_json::Value::Bool(true)
+        );
+    }
+
+    /// A pre-existing `pnpm` namespace is the chosen write target (pnpm-aware
+    /// drop-in compatibility), and the stale value in the other namespace is
+    /// scrubbed so reads see one source of truth.
+    #[test]
+    fn prefers_existing_pnpm_namespace_and_scrubs_others() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_manifest(
+            tmp.path(),
+            "{\n  \"name\": \"x\",\n  \"pnpm\": {},\n  \"aube\": { \"allowBuilds\": { \"old\": true } }\n}\n",
+        );
+
+        edit_setting_map(tmp.path(), "allowBuilds", |m| {
+            m.insert("esbuild".to_string(), serde_json::Value::Bool(true));
+        })
+        .unwrap();
+
+        let obj = read_manifest(tmp.path());
+        // Merged map written into the chosen `pnpm` namespace…
+        assert_eq!(
+            obj["pnpm"]["allowBuilds"]["esbuild"],
+            serde_json::Value::Bool(true)
+        );
+        // …and the previous value (`old`) carried over via the merge.
+        assert_eq!(
+            obj["pnpm"]["allowBuilds"]["old"],
+            serde_json::Value::Bool(true)
+        );
+        // The non-chosen `aube` namespace is scrubbed of `allowBuilds`.
+        assert!(obj.get("aube").and_then(|a| a.get("allowBuilds")).is_none());
+    }
 }

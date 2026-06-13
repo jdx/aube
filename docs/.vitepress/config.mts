@@ -91,6 +91,7 @@ export default defineConfig({
           { text: "Overview", link: "/guide" },
           { text: "Getting Started", link: "/getting-started" },
           { text: "Installation", link: "/installation" },
+          { text: "Contributing", link: "/contributing" },
           { text: "For pnpm users", link: "/pnpm-users" },
           { text: "For npm users", link: "/npm-users" },
           { text: "For yarn users", link: "/yarn-users" },

@@ -490,6 +490,9 @@ fn is_npm_ignored(name: &str) -> bool {
     // registry. Real footgun, real incidents, npm/pnpm both ship a
     // similar list. Users can still override via `files` field if
     // they really want to publish one of these (nobody should).
+    if name == aube_util::embedder().lockfile_basename {
+        return true;
+    }
     if matches!(
         name,
         ".git"
@@ -506,7 +509,6 @@ fn is_npm_ignored(name: &str) -> bool {
             | "yarn.lock"
             | "pnpm-lock.yaml"
             | "bun.lock"
-            | "aube-lock.yaml"
             | ".env"
             | ".envrc"
             | ".ssh"

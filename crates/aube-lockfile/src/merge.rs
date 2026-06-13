@@ -50,7 +50,7 @@ pub fn merge_branch_lockfiles(
         return Ok(report);
     }
 
-    let base_path = project_dir.join("aube-lock.yaml");
+    let base_path = project_dir.join(aube_util::embedder().lockfile_basename);
     let mut merged = if base_path.exists() {
         pnpm::parse(&base_path)?
     } else {
@@ -140,16 +140,18 @@ fn discover_branch_lockfiles(project_dir: &Path) -> Vec<PathBuf> {
     let Some(dir_str) = project_dir.to_str() else {
         return Vec::new();
     };
-    let pattern = format!("{dir_str}/aube-lock.*.yaml");
+    let basename = aube_util::embedder().lockfile_basename;
+    let (stem, ext) = basename.rsplit_once('.').unwrap_or((basename, "yaml"));
+    let pattern = format!("{dir_str}/{stem}.*.{ext}");
     let mut out: Vec<PathBuf> = glob::glob(&pattern)
         .ok()
         .into_iter()
         .flatten()
         .filter_map(|entry| entry.ok())
         .filter(|p| {
-            // `aube-lock.*.yaml` also matches `aube-lock.yaml` itself
-            // on some implementations; filter it out explicitly.
-            p.file_name().and_then(|n| n.to_str()) != Some("aube-lock.yaml")
+            // `<stem>.*.<ext>` also matches the plain canonical lockfile
+            // itself on some implementations; filter it out explicitly.
+            p.file_name().and_then(|n| n.to_str()) != Some(basename)
         })
         .collect();
     out.sort();

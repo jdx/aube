@@ -15,7 +15,7 @@ use clap::Args;
 
 #[derive(Args, Debug, Default, Clone, Copy)]
 #[command(next_help_heading = "Lockfile")]
-pub(crate) struct LockfileArgs {
+pub struct LockfileArgs {
     /// Error if the lockfile drifts from package.json.
     #[arg(long, conflicts_with_all = ["no_frozen_lockfile", "prefer_frozen_lockfile"])]
     pub frozen_lockfile: bool,
@@ -52,7 +52,7 @@ impl LockfileArgs {
 
 #[derive(Args, Debug, Default, Clone)]
 #[command(next_help_heading = "Network")]
-pub(crate) struct NetworkArgs {
+pub struct NetworkArgs {
     /// Number of retry attempts for failed registry fetches.
     ///
     /// Overrides `fetchRetries` / `fetch-retries` from `.npmrc` /
@@ -135,7 +135,7 @@ impl NetworkArgs {
 
 #[derive(Args, Debug, Default, Clone, Copy)]
 #[command(next_help_heading = "Virtual store")]
-pub(crate) struct VirtualStoreArgs {
+pub struct VirtualStoreArgs {
     /// Force the shared global virtual store off for this invocation.
     ///
     /// Packages are materialized inside the project's virtual store

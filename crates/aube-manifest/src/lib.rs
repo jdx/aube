@@ -402,8 +402,16 @@ impl PackageJson {
     fn pnpm_aube_objects(
         &self,
     ) -> impl Iterator<Item = &serde_json::Map<String, serde_json::Value>> {
-        ["pnpm", "aube"]
-            .into_iter()
+        // Compatible namespaces first (lower precedence), then this tool's
+        // own namespace (last = wins on key conflict). Standalone aube:
+        // `["pnpm", "aube"]`. An empty `manifest_namespace` (root) carries
+        // no object key and is skipped.
+        let id = aube_util::embedder();
+        let self_ns = (!id.manifest_namespace.is_empty()).then_some(id.manifest_namespace);
+        id.compatible_names
+            .iter()
+            .copied()
+            .chain(self_ns)
             .filter_map(|k| self.extra.get(k).and_then(|v| v.as_object()))
     }
 

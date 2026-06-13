@@ -97,8 +97,8 @@ fn build_http_client_inner(
     static UA: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     let user_agent = UA.get_or_init(|| {
         format!(
-            "aube/{} ({} {})",
-            env!("CARGO_PKG_VERSION"),
+            "{} ({} {})",
+            aube_util::embedder().user_agent,
             std::env::consts::OS,
             std::env::consts::ARCH
         )

@@ -10,6 +10,13 @@ use std::path::Path;
 /// text written by `aube patch-commit` (or any compatible tool).
 pub type Patches = BTreeMap<String, String>;
 
+/// The applied-patch sidecar filename, derived from the tool's identity:
+/// `.<name>-applied-patches.json`. Standalone aube:
+/// `.aube-applied-patches.json`.
+pub(crate) fn applied_patches_sidecar_name() -> String {
+    format!(".{}-applied-patches.json", aube_util::embedder().name)
+}
+
 pub(crate) fn current_patch_hashes(patches: &Patches) -> BTreeMap<String, String> {
     use sha2::{Digest, Sha256};
     patches
@@ -28,7 +35,7 @@ pub(crate) fn current_patch_hashes(patches: &Patches) -> BTreeMap<String, String
 /// were ever applied here," which conservatively triggers a re-link
 /// on the first run after the linker started writing the sidecar.
 pub(crate) fn read_applied_patches(nm_dir: &Path) -> BTreeMap<String, String> {
-    let path = nm_dir.join(".aube-applied-patches.json");
+    let path = nm_dir.join(applied_patches_sidecar_name());
     let Ok(raw) = std::fs::read_to_string(&path) else {
         return Default::default();
     };
@@ -49,7 +56,7 @@ pub(crate) fn write_applied_patches(
     nm_dir: &Path,
     map: &BTreeMap<String, String>,
 ) -> std::io::Result<()> {
-    let path = nm_dir.join(".aube-applied-patches.json");
+    let path = nm_dir.join(applied_patches_sidecar_name());
     let out = serde_json::to_string(map)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     aube_util::fs_atomic::atomic_write(&path, out.as_bytes())

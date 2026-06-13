@@ -360,48 +360,49 @@ pub(crate) fn enforce_package_manager_guardrails(
     };
 
     let normalized = version.strip_suffix("-DEBUG").unwrap_or(version);
-    match name {
-        "aube" => {
-            // With managePackageManagerVersions on, version mismatch
-            // is handled *before* this guard by the self-switch
-            // (crate::self_version) — reaching here mismatched means
-            // switching failed soft (onFail warn/ignore) or the
-            // switched binary still reports another version; either
-            // way the switcher already surfaced it.
-            if !settings.manage_package_manager_versions
-                && settings.package_manager_strict_version
-                && normalized != env!("CARGO_PKG_VERSION")
-            {
-                return Err(miette!(
-                    "packageManager requires aube@{version}, but this is aube@{} \
-                     (managePackageManagerVersions=false; re-enable it to switch automatically)",
-                    env!("CARGO_PKG_VERSION")
-                ));
-            }
-            Ok(PackageManagerGuard::Ok)
+    let id = aube_util::embedder();
+    let self_name = id.name;
+    let self_version = id.version;
+    let compatible = id.compatible_names.first().copied().unwrap_or("pnpm");
+    if id.self_names.contains(&name) {
+        // With managePackageManagerVersions on, version mismatch
+        // is handled *before* this guard by the self-switch
+        // (crate::self_version) — reaching here mismatched means
+        // switching failed soft (onFail warn/ignore) or the
+        // switched binary still reports another version; either
+        // way the switcher already surfaced it.
+        if !settings.manage_package_manager_versions
+            && settings.package_manager_strict_version
+            && normalized != self_version
+        {
+            return Err(miette!(
+                "packageManager requires {self_name}@{version}, but this is {self_name}@{self_version} \
+                 (managePackageManagerVersions=false; re-enable it to switch automatically)"
+            ));
         }
-        "pnpm" => {
-            if settings.package_manager_strict_version {
-                return Err(miette!(
-                    "packageManager requires exact pnpm@{version}, but aube cannot download or re-exec a specific pnpm version. Use pnpm directly, set packageManagerStrictVersion=false, or pin packageManager to aube@{}.",
-                    env!("CARGO_PKG_VERSION")
-                ));
-            }
-            Ok(PackageManagerGuard::Ok)
+        Ok(PackageManagerGuard::Ok)
+    } else if id.compatible_names.contains(&name) {
+        if settings.package_manager_strict_version {
+            return Err(miette!(
+                "packageManager requires exact {name}@{version}, but {self_name} cannot download or re-exec a specific {name} version. Use {name} directly, set packageManagerStrictVersion=false, or pin packageManager to {self_name}@{self_version}."
+            ));
         }
-        other => {
+        Ok(PackageManagerGuard::Ok)
+    } else {
+        let other = name;
+        {
             let mode = match settings.package_manager_strict {
                 PackageManagerStrictMode::Error => package_manager_guard_mode(command),
                 _ => PackageManagerGuardMode::WarnAndSkipAutoInstall,
             };
             match mode {
                 PackageManagerGuardMode::Error => Err(miette!(
-                    "packageManager in {} uses unsupported package manager `{other}`. aube's packageManagerStrict=error guard only accepts `aube` and `pnpm`; remove or change the `packageManager` field, or set `package-manager-strict=warn` (the default) or `=off` in .npmrc to soften this guard.",
+                    "packageManager in {} uses unsupported package manager `{other}`. {self_name}'s packageManagerStrict=error guard only accepts `{self_name}` and `{compatible}`; remove or change the `packageManager` field, or set `package-manager-strict=warn` (the default) or `=off` in .npmrc to soften this guard.",
                     path.display()
                 )),
                 PackageManagerGuardMode::WarnAndSkipAutoInstall => {
                     eprintln!(
-                        "warning: packageManager in {} uses unsupported package manager `{other}`; continuing but auto-install is disabled. Switch packageManager to `aube`/`pnpm`, set packageManagerStrict=off, or pass `--no-install` to skip the install probe explicitly.",
+                        "warning: packageManager in {} uses unsupported package manager `{other}`; continuing but auto-install is disabled. Switch packageManager to `{self_name}`/`{compatible}`, set packageManagerStrict=off, or pass `--no-install` to skip the install probe explicitly.",
                         path.display()
                     );
                     Ok(PackageManagerGuard::WarnRunOnly)
@@ -430,7 +431,6 @@ pub(crate) fn command_needs_package_manager_guard(command: Option<&Commands>) ->
             | Some(Commands::Get(_))
             | Some(Commands::Set(_))
             | Some(Commands::Completion(_))
-            | Some(Commands::Usage)
     )
 }
 
