@@ -1593,7 +1593,18 @@ pub async fn run(opts: InstallOptions) -> miette::Result<()> {
             let missing_packages: BTreeMap<String, aube_lockfile::LockedPackage> = graph
                 .packages
                 .iter()
-                .filter(|(dep_path, _)| !indices.contains_key(*dep_path))
+                // Only non-local registry tarballs are ever deferred by
+                // the streaming platform-skip above (it fires solely for
+                // `local_source.is_none()`), so the catch-up must scope to
+                // those. Local `file:`/`link:` deps already ran their
+                // `import_local_source` + `inc_reused` up front; link-only
+                // deps legitimately leave no `indices` entry, so a plain
+                // `!indices.contains_key` filter would re-import them and
+                // double-credit `reused` (reused > resolved →
+                // WARN_AUBE_PROGRESS_OVERFLOW).
+                .filter(|(dep_path, pkg)| {
+                    !indices.contains_key(*dep_path) && pkg.local_source.is_none()
+                })
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
             if !missing_packages.is_empty() {
