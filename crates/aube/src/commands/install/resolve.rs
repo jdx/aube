@@ -6,7 +6,10 @@ use std::path::Path;
 
 use super::frozen::FrozenMode;
 use super::lockfile_dir::{parse_lockfile_dir_remapped_with_kind, write_lockfile_dir_remapped};
-use super::settings::{ResolverConfigInputs, configure_resolver, maybe_cleanup_unused_catalogs};
+use super::settings::{
+    ResolverConfigInputs, configure_resolver, maybe_cleanup_unused_catalogs,
+    stamp_pnpm_config_checksums,
+};
 use super::workspace::write_per_project_lockfiles;
 
 pub(super) type ParsedLockfile = Option<(LockfileGraph, LockfileKind)>;
@@ -267,6 +270,21 @@ pub(super) async fn run_lockfile_only(input: LockfileOnlyInput<'_>) -> miette::R
         lo_write_kind,
     )
     .await?;
+    // Mirror the streaming path: stamp pnpm's config checksums (pnpm-lock
+    // only) before the graph hits disk so `--lockfile-only` and a regular
+    // install stay byte-identical.
+    let lo_local_pnpmfile = if ignore_pnpmfile {
+        None
+    } else {
+        crate::pnpmfile::detect(cwd, pnpmfile, ws_config.pnpmfile_path.as_deref())
+    };
+    stamp_pnpm_config_checksums(
+        &mut graph,
+        lo_write_kind,
+        manifest,
+        settings_ctx,
+        lo_local_pnpmfile.as_deref(),
+    );
     if shared_workspace_lockfile || !has_workspace {
         let lo_written = write_lockfile_dir_remapped(
             lockfile_dir,

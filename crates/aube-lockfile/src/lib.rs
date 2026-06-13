@@ -57,6 +57,22 @@ pub struct LockfileGraph {
     /// `override_rule::OverrideRule`s at the start of each resolve
     /// pass.
     pub overrides: BTreeMap<String, String>,
+    /// pnpm's top-level `packageExtensionsChecksum:` — a `sha256-`
+    /// prefixed `object-hash` of the effective `packageExtensions`
+    /// config. Lets pnpm detect that the extensions changed (and the
+    /// graph must be re-resolved) without re-reading every manifest.
+    /// `None` when there are no package extensions (pnpm omits the
+    /// field). Only the pnpm reader/writer touches this; other formats
+    /// leave it `None`. Computed via
+    /// [`pnpm::package_extensions_checksum`].
+    pub package_extensions_checksum: Option<String>,
+    /// pnpm's top-level `pnpmfileChecksum:` — a `sha256-` prefixed hash
+    /// of the local pnpmfile contents (CRLF-normalized). Lets pnpm
+    /// detect that a `.pnpmfile.cjs`/`.mjs` hook changed without
+    /// re-running it. `None` when no local pnpmfile participates (pnpm
+    /// omits the field). pnpm-only, like `package_extensions_checksum`.
+    /// Computed via [`pnpm::pnpmfile_checksum`].
+    pub pnpmfile_checksum: Option<String>,
     /// Names listed in the root manifest's `pnpm.ignoredOptionalDependencies`.
     /// The resolver drops entries in this set from every `optionalDependencies`
     /// map before enqueueing, matching pnpm's read-package hook. Round-tripped
@@ -666,6 +682,11 @@ impl LockfileGraph {
             // Overrides are part of the user's resolution intent and
             // should survive structural filters like `aube prune`.
             overrides: self.overrides.clone(),
+            // Config checksums describe the inputs that produced the
+            // graph, not its shape — a structural filter must carry
+            // them through unchanged.
+            package_extensions_checksum: self.package_extensions_checksum.clone(),
+            pnpmfile_checksum: self.pnpmfile_checksum.clone(),
             ignored_optional_dependencies: self.ignored_optional_dependencies.clone(),
             // Times follow the same round-trip invariant as settings:
             // filter doesn't change what versions are locked, so the
@@ -732,6 +753,11 @@ impl LockfileGraph {
             packages,
             settings: self.settings.clone(),
             overrides: self.overrides.clone(),
+            // The deployed subset inherits the source workspace's
+            // config checksums: the same `packageExtensions`/pnpmfile
+            // governed the resolution being subsetted.
+            package_extensions_checksum: self.package_extensions_checksum.clone(),
+            pnpmfile_checksum: self.pnpmfile_checksum.clone(),
             ignored_optional_dependencies: self.ignored_optional_dependencies.clone(),
             times: self.times.clone(),
             skipped_optional_dependencies,

@@ -1498,6 +1498,26 @@ pub async fn run(opts: InstallOptions) -> miette::Result<()> {
                     write_kind,
                 )
                 .await?;
+                // Record pnpm's config checksums (pnpm-lock.yaml only) so
+                // the written lockfile carries the same drift markers pnpm
+                // would. Resolve the local pnpmfile here where `opts` /
+                // `ws_config_shared` live; the helper skips non-pnpm formats.
+                let local_pnpmfile = if opts.ignore_pnpmfile {
+                    None
+                } else {
+                    crate::pnpmfile::detect(
+                        &cwd,
+                        opts.pnpmfile.as_deref(),
+                        ws_config_shared.pnpmfile_path.as_deref(),
+                    )
+                };
+                settings::stamp_pnpm_config_checksums(
+                    &mut graph,
+                    write_kind,
+                    &manifest,
+                    &settings_ctx,
+                    local_pnpmfile.as_deref(),
+                );
                 if shared_workspace_lockfile || !has_workspace {
                     let written_path = write_lockfile_dir_remapped(
                         &lockfile_dir,

@@ -589,6 +589,11 @@ pub fn write(path: &Path, graph: &LockfileGraph, manifest: &PackageJson) -> Resu
         } else {
             Some(graph.overrides.clone())
         },
+        // Already `sha256-`-prefixed (or `None`) on the graph; emitted
+        // verbatim. pnpm omits these when absent, and `skip_serializing_if`
+        // mirrors that.
+        package_extensions_checksum: graph.package_extensions_checksum.clone(),
+        pnpmfile_checksum: graph.pnpmfile_checksum.clone(),
         ignored_optional_dependencies: if graph.ignored_optional_dependencies.is_empty() {
             None
         } else {
@@ -707,6 +712,18 @@ struct WritablePnpmLockfile {
     // for the no-overrides case (the field is skipped when empty).
     #[serde(skip_serializing_if = "Option::is_none")]
     overrides: Option<BTreeMap<String, String>>,
+    /// pnpm v9's top-level `packageExtensionsChecksum:` — emitted right
+    /// after `overrides:` (and before `patchedDependencies:`) when the
+    /// effective config declares any `packageExtensions`. Already
+    /// carries pnpm's `sha256-` prefix. Skipped when absent so a
+    /// no-extensions install stays byte-identical to pnpm.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    package_extensions_checksum: Option<String>,
+    /// pnpm v9's top-level `pnpmfileChecksum:` — emitted immediately
+    /// after `packageExtensionsChecksum:` when a local pnpmfile
+    /// participates. Skipped when absent for byte-identical output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pnpmfile_checksum: Option<String>,
     /// pnpm v9+ top-level `patchedDependencies:` — preserved so a
     /// bun→aube-lock conversion keeps the user's patches and a
     /// re-emit doesn't strip the block. pnpm emits this block right

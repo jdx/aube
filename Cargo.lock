@@ -334,6 +334,7 @@ dependencies = [
  "aube-manifest",
  "aube-settings",
  "aube-util",
+ "base64",
  "blake3",
  "glob",
  "miette",
