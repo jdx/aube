@@ -145,6 +145,12 @@ pub const ALL: &[CodeMeta] = &[
         exit_code: None,
     },
     CodeMeta {
+        name: WARN_AUBE_PNPMFILE_CHECKSUM_FAILED,
+        category: category::PNPMFILE_HOOKS,
+        description: "Reading the local pnpmfile for checksum computation failed; the lockfile's `pnpmfileChecksum` field is omitted so a later install will re-resolve instead of trusting a stale value.",
+        exit_code: None,
+    },
+    CodeMeta {
         name: WARN_AUBE_HOOK_IMPORTER_MUTATED,
         category: category::PNPMFILE_HOOKS,
         description: "A pnpmfile `afterAllResolved` hook mutated `importers[...]`; aube ignored the edit.",

@@ -492,17 +492,24 @@ pub(crate) fn stamp_pnpm_config_checksums(
     graph.package_extensions_checksum =
         aube_lockfile::pnpm::package_extensions_checksum(&package_extensions);
 
-    let Some(path) = local_pnpmfile else {
-        return;
+    // Always reflect the *current* pnpmfile state: a missing or
+    // unreadable pnpmfile must clear any checksum the graph carried over
+    // (e.g. from a parsed lockfile), otherwise the written lockfile keeps
+    // a stale `pnpmfileChecksum` that pnpm would treat as config drift.
+    graph.pnpmfile_checksum = match local_pnpmfile {
+        Some(path) => match aube_lockfile::pnpm::pnpmfile_checksum(&[path.to_path_buf()]) {
+            Ok(checksum) => checksum,
+            Err(e) => {
+                tracing::warn!(
+                    code = aube_codes::warnings::WARN_AUBE_PNPMFILE_CHECKSUM_FAILED,
+                    "failed to read pnpmfile {} for checksum: {e}",
+                    path.display()
+                );
+                None
+            }
+        },
+        None => None,
     };
-    match aube_lockfile::pnpm::pnpmfile_checksum(&[path.to_path_buf()]) {
-        Ok(checksum) => graph.pnpmfile_checksum = checksum,
-        Err(e) => tracing::warn!(
-            code = aube_codes::warnings::WARN_AUBE_PNPMFILE_CHECKSUM_FAILED,
-            "failed to read pnpmfile {} for checksum: {e}",
-            path.display()
-        ),
-    }
 }
 
 fn merge_json_object_setting(

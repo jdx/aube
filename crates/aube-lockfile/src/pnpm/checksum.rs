@@ -181,27 +181,94 @@ fn write_array(items: &[Value], out: &mut Vec<u8>) {
     }
 }
 
-/// JS `Number.prototype.toString()` for a serde_json number.
+/// JS `Number.prototype.toString()` (radix 10) for a serde_json number.
 ///
 /// `packageExtensions` values are almost always strings (versions are
 /// quoted), so numbers are rare here, but `object-hash` still routes
 /// them through `(n).toString()`. Integers match Rust's formatting
-/// across the i64/u64 range; finite floats use Rust's shortest
-/// round-trip, which matches V8 for the small, non-exponential
-/// magnitudes that could appear in extension data. serde_json never
-/// produces NaN/Infinity. JS prints negative zero as `0`, so normalize
-/// it.
+/// across the i64/u64 range. Floats reuse Rust's shortest round-trip
+/// digits — the same digit sequence V8 picks — but re-apply V8's
+/// notation rules (see [`js_f64_to_string`]), because Rust's
+/// `f64::to_string` renders large/small magnitudes in plain decimal
+/// (`1000000000000000000000`, `0.0000001`) where V8 switches to
+/// exponential (`1e+21`, `1e-7`). serde_json never produces
+/// NaN/Infinity; JS prints negative zero as `0`.
 fn js_number_string(n: &serde_json::Number) -> String {
     if let Some(u) = n.as_u64() {
-        u.to_string()
-    } else if let Some(i) = n.as_i64() {
-        i.to_string()
-    } else if let Some(f) = n.as_f64() {
-        let s = f.to_string();
-        if s == "-0" { "0".to_string() } else { s }
-    } else {
-        "0".to_string()
+        return u.to_string();
     }
+    if let Some(i) = n.as_i64() {
+        return i.to_string();
+    }
+    match n.as_f64() {
+        Some(f) => js_f64_to_string(f),
+        None => "0".to_string(),
+    }
+}
+
+/// ECMA-262 `Number::toString` (radix 10) for a finite `f64`, matching
+/// V8 byte-for-byte.
+///
+/// Rust and V8 agree on the *shortest round-trip digit sequence*; they
+/// disagree only on notation. We grab those digits from `{:e}` (which
+/// always normalizes to one leading digit) and re-emit them with the
+/// spec's fixed-vs-exponential rules: fixed-point for `-6 < n <= 21`,
+/// exponential otherwise, where `n` is the position of the decimal
+/// point relative to the first significant digit.
+fn js_f64_to_string(f: f64) -> String {
+    // Covers both +0.0 and -0.0; JS renders each as "0".
+    if f == 0.0 {
+        return "0".to_string();
+    }
+
+    // `{:e}` yields the shortest mantissa as `d[.ddd]e<exp>` with a
+    // single leading digit (1 <= |mantissa| < 10) — the exact
+    // significant digits V8 uses, in a notation we can decompose.
+    let exp_form = format!("{:e}", f.abs());
+    // INVARIANT: Rust's LowerExp formatting always emits an `e`, and the
+    // exponent after it is always a valid base-10 i64 — neither can fail.
+    let (mantissa, exp) = exp_form
+        .split_once('e')
+        .expect("{:e} always emits an exponent separator");
+    let exp: i64 = exp.parse().expect("{:e} exponent is a base-10 integer");
+
+    let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
+    let k = digits.len() as i64; // count of significant digits
+    // ECMA-262 `n`: value == digits × 10^(n - k); the decimal point sits
+    // after the first `n` digits. With one leading digit, n = exp + 1.
+    let n = exp + 1;
+
+    let mut out = String::new();
+    if f < 0.0 {
+        out.push('-');
+    }
+    if k <= n && n <= 21 {
+        // Integer: every digit, then (n - k) trailing zeros.
+        out.push_str(&digits);
+        out.push_str(&"0".repeat((n - k) as usize));
+    } else if 0 < n && n <= 21 {
+        // Decimal point falls inside the digit run.
+        out.push_str(&digits[..n as usize]);
+        out.push('.');
+        out.push_str(&digits[n as usize..]);
+    } else if -6 < n && n <= 0 {
+        // Leading "0.", then (-n) zeros, then every digit.
+        out.push_str("0.");
+        out.push_str(&"0".repeat((-n) as usize));
+        out.push_str(&digits);
+    } else {
+        // Exponential: d[.ddd]e{+|-}{exp}, with exp == n - 1.
+        out.push_str(&digits[..1]);
+        if k > 1 {
+            out.push('.');
+            out.push_str(&digits[1..]);
+        }
+        let e10 = n - 1;
+        out.push('e');
+        out.push(if e10 < 0 { '-' } else { '+' });
+        out.push_str(&e10.abs().to_string());
+    }
+    out
 }
 
 #[cfg(test)]
@@ -245,6 +312,50 @@ mod tests {
             got.as_deref(),
             Some("sha256-EOT4Rq2KGdwdUwAI9FuL2HmoawSWgN2C+QLiGsRhY20=")
         );
+    }
+
+    /// `js_f64_to_string` must match V8's `Number.prototype.toString()`
+    /// byte-for-byte — especially the exponential notation V8 uses for
+    /// magnitudes >= 1e21 and < 1e-6, where Rust's `f64::to_string`
+    /// emits plain decimal and would silently diverge the checksum from
+    /// pnpm (triggering a frozen-lockfile config mismatch).
+    #[test]
+    fn js_f64_to_string_matches_v8_notation() {
+        let cases = [
+            (0.0_f64, "0"),
+            (-0.0_f64, "0"),
+            (3.5, "3.5"),
+            (0.5, "0.5"),
+            (0.0001, "0.0001"),
+            (1e-6, "0.000001"), // last fixed-point magnitude
+            (1e-7, "1e-7"),     // first exponential (small)
+            (1e-8, "1e-8"),
+            (-1.5e-7, "-1.5e-7"),
+            (123.456, "123.456"),
+            (1e20, "100000000000000000000"), // last fixed-point integer
+            (1e21, "1e+21"),                 // first exponential (large)
+            (1.5e21, "1.5e+21"),
+            (-1e21, "-1e+21"),
+        ];
+        for (input, want) in cases {
+            assert_eq!(js_f64_to_string(input), want, "f64 {input:?}");
+        }
+    }
+
+    /// Integers route through Rust's integer formatting; float-backed
+    /// numbers route through the V8-parity path.
+    #[test]
+    fn js_number_string_routes_ints_and_floats() {
+        let int = match serde_json::from_str::<Value>("42").expect("valid JSON") {
+            Value::Number(n) => n,
+            other => panic!("expected number, got {other:?}"),
+        };
+        let big = match serde_json::from_str::<Value>("1e21").expect("valid JSON") {
+            Value::Number(n) => n,
+            other => panic!("expected number, got {other:?}"),
+        };
+        assert_eq!(js_number_string(&int), "42");
+        assert_eq!(js_number_string(&big), "1e+21");
     }
 
     #[test]
