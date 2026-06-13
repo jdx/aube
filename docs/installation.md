@@ -49,11 +49,11 @@ The tap formula builds from source and installs shell completions.
 
 ## From npm
 
-aube is also published on npm as `@jdx/aube`:
+aube is also published on npm as `@endevco/aube`:
 
 ```sh
-npm install -g --ignore-scripts=false @jdx/aube
-npx --ignore-scripts=false @jdx/aube --version
+npm install -g --ignore-scripts=false @endevco/aube
+npx --ignore-scripts=false @endevco/aube --version
 ```
 
 ::: warning
