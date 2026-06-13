@@ -252,21 +252,28 @@ pub(super) fn order_lifecycle_manifests(
         .collect()
 }
 
-/// Write one lockfile per non-root workspace importer when
-/// `sharedWorkspaceLockfile=false` is set. Each lockfile contains
-/// only the importer's own deps (remapped to `.`) plus the transitive
-/// closure reachable from them. The workspace-root lockfile is not
-/// written under this layout.
+/// Write one lockfile per workspace importer when
+/// `sharedWorkspaceLockfile=false` is set, the workspace root
+/// included. Each lockfile contains only that importer's own deps
+/// (remapped to `.`) plus the transitive closure reachable from them.
 ///
-/// Each member's existing lockfile format is preserved: a package that
+/// pnpm under `sharedWorkspaceLockfile=false` writes a separate
+/// lockfile for every project — the root among them when it carries
+/// its own dependencies — so the root's lockfile (importer `.`) is
+/// written here too, at the workspace root. A dependency-free root
+/// with no graph importer entry is skipped via `subset_to_importer`
+/// below.
+///
+/// Each project's existing lockfile format is preserved: a package that
 /// already ships a `pnpm-lock.yaml` (or any other supported lockfile)
 /// keeps getting that file rewritten in place instead of gaining a
 /// surprise `aube-lock.yaml` next to it. This mirrors the single-project
 /// write path ([`aube_lockfile::write_lockfile_preserving_existing`]) and
 /// pnpm's own `sharedWorkspaceLockfile=false` behavior, where each
 /// member keeps its own `pnpm-lock.yaml`. `fallback_kind` is only used
-/// for members that have no lockfile yet (the workspace default, derived
-/// from the root's lockfile format or aube's own when none exists).
+/// for projects (root or member) that have no lockfile yet (the
+/// workspace default, derived from the root's lockfile format or
+/// aube's own when none exists).
 ///
 /// Importers without a corresponding manifest entry are skipped — the
 /// resolver should never produce one, but defensive skipping keeps a
@@ -280,19 +287,21 @@ pub(super) fn write_per_project_lockfiles(
 ) -> miette::Result<()> {
     use miette::IntoDiagnostic;
     for (importer_path, pkg_manifest) in workspace_manifests {
-        if importer_path == "." {
-            // The root manifest gets no per-project lockfile under
-            // sharedWorkspaceLockfile=false; it's the workspace anchor,
-            // not an installable importer.
-            continue;
-        }
         let Some(subset) = graph.subset_to_importer(importer_path, |_| true) else {
             tracing::debug!(
                 "sharedWorkspaceLockfile=false: skipping {importer_path} (no graph importer entry)"
             );
             continue;
         };
-        let pkg_dir = workspace_root.join(importer_path);
+        // The root importer (`.`) writes its lockfile at the workspace
+        // root itself; members nest under their relative path. pnpm
+        // writes the root project's own lockfile under
+        // sharedWorkspaceLockfile=false, so `.` must not be skipped.
+        let pkg_dir = if importer_path == "." {
+            workspace_root.to_path_buf()
+        } else {
+            workspace_root.join(importer_path)
+        };
         // Honor the member's own on-disk lockfile format; only members
         // without one fall back to the workspace default. Without this,
         // a `pnpm-lock.yaml`-based member gets a redundant `aube-lock.yaml`
@@ -462,5 +471,49 @@ mod per_project_lockfile_tests {
             "fallback kind (pnpm) must be used for a member with no lockfile"
         );
         assert!(!pkg_dir.join("aube-lock.yaml").exists());
+    }
+
+    /// Under `sharedWorkspaceLockfile=false`, pnpm writes the root
+    /// project's OWN lockfile (importer `.`) at the workspace root,
+    /// alongside each member's. Regression for the root `pnpm-lock.yaml`
+    /// disappearing once aube switched to per-project lockfiles: the
+    /// root must keep getting its own lockfile, with its format
+    /// preserved (no surprise `aube-lock.yaml` beside it).
+    #[test]
+    fn writes_root_importer_lockfile_alongside_members() {
+        let root = tempfile::tempdir().unwrap();
+        let lib_dir = root.path().join("packages/lib");
+        std::fs::create_dir_all(&lib_dir).unwrap();
+
+        // Root already ships a pnpm-lock.yaml; its format must be kept.
+        std::fs::write(root.path().join("pnpm-lock.yaml"), "lockfileVersion: '9.0'\n").unwrap();
+
+        let graph = graph_with_importers(&[".", "packages/lib"]);
+        let manifests = vec![
+            (".".to_string(), manifest("root")),
+            ("packages/lib".to_string(), manifest("@test/lib")),
+        ];
+
+        write_per_project_lockfiles(root.path(), &graph, &manifests, LockfileKind::Aube).unwrap();
+
+        // Root: its own pnpm-lock.yaml is (re)written at the workspace
+        // root, format preserved — no aube-lock.yaml beside it.
+        let root_lock = root.path().join("pnpm-lock.yaml");
+        assert!(
+            root_lock.exists(),
+            "root pnpm-lock.yaml must be written under sharedWorkspaceLockfile=false"
+        );
+        assert!(
+            !root.path().join("aube-lock.yaml").exists(),
+            "no aube-lock.yaml beside the root's preserved pnpm-lock.yaml"
+        );
+        let root_contents = std::fs::read_to_string(&root_lock).unwrap();
+        assert!(
+            root_contents.contains("importers:"),
+            "root lockfile must hold its own importer, got:\n{root_contents}"
+        );
+
+        // Member still gets its own lockfile (fallback kind, no prior lockfile).
+        assert!(lib_dir.join("aube-lock.yaml").exists());
     }
 }
