@@ -1063,7 +1063,7 @@ pub(super) fn remap_indices_to_contextualized(
     for (dep_path, pkg) in &graph.packages {
         let canonical_key = pkg.spec_key();
         // The peer-context pass appends a `(peer@ver)` suffix (or a
-        // hashed `_<hex>` marker when it exceeds the cap) onto a
+        // parenthesized `(<short-hash>)` when it exceeds the cap) onto a
         // package's canonical dep_path. Source-backed deps (git /
         // remote tarball / file) are streamed from the resolver — and
         // therefore keyed in `canonical_indices` — under their
@@ -1091,38 +1091,17 @@ pub(super) fn remap_indices_to_contextualized(
 
 /// Strip the peer-context suffix from a `dep_path`, recovering the
 /// canonical dep_path the resolver streamed it under (and that
-/// `canonical_indices` is keyed by). Mirrors the inverse of the suffix
-/// the peer-context pass appends in `aube-resolver`: either a
-/// parenthesized `(peer@ver)…` tail or, when that exceeds the length
-/// cap, a hashed `_<10-hex>` marker. The two forms are mutually
-/// exclusive, so drop the parenthesized tail first, then the hashed
-/// marker. A dep_path with no suffix is returned unchanged.
+/// `canonical_indices` is keyed by). The peer-context pass in
+/// `aube-resolver` appends either a parenthesized `(peer@ver)…` tail
+/// or, when the suffix body exceeds the length cap, a single
+/// parenthesized short hash `(<short-hash>)` (pnpm's
+/// `createPeerDepGraphHash`). Both forms begin at the first `(`, so
+/// cutting there is the exact inverse and recovers the canonical
+/// coordinate. A `dep_path` with no suffix is returned unchanged — a
+/// bare `_<hex>` tail belongs to a `git+`/`url+`/`file+` source
+/// coordinate and is never a peer marker, so it is preserved.
 fn strip_peer_context_suffix(dep_path: &str) -> &str {
-    let base = dep_path.split('(').next().unwrap_or(dep_path);
-    strip_hashed_peer_suffix(base)
-}
-
-/// Strip a trailing `_<10-hex>` peer-suffix marker (the form
-/// `hash_peer_suffix` emits in `aube-resolver` when a peer suffix
-/// exceeds `peersSuffixMaxLength`). Returns the input unchanged when no
-/// such marker is present. Operates on the last 11 bytes only, which
-/// for a canonical source dep_path is the `git+`/`url+`/`file+` hex
-/// coordinate — never a literal `_`, so a suffix-less key is never
-/// falsely truncated.
-fn strip_hashed_peer_suffix(s: &str) -> &str {
-    const MARKER_LEN: usize = 11; // `_` + 10 hex chars
-    if s.len() < MARKER_LEN {
-        return s;
-    }
-    let tail = &s[s.len() - MARKER_LEN..];
-    if !tail.starts_with('_') {
-        return s;
-    }
-    if tail[1..].chars().all(|c| c.is_ascii_hexdigit()) {
-        &s[..s.len() - MARKER_LEN]
-    } else {
-        s
-    }
+    dep_path.split('(').next().unwrap_or(dep_path)
 }
 
 #[cfg(test)]
@@ -1181,9 +1160,9 @@ mod tests {
             strip_peer_context_suffix("a@git+abc1234567890123(b@1.0.0)(c@2.0.0)"),
             "a@git+abc1234567890123"
         );
-        // Hashed suffix (`_` + 10 hex) emitted past the length cap.
+        // Hashed suffix `(<short-hash>)` emitted past the length cap.
         assert_eq!(
-            strip_peer_context_suffix("a@git+abc1234567890123_0123456789"),
+            strip_peer_context_suffix("a@git+abc1234567890123(0123456789abcdef0123456789abcdef)"),
             "a@git+abc1234567890123"
         );
         // Scoped name keeps its leading `@scope/` intact.
@@ -1193,10 +1172,13 @@ mod tests {
         );
         // No suffix → unchanged.
         assert_eq!(strip_peer_context_suffix("a@1.0.0"), "a@1.0.0");
-        // A trailing `_<non-hex>` is not a hashed marker → unchanged.
+        // A bare `_<hex>` tail belongs to the source coordinate, not a
+        // peer marker — only parenthesized suffixes are stripped, so it
+        // is preserved (the old bare-marker stripper would have wrongly
+        // truncated it).
         assert_eq!(
-            strip_peer_context_suffix("a@1.0.0_zzzzzzzzzz"),
-            "a@1.0.0_zzzzzzzzzz"
+            strip_peer_context_suffix("a@git+abc1234567890123_0123456789"),
+            "a@git+abc1234567890123_0123456789"
         );
     }
 
@@ -1258,11 +1240,12 @@ mod tests {
     }
 
     // Same recovery for the hashed-suffix form the peer-context pass
-    // emits when the parenthesized suffix exceeds the length cap.
+    // emits when the suffix body exceeds the length cap: a single
+    // parenthesized short hash `(<short-hash>)`.
     #[test]
     fn remap_recovers_git_dep_index_through_hashed_peer_suffix() {
         let canonical = "left-pad@git+3c803342e33ad828";
-        let contextualized = format!("{canonical}_0123456789");
+        let contextualized = format!("{canonical}(0123456789abcdef0123456789abcdef)");
 
         let mut canonical_indices = std::collections::BTreeMap::new();
         canonical_indices.insert(canonical.to_string(), one_file_index());

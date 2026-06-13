@@ -1523,10 +1523,11 @@ type = "int"
 default = "1000"
 docs = """
 Caps the length of the peer-ID suffix appended to a `dep_path` in the
-lockfile (e.g. `react-dom@18.2.0(react@18.2.0)`). When the suffix would
-exceed this many bytes, aube replaces it with `_<hex>` where `<hex>` is
-a short SHA-256 digest of the full suffix — matching pnpm's format so
-lockfiles stay portable.
+lockfile (e.g. `react-dom@18.2.0(react@18.2.0)`). When the suffix body
+would exceed this many bytes, aube replaces the whole suffix with a
+parenthesized short hash `(<short-hash>)` — the first 32 chars of the
+SHA-256 of the suffix body — matching pnpm's `createPeerDepGraphHash`
+so lockfiles stay portable.
 
 Mutual-peer cycles in large graphs can otherwise grow suffixes
 unboundedly across fixed-point iterations of the resolver. The default

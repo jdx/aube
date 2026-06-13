@@ -3011,27 +3011,45 @@ async fn lockfile_reuse_handles_name_at_version_dep_form() {
 
 // ===== peersSuffixMaxLength =====
 //
-// Helpers exercised directly: `hash_peer_suffix` for the format
-// invariant; `apply_peer_contexts` for the integration path that
-// reads the cap and decides whether to swap the suffix.
+// Helpers exercised directly: `effective_peer_suffix` for the pnpm
+// format invariant; `apply_peer_contexts` for the integration path
+// that reads the cap and decides whether to swap the suffix.
 
 #[test]
-fn hash_peer_suffix_matches_expected_format() {
-    let out = hash_peer_suffix("(react@18.2.0)");
-    // `_` prefix, 10 hex chars, nothing else.
-    assert!(out.starts_with('_'), "expected `_` prefix: {out:?}");
-    assert_eq!(out.len(), 11, "expected `_` + 10 hex chars: {out:?}");
+fn effective_peer_suffix_hashes_to_pnpm_parenthesized_form() {
+    // Cap of 0 forces hashing of any non-empty body. pnpm's
+    // `createPeerDepGraphHash` wraps the short hash in a single
+    // `(...)`, never a bare `_<hex>` marker.
+    let out = effective_peer_suffix("(react@18.2.0)", 0);
+    assert!(out.starts_with('(') && out.ends_with(')'), "parens: {out:?}");
+    let inner = &out[1..out.len() - 1];
+    // `createShortHash` = sha256 hex truncated to 32 chars.
+    assert_eq!(inner.len(), 32, "expected 32 hex chars: {out:?}");
     assert!(
-        out[1..]
+        inner
             .chars()
             .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
-        "expected lowercase hex after `_`: {out:?}"
+        "expected lowercase hex inside parens: {out:?}"
     );
-    // Stable output — regression guard against accidental format changes.
-    assert_eq!(hash_peer_suffix("(react@18.2.0)"), out);
+    // The hash input is the body (suffix without the outer parens),
+    // matching pnpm's `dirName = peers.join(')(')`.
+    assert_eq!(
+        out,
+        effective_peer_suffix("(react@18.2.0)", 0),
+        "stable output"
+    );
+    assert!(is_hashed_peer_suffix(&out), "must be recognized as hashed");
 }
 
-// Small cap forces the suffix to collapse to `_<hex>`. Uses the
+#[test]
+fn effective_peer_suffix_is_identity_within_cap() {
+    // Within the cap the suffix is returned verbatim (the common case).
+    let suffix = "(react@18.2.0)(redux@4.0.5)";
+    assert_eq!(effective_peer_suffix(suffix, 1000), suffix);
+    assert!(!is_hashed_peer_suffix(suffix), "real peers aren't hashed");
+}
+
+// Small cap forces the suffix to collapse to `(<short-hash>)`. Uses the
 // nested-peer fixture that already proves correct behavior at the
 // default cap — same fixture, different cap, different output.
 #[test]
@@ -3087,8 +3105,8 @@ fn peer_suffix_is_hashed_when_exceeding_cap() {
         .expect("consumer@1.0.0 variant missing");
     let suffix = consumer_key.strip_prefix("consumer@1.0.0").unwrap();
     assert!(
-        suffix.starts_with('_') && suffix.len() == 11,
-        "expected hashed suffix _<10-hex>, got {suffix:?} from {consumer_key:?}"
+        is_hashed_peer_suffix(suffix),
+        "expected parenthesized hashed suffix (<32-hex>), got {suffix:?} from {consumer_key:?}"
     );
 }
 

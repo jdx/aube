@@ -823,12 +823,12 @@ fn test_write_npm_preserves_platform_optional_metadata() {
 }
 
 /// Regression: `canonical_key_from_dep_path` must strip the
-/// `(peer@ver)` suffix *before* splitting on `@`. A naive
+/// peer-context suffix *before* splitting on `@`. A naive
 /// `rfind('@')` lands inside the peer suffix and returns the
 /// input unchanged, which silently drops every peer-contextualized
-/// root dep from the written lockfile. Hashed suffixes use the
-/// same canonical identity; otherwise long peer suffixes drop
-/// out of npm package-lock output.
+/// root dep from the written lockfile. The capped hash form
+/// `(<short-hash>)` shares the same canonical identity and is
+/// stripped the same way — it also begins at the first `(`.
 #[test]
 fn test_canonical_key_strips_peer_suffix() {
     assert_eq!(canonical_key_from_dep_path("foo@1.0.0"), "foo@1.0.0");
@@ -840,21 +840,20 @@ fn test_canonical_key_strips_peer_suffix() {
         canonical_key_from_dep_path("@scope/pkg@2.0.0(peer@1.0.0)"),
         "@scope/pkg@2.0.0"
     );
+    // Capped suffix: a single parenthesized short hash (pnpm's
+    // `createPeerDepGraphHash`), stripped like any other `(…)` tail.
+    let hashed = "expo-router@4.0.22(94c00fd028a1b2c3d4e5f60718293a4b)";
+    assert_eq!(canonical_key_from_dep_path(hashed), "expo-router@4.0.22");
     assert_eq!(
-        canonical_key_from_dep_path("expo-router@4.0.22_94c00fd028"),
+        child_canonical_key("expo-router", "4.0.22(94c00fd028a1b2c3d4e5f60718293a4b)"),
         "expo-router@4.0.22"
     );
     assert_eq!(
-        child_canonical_key("expo-router", "4.0.22_94c00fd028"),
-        "expo-router@4.0.22"
-    );
-    assert_eq!(
-        dep_value_as_version("expo-router", "expo-router@4.0.22_94c00fd028"),
+        dep_value_as_version(
+            "expo-router",
+            "expo-router@4.0.22(94c00fd028a1b2c3d4e5f60718293a4b)"
+        ),
         "4.0.22"
-    );
-    assert_eq!(
-        canonical_key_from_dep_path("expo-router@4.0.22_94C00FD028"),
-        "expo-router@4.0.22"
     );
 }
 

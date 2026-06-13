@@ -290,8 +290,9 @@ pub struct PeerContextOptions {
     /// module for the owning implementation (intentionally crate-
     /// private; the public API here is the option flag itself).
     pub resolve_from_workspace_root: bool,
-    /// Byte cap on the peer-ID suffix after which the entire suffix
-    /// is hashed to `_<10-char-sha256-hex>`. pnpm's default is 1000.
+    /// Byte cap on the peer-ID suffix body after which the entire
+    /// suffix is replaced by a parenthesized short hash `(<short-hash>)`
+    /// (pnpm's `createPeerDepGraphHash`). pnpm's default is 1000.
     pub peers_suffix_max_length: usize,
 }
 
@@ -733,14 +734,6 @@ fn apply_peer_contexts_once(
 /// `(` / `)` / end-of-string)? Used by the peer-context pass to detect
 /// when a nested tail loops back to the current package so it can
 /// short-circuit the chain instead of growing the suffix forever.
-/// If `s` ends with `_<10 lowercase hex>` (the marker written by
-/// `hash_peer_suffix`), strip it and return the prefix. Otherwise
-/// return `s` unchanged.
-///
-/// Safe against false positives: `s` here is always a post-split
-/// `name@version` base, and semver forbids `_` inside a version, so
-/// an underscore 10 chars from the end of `name@version` can only be
-/// our marker.
 /// Everything before the first `(` — i.e. the canonical `name@version`
 /// part of a dep-path with the peer-context suffix stripped. Returns
 /// the original string when no `(` is present. Borrowed; callers that
@@ -771,39 +764,58 @@ fn scope_map_from_deps(deps: &[DirectDep]) -> FxHashMap<String, String> {
     out
 }
 
-fn strip_hashed_peer_suffix(s: &str) -> &str {
-    const MARKER_LEN: usize = 11; // `_` + 10 hex chars
-    if s.len() < MARKER_LEN {
-        return s;
-    }
-    let tail = &s[s.len() - MARKER_LEN..];
-    if !tail.starts_with('_') {
-        return s;
-    }
-    if tail[1..]
-        .chars()
-        .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
-    {
-        &s[..s.len() - MARKER_LEN]
-    } else {
-        s
-    }
+/// True when `s` is a single hashed peer suffix `(<32 lowercase hex>)`
+/// as emitted by [`effective_peer_suffix`] once a suffix exceeds
+/// `peersSuffixMaxLength`. The hashed form discards the textual peer
+/// set, so the propagation pass recognizes such keys and leaves them
+/// untouched (their per-peer contribution can't be recovered). A real
+/// peer segment always contains `@`, so the all-hex check can't
+/// false-positive on a `(name@version)` group.
+pub(crate) fn is_hashed_peer_suffix(s: &str) -> bool {
+    let Some(inner) = s.strip_prefix('(').and_then(|x| x.strip_suffix(')')) else {
+        return false;
+    };
+    inner.len() == 32
+        && inner
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-/// Hash a peer-ID suffix with SHA-256 and return `_<10-char-hex>`.
-/// Used by the peer-context pass when the raw suffix length exceeds
-/// `peersSuffixMaxLength`. Matches pnpm's format so lockfile dep_path
-/// keys stay portable.
-pub(crate) fn hash_peer_suffix(suffix: &str) -> String {
+/// pnpm's `createShortHash`: the lowercase SHA-256 hex digest of
+/// `input`, truncated to its first 32 characters (16 bytes).
+fn short_peer_hash(input: &str) -> String {
     use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(suffix.as_bytes());
-    let mut out = String::with_capacity(11);
-    out.push('_');
-    for byte in digest.iter().take(5) {
+    let digest = Sha256::digest(input.as_bytes());
+    let mut out = String::with_capacity(32);
+    for byte in digest.iter().take(16) {
         use std::fmt::Write;
         let _ = write!(out, "{byte:02x}");
     }
     out
+}
+
+/// Final peer-context tail for an already-built `(name@version)…`
+/// `suffix`, mirroring pnpm's `createPeerDepGraphHash`. pnpm derives
+/// `dirName` by joining the sorted peer ids with `)(` — i.e. the suffix
+/// without its outer parens — hashes it with `createShortHash` when it
+/// exceeds `peersSuffixMaxLength`, and always re-wraps the result in a
+/// single `(...)`. Keeping that shape means a capped suffix aube writes
+/// into `pnpm-lock.yaml` is `(<short-hash>)` — byte-compatible with
+/// pnpm — never a bare `_<hex>` marker.
+pub(crate) fn effective_peer_suffix(suffix: &str, max_length: usize) -> String {
+    // `dir_name` == pnpm's `dirName`: the suffix without the outer `(`
+    // and `)` that wrap the first and last peer segment. `suffix` is
+    // always a concatenation of `(…)` groups here, so stripping one
+    // byte off each end is safe; an empty suffix degrades to empty.
+    let dir_name = suffix
+        .strip_prefix('(')
+        .and_then(|s| s.strip_suffix(')'))
+        .unwrap_or(suffix);
+    if dir_name.len() > max_length {
+        format!("({})", short_peer_hash(dir_name))
+    } else {
+        suffix.to_string()
+    }
 }
 
 pub(crate) fn contains_canonical_back_ref(value: &str, canonical: &str) -> bool {
@@ -1116,7 +1128,7 @@ fn propagate_peer_suffixes_to_ancestors(
     // cumulative is identical to its self set the rewrite is a no-op
     // and we skip it.
     //
-    // Hashed-suffix keys (`name@version_<10hex>`, produced when a
+    // Hashed-suffix keys (`name@version(<short-hash>)`, produced when a
     // package's own peer suffix exceeded `peersSuffixMaxLength`) are
     // left untouched. The hash form discards the textual peer set
     // by design — `outer_paren_segments` can't recover its
@@ -1134,19 +1146,15 @@ fn propagate_peer_suffixes_to_ancestors(
         let Some(segments) = cumulative.get(key) else {
             continue;
         };
-        let original_tail = canonical_tail(key);
-        let canonical = strip_hashed_peer_suffix(original_tail);
-        if canonical.len() != original_tail.len() {
-            // Original key already has the hashed marker. Skip — see
-            // comment above.
+        let canonical = canonical_tail(key);
+        if is_hashed_peer_suffix(&key[canonical.len()..]) {
+            // Original key already carries the hashed suffix `(…)` — see
+            // comment above. Its textual peer set is irrecoverable, so
+            // leave the key untouched.
             continue;
         }
         let suffix: String = segments.values().cloned().collect();
-        let effective_suffix = if suffix.len() > options.peers_suffix_max_length {
-            hash_peer_suffix(&suffix)
-        } else {
-            suffix
-        };
+        let effective_suffix = effective_peer_suffix(&suffix, options.peers_suffix_max_length);
         let new_key = format!("{canonical}{effective_suffix}");
         if new_key != *key {
             rewrite.insert(key.clone(), new_key);
@@ -1474,16 +1482,13 @@ fn visit_peer_context<'g>(
     // append the new suffix on top of the old and grow unboundedly
     // across iterations (classic mutual-peer-cycle blow-up).
     //
-    // Two suffix forms can be present from a prior pass:
-    //   1. `(name@version)(…)` — the normal nested peer suffix. Stripped
-    //      by splitting on the first `(`.
-    //   2. `_<10-char-sha256-hex>` — the hashed form produced when the
-    //      normal suffix exceeded `peersSuffixMaxLength`. Must also be
-    //      stripped; otherwise each pass re-hashes the already-hashed
-    //      key and appends another marker (exposed by the
-    //      `peer_suffix_is_hashed_when_exceeding_cap` unit test).
-    let canonical_base = canonical_tail(input_dep_path);
-    let canonical_base = strip_hashed_peer_suffix(canonical_base).to_string();
+    // Both suffix forms are parenthesized — the normal nested
+    // `(name@version)(…)` and the capped `(<short-hash>)` that
+    // `effective_peer_suffix` emits past `peersSuffixMaxLength` — so
+    // splitting on the first `(` strips either one. Otherwise each
+    // pass would re-hash the already-hashed key and grow it (covered
+    // by the `peer_suffix_is_hashed_when_exceeding_cap` unit test).
+    let canonical_base = canonical_tail(input_dep_path).to_string();
 
     // Compute peer context: walk declared peers, resolve from ancestors
     // (nearest wins — the scope is rebuilt as we recurse) or from the
@@ -1644,15 +1649,11 @@ fn visit_peer_context<'g>(
             format!("({n}@{display_v})")
         })
         .collect();
-    // pnpm's `peersSuffixMaxLength`: when the built suffix exceeds the
-    // cap, replace the entire suffix with `_<10-char-sha256-hex>` so the
-    // lockfile key stays bounded. Matches pnpm's lockfile format, so
-    // lockfiles shared between aube and pnpm stay comparable.
-    let effective_suffix = if suffix.len() > options.peers_suffix_max_length {
-        hash_peer_suffix(&suffix)
-    } else {
-        suffix
-    };
+    // pnpm's `peersSuffixMaxLength`: when the suffix body exceeds the
+    // cap, `effective_peer_suffix` replaces the whole suffix with a
+    // parenthesized short hash `(<hash>)` so the lockfile key stays
+    // bounded and byte-compatible with pnpm's `createPeerDepGraphHash`.
+    let effective_suffix = effective_peer_suffix(&suffix, options.peers_suffix_max_length);
     let contextualized = format!("{canonical_base}{effective_suffix}");
 
     if out_packages.contains_key(&contextualized) || visiting.contains(&contextualized) {

@@ -229,26 +229,13 @@ fn ancestor_resolution(
     AncestorHit::Miss
 }
 
-/// Strip any `(peer@ver)` suffix from a dep_path tail, returning just
-/// the version. Input `"18.2.0(prop-types@15.8.1)"` → `"18.2.0"`.
+/// Strip any peer-context suffix from a dep_path tail, returning just
+/// the version. Both the normal `(peer@ver)…` form and the capped
+/// `(<short-hash>)` form (pnpm's `createPeerDepGraphHash`) begin at the
+/// first `(`, so cutting there handles either. Input
+/// `"18.2.0(prop-types@15.8.1)"` → `"18.2.0"`.
 fn version_from_tail(tail: &str) -> &str {
     tail.split_once('(').map(|(v, _)| v).unwrap_or(tail)
-}
-
-fn strip_hashed_peer_suffix(s: &str) -> &str {
-    const MARKER_LEN: usize = 11; // `_` + 10 hex chars
-    if s.len() < MARKER_LEN {
-        return s;
-    }
-    let tail = &s[s.len() - MARKER_LEN..];
-    if !tail.starts_with('_') {
-        return s;
-    }
-    if tail[1..].chars().all(|c| c.is_ascii_hexdigit()) {
-        &s[..s.len() - MARKER_LEN]
-    } else {
-        s
-    }
 }
 
 /// Compute the canonical `name@version` key for a child declared in
@@ -258,7 +245,7 @@ fn strip_hashed_peer_suffix(s: &str) -> &str {
 /// currently emitted by [`parse`] above. Peer context suffixes are
 /// stripped in both branches.
 pub(crate) fn child_canonical_key(child_name: &str, value: &str) -> String {
-    let no_peer = strip_hashed_peer_suffix(version_from_tail(value));
+    let no_peer = version_from_tail(value);
     let prefix = format!("{child_name}@");
     if no_peer.starts_with(&prefix) {
         no_peer.to_string()
@@ -271,7 +258,7 @@ pub(crate) fn child_canonical_key(child_name: &str, value: &str) -> String {
 /// of which encoding it was stored in. Used when writing out the
 /// `dependencies` field of a nested package entry.
 pub(crate) fn dep_value_as_version<'a>(child_name: &str, value: &'a str) -> &'a str {
-    let no_peer = strip_hashed_peer_suffix(version_from_tail(value));
+    let no_peer = version_from_tail(value);
     let prefix = format!("{child_name}@");
     if let Some(rest) = no_peer.strip_prefix(&prefix) {
         rest
@@ -288,7 +275,7 @@ pub(crate) fn dep_value_as_version<'a>(child_name: &str, value: &'a str) -> &'a 
 /// then miss the canonical map and silently drop the package from
 /// the written lockfile).
 pub(crate) fn canonical_key_from_dep_path(dep_path: &str) -> String {
-    let trimmed = strip_hashed_peer_suffix(version_from_tail(dep_path));
+    let trimmed = version_from_tail(dep_path);
     let (name, version) = match trimmed.rfind('@') {
         Some(0) | None => return trimmed.to_string(),
         Some(idx) => (&trimmed[..idx], &trimmed[idx + 1..]),

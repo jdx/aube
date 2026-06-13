@@ -62,7 +62,7 @@ use package_ext::{apply_package_extensions, package_selector_matches, pick_overr
 #[cfg(test)]
 use peer_context::{
     apply_dedupe_peers_to_key, contains_canonical_back_ref, dedupe_peer_suffixes,
-    dedupe_peer_variants, hash_peer_suffix,
+    dedupe_peer_variants, effective_peer_suffix, is_hashed_peer_suffix,
 };
 #[cfg(test)]
 use semver_util::{PickResult, pick_version, strip_alias_prefix};
@@ -177,11 +177,12 @@ pub struct Resolver {
     /// explicitly if they want the pnpm list; keeping the list in
     /// one place (`settings.toml`) avoids drift.
     git_shallow_hosts: Vec<String>,
-    /// pnpm's `peersSuffixMaxLength`. When the peer-ID suffix on a
-    /// `dep_path` (the `(name@version)(…)` portion) would exceed this
-    /// many bytes, the post-pass replaces the whole suffix with
-    /// `_<hex>` where `<hex>` is the first 10 chars of SHA-256 of the
-    /// full suffix. Matches pnpm's lockfile format. Default 1000.
+    /// pnpm's `peersSuffixMaxLength`. When the peer-ID suffix body on a
+    /// `dep_path` (the `(name@version)(…)` portion without its outer
+    /// parens) would exceed this many bytes, the post-pass replaces the
+    /// whole suffix with a parenthesized short hash `(<short-hash>)` —
+    /// the first 32 chars of SHA-256 of the body, matching pnpm's
+    /// `createPeerDepGraphHash` lockfile format. Default 1000.
     peers_suffix_max_length: usize,
     /// pnpm's `dedupe-peer-dependents`. When true (pnpm's default),
     /// the peer-context post-pass collapses multiple dep_path variants

@@ -157,9 +157,11 @@ impl Resolver {
         self
     }
 
-    /// Configure pnpm's `peersSuffixMaxLength`. When the peer suffix on a
-    /// `dep_path` would exceed this many bytes, the post-pass replaces it
-    /// with `_<10-char-sha256-hex>`. Default 1000 (pnpm's default).
+    /// Configure pnpm's `peersSuffixMaxLength`. When the peer suffix body
+    /// on a `dep_path` would exceed this many bytes, the post-pass
+    /// replaces the whole suffix with a parenthesized short hash
+    /// `(<short-hash>)` (pnpm's `createPeerDepGraphHash`). Default 1000
+    /// (pnpm's default).
     pub fn with_peers_suffix_max_length(mut self, max_length: usize) -> Self {
         self.peers_suffix_max_length = max_length;
         self
