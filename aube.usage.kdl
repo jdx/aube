@@ -2001,7 +2001,6 @@ cmd update help="Update dependencies" {
     }
     arg "[PACKAGES]…" help="Package(s) to update (all if empty)" required=#false var=#true
 }
-cmd usage hide=#true help="Print a usage.jdx.dev KDL spec for the CLI (internal)"
 cmd version help="Bump the version in package.json (and optionally create a git commit + tag)" {
     flag --allow-same-version help="Allow setting the version to its current value without erroring"
     flag --ignore-scripts help="Skip `preversion` / `version` / `postversion` lifecycle scripts"
