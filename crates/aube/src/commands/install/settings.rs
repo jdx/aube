@@ -410,8 +410,7 @@ pub(crate) fn resolve_dependency_policy(
 ) -> aube_resolver::DependencyPolicy {
     let mut policy = aube_resolver::DependencyPolicy::default();
 
-    let mut package_extensions = manifest.package_extensions();
-    merge_json_object_setting(ctx, "packageExtensions", &mut package_extensions);
+    let package_extensions = effective_package_extensions(manifest, ctx);
     policy.package_extensions = parse_package_extensions(package_extensions);
 
     let mut allowed_deprecated = manifest.allowed_deprecated_versions();
@@ -449,6 +448,87 @@ pub(crate) fn resolve_dependency_policy(
     policy.block_exotic_subdeps = aube_settings::resolved::block_exotic_subdeps(ctx);
 
     policy
+}
+
+/// Assemble the effective `packageExtensions` object — the root
+/// manifest's `pnpm.packageExtensions` merged with every config source
+/// (`.npmrc`, `pnpm-workspace.yaml`, env), later sources winning per
+/// key. This is the object the resolver parses into typed
+/// `PackageExtension`s *and* the one pnpm hashes into
+/// `packageExtensionsChecksum`, so both must read it from here to stay
+/// in agreement.
+pub(crate) fn effective_package_extensions(
+    manifest: &aube_manifest::PackageJson,
+    ctx: &aube_settings::ResolveCtx<'_>,
+) -> BTreeMap<String, serde_json::Value> {
+    let mut package_extensions = manifest.package_extensions();
+    merge_json_object_setting(ctx, "packageExtensions", &mut package_extensions);
+    package_extensions
+}
+
+/// Stamp pnpm's `packageExtensionsChecksum` / `pnpmfileChecksum` onto
+/// `graph` so a written pnpm-lock.yaml matches what pnpm itself records,
+/// keeping config-drift detection in sync (a wrong/absent value makes
+/// pnpm re-resolve, or abort a frozen install). No-op for non-pnpm
+/// lockfiles: aube-lock.yaml shares the writer and must not grow
+/// pnpm-only fields.
+///
+/// `local_pnpmfile` is the project-local pnpmfile that participates in
+/// the checksum — the caller resolves it via `crate::pnpmfile::detect`
+/// so this stays agnostic to `--ignore-pnpmfile` and the global-pnpmfile
+/// exclusion (pnpm hashes only the local file). Both checksums derive
+/// from the same inputs pnpm uses.
+pub(crate) async fn stamp_pnpm_config_checksums(
+    graph: &mut aube_lockfile::LockfileGraph,
+    write_kind: aube_lockfile::LockfileKind,
+    manifest: &aube_manifest::PackageJson,
+    ctx: &aube_settings::ResolveCtx<'_>,
+    local_pnpmfile: Option<&std::path::Path>,
+) {
+    if !matches!(write_kind, aube_lockfile::LockfileKind::Pnpm) {
+        return;
+    }
+    let package_extensions = effective_package_extensions(manifest, ctx);
+    graph.package_extensions_checksum =
+        aube_lockfile::pnpm::package_extensions_checksum(&package_extensions);
+
+    // Always reflect the *current* pnpmfile state: a missing, hook-less,
+    // or unreadable pnpmfile must clear any checksum the graph carried
+    // over (e.g. from a parsed lockfile), otherwise the written lockfile
+    // keeps a stale `pnpmfileChecksum` that pnpm treats as config drift.
+    //
+    // pnpm records the checksum only when the loaded pnpmfile actually
+    // exports a `hooks` object (`requireHooks` gates
+    // `calculatePnpmfileChecksum` on `entries.some(e => e.hooks != null)`).
+    // A pnpmfile that exists but exports no hooks — e.g. an empty
+    // `.pnpmfile.cjs` — gets no checksum from pnpm; stamping one anyway
+    // aborts pnpm's frozen install with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH.
+    // So gate on the export, not on file existence.
+    graph.pnpmfile_checksum = match local_pnpmfile {
+        Some(path) => match crate::pnpmfile::exports_hooks(path).await {
+            Ok(true) => match aube_lockfile::pnpm::pnpmfile_checksum(&[path.to_path_buf()]) {
+                Ok(checksum) => checksum,
+                Err(e) => {
+                    tracing::warn!(
+                        code = aube_codes::warnings::WARN_AUBE_PNPMFILE_CHECKSUM_FAILED,
+                        "failed to read pnpmfile {} for checksum: {e}",
+                        path.display()
+                    );
+                    None
+                }
+            },
+            Ok(false) => None,
+            Err(e) => {
+                tracing::warn!(
+                    code = aube_codes::warnings::WARN_AUBE_PNPMFILE_CHECKSUM_FAILED,
+                    "failed to inspect pnpmfile {} for hooks: {e}",
+                    path.display()
+                );
+                None
+            }
+        },
+        None => None,
+    };
 }
 
 fn merge_json_object_setting(

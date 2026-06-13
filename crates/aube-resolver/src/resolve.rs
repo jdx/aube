@@ -145,6 +145,11 @@ impl Resolver {
             runtimes: BTreeMap::new(),
             extra_fields: BTreeMap::new(),
             workspace_extra_fields: BTreeMap::new(),
+            // pnpm config checksums are an install-flow concern, stamped
+            // onto the graph just before a pnpm-lock.yaml is written.
+            // A fresh resolve leaves them unset.
+            package_extensions_checksum: None,
+            pnpmfile_checksum: None,
         };
 
         // Second pass: hoist every auto-installed peer to its importer's

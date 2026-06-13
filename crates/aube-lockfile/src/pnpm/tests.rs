@@ -1173,6 +1173,113 @@ fn empty_overrides_block_omitted_from_yaml() {
     );
 }
 
+/// `packageExtensionsChecksum:` / `pnpmfileChecksum:` must round-trip
+/// verbatim and land right after `overrides:` and before `importers:`,
+/// each as its own blank-line-separated top-level scalar — exactly
+/// where pnpm writes them. Any other shape produces a gratuitous diff
+/// against pnpm's output (and a wrong/absent value makes pnpm re-resolve
+/// or abort a frozen install).
+#[test]
+fn config_checksums_round_trip_in_pnpm_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let lockfile_path = dir.path().join("pnpm-lock.yaml");
+
+    let mut overrides = BTreeMap::new();
+    overrides.insert("lodash".to_string(), "4.17.21".to_string());
+
+    let graph = LockfileGraph {
+        overrides,
+        package_extensions_checksum: Some(
+            "sha256-9yDK//Ix13a8CrWmJGIeVC0z1tCnQxNHOLTw47oh10s=".to_string(),
+        ),
+        pnpmfile_checksum: Some("sha256-EOT4Rq2KGdwdUwAI9FuL2HmoawSWgN2C+QLiGsRhY20=".to_string()),
+        ..Default::default()
+    };
+
+    let manifest = PackageJson {
+        name: Some("test".to_string()),
+        version: Some("0.0.0".to_string()),
+        ..Default::default()
+    };
+
+    write(&lockfile_path, &graph, &manifest).unwrap();
+    let yaml = std::fs::read_to_string(&lockfile_path).unwrap();
+
+    // Exact lines pnpm emits (unquoted scalars, `sha256-` prefix kept).
+    assert!(
+        yaml.contains(
+            "packageExtensionsChecksum: sha256-9yDK//Ix13a8CrWmJGIeVC0z1tCnQxNHOLTw47oh10s="
+        ),
+        "missing packageExtensionsChecksum line:\n{yaml}"
+    );
+    assert!(
+        yaml.contains("pnpmfileChecksum: sha256-EOT4Rq2KGdwdUwAI9FuL2HmoawSWgN2C+QLiGsRhY20="),
+        "missing pnpmfileChecksum line:\n{yaml}"
+    );
+
+    // Order: overrides < packageExtensionsChecksum < pnpmfileChecksum < importers.
+    let overrides_at = yaml.find("overrides:").expect("overrides:");
+    let pe_at = yaml
+        .find("packageExtensionsChecksum:")
+        .expect("packageExtensionsChecksum:");
+    let pf_at = yaml.find("pnpmfileChecksum:").expect("pnpmfileChecksum:");
+    let importers_at = yaml.find("importers:").expect("importers:");
+    assert!(
+        overrides_at < pe_at && pe_at < pf_at && pf_at < importers_at,
+        "expected order overrides < packageExtensionsChecksum < pnpmfileChecksum < importers, got:\n{yaml}"
+    );
+
+    // Each checksum is its own blank-line-separated top-level section,
+    // matching pnpm's spacing.
+    assert!(
+        yaml.contains(
+            "\n\npackageExtensionsChecksum: sha256-9yDK//Ix13a8CrWmJGIeVC0z1tCnQxNHOLTw47oh10s=\n\n"
+        ),
+        "packageExtensionsChecksum not blank-line separated:\n{yaml}"
+    );
+    assert!(
+        yaml.contains(
+            "\n\npnpmfileChecksum: sha256-EOT4Rq2KGdwdUwAI9FuL2HmoawSWgN2C+QLiGsRhY20=\n\n"
+        ),
+        "pnpmfileChecksum not blank-line separated:\n{yaml}"
+    );
+
+    let reparsed = parse(&lockfile_path).unwrap();
+    assert_eq!(
+        reparsed.package_extensions_checksum.as_deref(),
+        Some("sha256-9yDK//Ix13a8CrWmJGIeVC0z1tCnQxNHOLTw47oh10s=")
+    );
+    assert_eq!(
+        reparsed.pnpmfile_checksum.as_deref(),
+        Some("sha256-EOT4Rq2KGdwdUwAI9FuL2HmoawSWgN2C+QLiGsRhY20=")
+    );
+}
+
+/// A graph with no config checksums must not introduce either key —
+/// byte-identical parity with pnpm on the no-extensions / no-pnpmfile
+/// path.
+#[test]
+fn absent_config_checksums_are_omitted_from_yaml() {
+    let dir = tempfile::tempdir().unwrap();
+    let lockfile_path = dir.path().join("pnpm-lock.yaml");
+    let graph = LockfileGraph::default();
+    let manifest = PackageJson {
+        name: Some("test".to_string()),
+        version: Some("0.0.0".to_string()),
+        ..Default::default()
+    };
+    write(&lockfile_path, &graph, &manifest).unwrap();
+    let yaml = std::fs::read_to_string(&lockfile_path).unwrap();
+    assert!(
+        !yaml.contains("packageExtensionsChecksum:"),
+        "unexpected packageExtensionsChecksum:\n{yaml}"
+    );
+    assert!(
+        !yaml.contains("pnpmfileChecksum:"),
+        "unexpected pnpmfileChecksum:\n{yaml}"
+    );
+}
+
 #[test]
 fn test_write_dev_and_optional_deps() {
     let dir = tempfile::tempdir().unwrap();

@@ -1,3 +1,4 @@
+mod checksum;
 mod dep_path;
 mod format;
 mod raw;
@@ -7,6 +8,7 @@ mod write;
 #[cfg(test)]
 mod tests;
 
+pub use checksum::{package_extensions_checksum, pnpmfile_checksum};
 pub use read::parse;
 pub use write::write;
 

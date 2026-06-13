@@ -104,6 +104,16 @@ pub(super) struct RawPnpmLockfile {
     pub(super) settings: Option<RawSettings>,
     #[serde(default)]
     pub(super) overrides: Option<BTreeMap<String, String>>,
+    /// `sha256-` prefixed `object-hash` of the effective
+    /// `packageExtensions`. Round-tripped verbatim so a parse/write
+    /// cycle preserves the value pnpm wrote and drift detection can
+    /// compare it against a freshly computed hash.
+    #[serde(default)]
+    pub(super) package_extensions_checksum: Option<String>,
+    /// `sha256-` prefixed hash of the local pnpmfile contents.
+    /// Round-tripped verbatim alongside `package_extensions_checksum`.
+    #[serde(default)]
+    pub(super) pnpmfile_checksum: Option<String>,
     #[serde(default)]
     pub(super) catalogs: Option<BTreeMap<String, BTreeMap<String, RawCatalogEntry>>>,
     /// pnpm v9+ top-level `patchedDependencies:` block. Map of

@@ -417,6 +417,12 @@
       "exit_code": null
     },
     {
+      "name": "WARN_AUBE_PNPMFILE_CHECKSUM_FAILED",
+      "category": "pnpmfile / hooks",
+      "description": "Reading the local pnpmfile for checksum computation failed; the lockfile's `pnpmfileChecksum` field is omitted so a later install will re-resolve instead of trusting a stale value.",
+      "exit_code": null
+    },
+    {
       "name": "WARN_AUBE_HOOK_IMPORTER_MUTATED",
       "category": "pnpmfile / hooks",
       "description": "A pnpmfile `afterAllResolved` hook mutated `importers[...]`; aube ignored the edit.",

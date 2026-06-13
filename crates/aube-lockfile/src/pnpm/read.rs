@@ -796,6 +796,8 @@ pub fn parse(path: &Path) -> Result<LockfileGraph, Error> {
         packages,
         settings,
         overrides: raw.overrides.unwrap_or_default(),
+        package_extensions_checksum: raw.package_extensions_checksum,
+        pnpmfile_checksum: raw.pnpmfile_checksum,
         ignored_optional_dependencies: raw
             .ignored_optional_dependencies
             .unwrap_or_default()

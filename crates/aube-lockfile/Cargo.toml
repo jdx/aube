@@ -15,6 +15,7 @@ aube-codes = { workspace = true }
 aube-manifest = { workspace = true }
 aube-settings = { workspace = true }
 aube-util = { workspace = true }
+base64 = { workspace = true }
 glob = { workspace = true }
 miette = { workspace = true }
 node-semver = { workspace = true }

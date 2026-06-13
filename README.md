@@ -72,8 +72,8 @@ mise use aube
 aube is also published on npm:
 
 ```sh
-npm install -g --ignore-scripts=false @jdx/aube
-npx --ignore-scripts=false @jdx/aube --version
+npm install -g --ignore-scripts=false @endevco/aube
+npx --ignore-scripts=false @endevco/aube --version
 ```
 
 The npm package uses an install script to fetch native binaries for

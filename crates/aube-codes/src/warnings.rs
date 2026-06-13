@@ -10,6 +10,7 @@ use crate::CodeMeta;
 // ── pnpmfile / hooks ────────────────────────────────────────────────
 pub const WARN_AUBE_PNPMFILE_NOT_FOUND: &str = "WARN_AUBE_PNPMFILE_NOT_FOUND";
 pub const WARN_AUBE_PNPMFILE_STDERR_FORWARDER: &str = "WARN_AUBE_PNPMFILE_STDERR_FORWARDER";
+pub const WARN_AUBE_PNPMFILE_CHECKSUM_FAILED: &str = "WARN_AUBE_PNPMFILE_CHECKSUM_FAILED";
 pub const WARN_AUBE_HOOK_IMPORTER_MUTATED: &str = "WARN_AUBE_HOOK_IMPORTER_MUTATED";
 pub const WARN_AUBE_HOOK_IMPORTER_ADDED: &str = "WARN_AUBE_HOOK_IMPORTER_ADDED";
 pub const WARN_AUBE_HOOK_IDENTITY_REWRITTEN: &str = "WARN_AUBE_HOOK_IDENTITY_REWRITTEN";
@@ -141,6 +142,12 @@ pub const ALL: &[CodeMeta] = &[
         name: WARN_AUBE_PNPMFILE_STDERR_FORWARDER,
         category: category::PNPMFILE_HOOKS,
         description: "The background task forwarding pnpmfile stderr panicked.",
+        exit_code: None,
+    },
+    CodeMeta {
+        name: WARN_AUBE_PNPMFILE_CHECKSUM_FAILED,
+        category: category::PNPMFILE_HOOKS,
+        description: "Reading the local pnpmfile for checksum computation failed; the lockfile's `pnpmfileChecksum` field is omitted so a later install will re-resolve instead of trusting a stale value.",
         exit_code: None,
     },
     CodeMeta {
