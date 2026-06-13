@@ -200,23 +200,42 @@ pub(super) fn run_link_phase(input: LinkPhaseInput<'_>) -> miette::Result<LinkPh
         // imported tree and fold it into the hash so those two land at
         // distinct GVS paths instead of the first writer's tree leaking
         // into the second project.
-        let content_hashes: aube_util::collections::FxMap<String, String> = graph_for_link
-            .packages
-            .iter()
-            .filter(|(_, pkg)| {
-                pkg.local_source
-                    .as_ref()
-                    .is_some_and(|s| s.is_globally_shareable())
-            })
-            .filter_map(|(dep_path, _)| {
-                package_indices.get(dep_path).map(|index| {
-                    (
-                        dep_path.clone(),
-                        aube_store::index_content_fingerprint(index),
-                    )
-                })
-            })
-            .collect();
+        let mut content_hashes: aube_util::collections::FxMap<String, String> =
+            aube_util::collections::FxMap::default();
+        for (dep_path, pkg) in &graph_for_link.packages {
+            let is_shareable_source = pkg
+                .local_source
+                .as_ref()
+                .is_some_and(|s| s.is_globally_shareable());
+            if !is_shareable_source {
+                continue;
+            }
+            // The fingerprint *defines* this dep's GVS path, and the
+            // linker keys its dependents' sibling symlinks off the same
+            // hash. Silently dropping a dep whose index is absent would
+            // compute the parent's path with a fingerprint-less hash
+            // while the dep itself was materialized at the
+            // fingerprinted path — a dangling sibling and a runtime
+            // `Cannot find module`. The fetch driver guarantees every
+            // in-graph source dep is imported (and thus indexed), so a
+            // miss is a contract violation, not a recoverable cache
+            // gap: there is no `store.load_index` fallback because
+            // git/tarball indices aren't persisted by coordinate (a
+            // prepared tree and its raw `--ignore-scripts` checkout
+            // would collide). Fail loudly to keep the invariant honest.
+            let index = package_indices.get(dep_path).ok_or_else(|| {
+                miette!(
+                    code = aube_codes::errors::ERR_AUBE_MISSING_PACKAGE_INDEX,
+                    "internal: globally-shared source dependency {dep_path} is in the link \
+                     graph but missing from package_indices; cannot fingerprint its content \
+                     for the global virtual store"
+                )
+            })?;
+            content_hashes.insert(
+                dep_path.clone(),
+                aube_store::index_content_fingerprint(index),
+            );
+        }
         let content_hash_fn =
             |dep_path: &str| -> Option<String> { content_hashes.get(dep_path).cloned() };
 

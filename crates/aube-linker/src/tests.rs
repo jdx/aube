@@ -530,6 +530,77 @@ fn test_second_install_reuses_global_store() {
     );
 }
 
+#[test]
+fn gvs_shareable_source_dep_without_index_errors_loudly() {
+    // A git / remote-tarball dep is keyed in the GVS under a
+    // content-addressed path whose hash folds in the dep's content
+    // fingerprint. That fingerprint comes from its package index, so
+    // under the global virtual store the dep MUST have an index — a
+    // missing one would otherwise leave the dep unmaterialized and
+    // dangle every dependent's sibling symlink. The loop used to
+    // silently `continue`; assert it now fails loudly with a
+    // `MissingPackageIndex` diagnostic instead (the registry pass
+    // already does, but git/tarball deps have no `load_index` fallback
+    // because their indices aren't persisted by coordinate).
+    use aube_lockfile::{GitSource, LocalSource};
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::at(dir.path().join("store/files"));
+
+    let git = LocalSource::Git(GitSource {
+        url: "https://github.com/request/request.git".to_string(),
+        committish: None,
+        resolved: "0123456789abcdef0123456789abcdef01234567".to_string(),
+        integrity: None,
+        subpath: None,
+    });
+    let dep_path = git.dep_path("request");
+
+    let mut packages = BTreeMap::new();
+    packages.insert(
+        dep_path.clone(),
+        LockedPackage {
+            name: "request".to_string(),
+            version: "2.88.0".to_string(),
+            integrity: None,
+            dependencies: BTreeMap::new(),
+            dep_path: dep_path.clone(),
+            local_source: Some(git),
+            ..Default::default()
+        },
+    );
+    let mut importers = BTreeMap::new();
+    importers.insert(
+        ".".to_string(),
+        vec![DirectDep {
+            name: "request".to_string(),
+            dep_path: dep_path.clone(),
+            dep_type: DepType::Production,
+            specifier: None,
+        }],
+    );
+    let graph = LockfileGraph {
+        importers,
+        packages,
+        ..Default::default()
+    };
+
+    // Deliberately omit `dep_path` from the indices map — the contract
+    // violation the fetch driver normally prevents.
+    let indices: BTreeMap<String, aube_store::PackageIndex> = BTreeMap::new();
+
+    let project_dir = dir.path().join("project");
+    std::fs::create_dir_all(&project_dir).unwrap();
+    let linker = Linker::new_with_gvs(&store, LinkStrategy::Copy, true);
+    let err = linker
+        .link_all(&project_dir, &graph, &indices)
+        .expect_err("a shareable source dep with no index must error, not dangle");
+    assert!(
+        matches!(err, Error::MissingPackageIndex(ref dp) if dp == &dep_path),
+        "expected MissingPackageIndex({dep_path}), got: {err:?}"
+    );
+}
+
 /// Regression: a version bump keeps the same top-level name
 /// (`foo`) but must repoint `node_modules/foo` at the new
 /// `.aube/foo@<new>` entry. The old `.aube/foo@<old>/` is left

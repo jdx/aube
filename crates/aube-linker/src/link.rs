@@ -148,10 +148,29 @@ impl Linker {
             if matches!(local, LocalSource::Link(_)) {
                 continue;
             }
-            let Some(index) = package_indices.get(dep_path) else {
-                continue;
-            };
             if self.use_global_virtual_store && local.is_globally_shareable() {
+                // A git / remote-tarball dep shared globally must be
+                // materialized into its content-addressed GVS path so a
+                // registry dependent's sibling symlink resolves. The
+                // package index *defines* that path — the content
+                // fingerprint is folded into the graph hash — so a
+                // missing index is not a skippable cache hit the way a
+                // per-project `file:` dep can be; silently continuing
+                // would leave the GVS entry absent and dangle every
+                // dependent (`require()` throwing `Cannot find module`).
+                // Fail loudly, exactly like the registry pass below.
+                //
+                // There is deliberately no `store.load_index` fallback
+                // here (unlike the registry pass): git/tarball indices
+                // are never persisted by `(name, version, integrity)`,
+                // because a prepared tree and its `--ignore-scripts` raw
+                // checkout share that coordinate and the content
+                // fingerprint is precisely what keeps them on separate
+                // GVS paths. The fetch driver guarantees the index is
+                // present by always re-importing source deps.
+                let index = package_indices
+                    .get(dep_path)
+                    .ok_or_else(|| Error::MissingPackageIndex(dep_path.to_string()))?;
                 self.ensure_shared_local_in_global_store(
                     &aube_dir,
                     dep_path,
@@ -162,6 +181,9 @@ impl Linker {
                 )?;
                 continue;
             }
+            let Some(index) = package_indices.get(dep_path) else {
+                continue;
+            };
             let aube_entry = aube_dir.join(dep_path);
             if !aube_entry.exists() {
                 self.materialize_into(
@@ -685,10 +707,16 @@ impl Linker {
             if matches!(local, LocalSource::Link(_)) {
                 continue;
             }
-            let Some(index) = package_indices.get(dep_path) else {
-                continue;
-            };
             if self.use_global_virtual_store && local.is_globally_shareable() {
+                // See the matching block in `link_isolated`: a globally
+                // shared git/tarball dep's index defines its
+                // content-addressed GVS path, so a missing index must
+                // fail loudly rather than dangle every dependent. No
+                // `load_index` fallback — those indices aren't persisted
+                // by coordinate (prepared vs raw checkout would collide).
+                let index = package_indices
+                    .get(dep_path)
+                    .ok_or_else(|| Error::MissingPackageIndex(dep_path.to_string()))?;
                 self.ensure_shared_local_in_global_store(
                     &aube_dir,
                     dep_path,
@@ -699,6 +727,9 @@ impl Linker {
                 )?;
                 continue;
             }
+            let Some(index) = package_indices.get(dep_path) else {
+                continue;
+            };
             let aube_entry = aube_dir.join(self.aube_dir_entry_name(dep_path));
             if aube_entry.exists() {
                 stats.packages_cached += 1;

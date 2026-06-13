@@ -317,6 +317,16 @@ impl LocalSource {
 pub fn shared_local_dep_path(dep_name: &str, dep_value: &str) -> Option<String> {
     // pnpm appends a `(peer@ver)` suffix to some spec values; the parser
     // strips it before classifying the source, so strip it here too.
+    //
+    // This MUST stay byte-for-byte identical to `pnpm::read::push_direct`'s
+    // `classify_version` (`info.version.split('(').next()`), which is what
+    // produced the `dep_path` keys in `graph.packages` we're matching
+    // against. A "smarter" strip (e.g. only a trailing `(peer@…)` via
+    // rfind) would *desync* the two: any value with a non-peer `(` would
+    // hash differently here than the key the parser inserted, silently
+    // re-skipping that child in the linker and graph hasher. If the
+    // first-`(` truncation is ever wrong for a real spec, fix it in
+    // `push_direct` and here together — never in isolation.
     let classify = dep_value.split('(').next().unwrap_or(dep_value);
     match LocalSource::parse(classify, Path::new("")) {
         Some(LocalSource::Git(mut git)) => {
