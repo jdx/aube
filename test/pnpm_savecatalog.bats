@@ -126,11 +126,12 @@ YAML
 
 	run aube install
 	assert_success
-	# Each non-root project gets its own lockfile; the workspace root
-	# does not.
+	# Each project gets its own lockfile, the workspace root included
+	# (pnpm parity: the root is itself a project, so under
+	# sharedWorkspaceLockfile=false it writes its own root lockfile).
 	assert_file_exists project-0/aube-lock.yaml
 	assert_file_exists project-1/aube-lock.yaml
-	assert [ ! -e aube-lock.yaml ]
+	assert_file_exists aube-lock.yaml
 
 	run aube --filter=project-1 add --save-catalog is-even@^1.0.0
 	assert_success

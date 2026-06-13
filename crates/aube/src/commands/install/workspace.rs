@@ -258,11 +258,13 @@ pub(super) fn order_lifecycle_manifests(
 /// (remapped to `.`) plus the transitive closure reachable from them.
 ///
 /// pnpm under `sharedWorkspaceLockfile=false` writes a separate
-/// lockfile for every project — the root among them when it carries
-/// its own dependencies — so the root's lockfile (importer `.`) is
-/// written here too, at the workspace root. A dependency-free root
-/// with no graph importer entry is skipped via `subset_to_importer`
-/// below.
+/// lockfile for every project, the workspace root included when the
+/// root is itself a project — i.e. it ships a `package.json`. So the
+/// root's lockfile (importer `.`) is written here too, at the workspace
+/// root, even when the root declares no dependencies (its lockfile then
+/// just records an empty `.` importer). A config-only root that carries
+/// only a `pnpm-workspace.yaml` and no `package.json` is not a project,
+/// so its synthetic `.` importer is skipped.
 ///
 /// Each project's existing lockfile format is preserved: a package that
 /// already ships a `pnpm-lock.yaml` (or any other supported lockfile)
@@ -287,6 +289,19 @@ pub(super) fn write_per_project_lockfiles(
 ) -> miette::Result<()> {
     use miette::IntoDiagnostic;
     for (importer_path, pkg_manifest) in workspace_manifests {
+        // The workspace root (`.`) gets its own lockfile only when it is
+        // itself a project — i.e. it ships a package.json. pnpm under
+        // sharedWorkspaceLockfile=false writes the root project's lockfile
+        // (even when it declares no dependencies), but writes nothing for a
+        // config-only root that carries just a pnpm-workspace.yaml and no
+        // package.json. Mirror that: skip the synthetic `.` importer when
+        // the root isn't a project.
+        if importer_path == "." && !workspace_root.join("package.json").exists() {
+            tracing::debug!(
+                "sharedWorkspaceLockfile=false: skipping root importer (workspace root has no package.json)"
+            );
+            continue;
+        }
         let Some(subset) = graph.subset_to_importer(importer_path, |_| true) else {
             tracing::debug!(
                 "sharedWorkspaceLockfile=false: skipping {importer_path} (no graph importer entry)"
@@ -294,9 +309,7 @@ pub(super) fn write_per_project_lockfiles(
             continue;
         };
         // The root importer (`.`) writes its lockfile at the workspace
-        // root itself; members nest under their relative path. pnpm
-        // writes the root project's own lockfile under
-        // sharedWorkspaceLockfile=false, so `.` must not be skipped.
+        // root itself; members nest under their relative path.
         let pkg_dir = if importer_path == "." {
             workspace_root.to_path_buf()
         } else {
@@ -474,19 +487,30 @@ mod per_project_lockfile_tests {
     }
 
     /// Under `sharedWorkspaceLockfile=false`, pnpm writes the root
-    /// project's OWN lockfile (importer `.`) at the workspace root,
-    /// alongside each member's. Regression for the root `pnpm-lock.yaml`
-    /// disappearing once aube switched to per-project lockfiles: the
-    /// root must keep getting its own lockfile, with its format
-    /// preserved (no surprise `aube-lock.yaml` beside it).
+    /// project's OWN lockfile (importer `.`) at the workspace root when the
+    /// root is itself a project (it ships a package.json), alongside each
+    /// member's. Regression for the root lockfile disappearing once aube
+    /// switched to per-project lockfiles: a root project must keep getting
+    /// its own lockfile, with its format preserved (no surprise
+    /// `aube-lock.yaml` beside an existing `pnpm-lock.yaml`).
     #[test]
-    fn writes_root_importer_lockfile_alongside_members() {
+    fn writes_root_importer_lockfile_when_root_is_a_project() {
         let root = tempfile::tempdir().unwrap();
         let lib_dir = root.path().join("packages/lib");
         std::fs::create_dir_all(&lib_dir).unwrap();
 
-        // Root already ships a pnpm-lock.yaml; its format must be kept.
-        std::fs::write(root.path().join("pnpm-lock.yaml"), "lockfileVersion: '9.0'\n").unwrap();
+        // Root is a project: it ships a package.json and already uses pnpm,
+        // so its lockfile format must be preserved.
+        std::fs::write(
+            root.path().join("package.json"),
+            r#"{ "name": "root", "version": "1.0.0" }"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("pnpm-lock.yaml"),
+            "lockfileVersion: '9.0'\n",
+        )
+        .unwrap();
 
         let graph = graph_with_importers(&[".", "packages/lib"]);
         let manifests = vec![
@@ -514,6 +538,36 @@ mod per_project_lockfile_tests {
         );
 
         // Member still gets its own lockfile (fallback kind, no prior lockfile).
+        assert!(lib_dir.join("aube-lock.yaml").exists());
+    }
+
+    /// A config-only workspace root (a `pnpm-workspace.yaml` but no
+    /// `package.json`) is not a project, so pnpm writes no root lockfile —
+    /// only the members get one. aube must match: skip the synthetic `.`
+    /// importer when the root has no package.json, even though the graph
+    /// and manifests still carry a `.` entry for it.
+    #[test]
+    fn skips_root_importer_when_root_is_not_a_project() {
+        let root = tempfile::tempdir().unwrap();
+        let lib_dir = root.path().join("packages/lib");
+        std::fs::create_dir_all(&lib_dir).unwrap();
+        // Deliberately no package.json at the workspace root.
+
+        let graph = graph_with_importers(&[".", "packages/lib"]);
+        let manifests = vec![
+            (".".to_string(), manifest("root")),
+            ("packages/lib".to_string(), manifest("@test/lib")),
+        ];
+
+        write_per_project_lockfiles(root.path(), &graph, &manifests, LockfileKind::Aube).unwrap();
+
+        // No root lockfile of any kind — the root isn't a project.
+        assert!(
+            !root.path().join("aube-lock.yaml").exists(),
+            "config-only root (no package.json) must not get a lockfile"
+        );
+        assert!(!root.path().join("pnpm-lock.yaml").exists());
+        // Members still get theirs.
         assert!(lib_dir.join("aube-lock.yaml").exists());
     }
 }

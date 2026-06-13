@@ -318,7 +318,9 @@ EOF
 	run grep '"@pnpm.e2e/foo": "\^100.1.0"' project/package.json
 	assert_success
 
-	# No shared root lockfile.
+	# No root lockfile: this workspace root is config-only (a
+	# pnpm-workspace.yaml with no package.json), so it isn't a project
+	# and pnpm writes no lockfile for it — only the member does.
 	assert_file_not_exists aube-lock.yaml
 }
 

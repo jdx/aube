@@ -636,8 +636,9 @@ _setup_shared_direct_dep_workspace() {
 
 @test "aube install: sharedWorkspaceLockfile=false writes per-project lockfiles" {
 	# Each workspace member gets its own lockfile next to its
-	# package.json; no root lockfile is written. Resolver still runs
-	# once over the whole workspace so workspace deps work.
+	# package.json, and the workspace root — itself a project — gets its
+	# own root lockfile too (pnpm parity). Resolver still runs once over
+	# the whole workspace so workspace deps work.
 	cat >package.json <<-'JSON'
 		{ "name": "swl-root", "version": "0.0.0", "private": true }
 	JSON
@@ -661,8 +662,16 @@ _setup_shared_direct_dep_workspace() {
 	# Each importer has its own lockfile…
 	assert_file_exists packages/lib/aube-lock.yaml
 	assert_file_exists packages/app/aube-lock.yaml
-	# …and no root lockfile under this layout.
-	assert [ ! -e aube-lock.yaml ]
+	# …and the root project gets its own lockfile too. pnpm parity: the
+	# workspace root is itself a project (it ships a package.json), so
+	# under sharedWorkspaceLockfile=false it writes a root lockfile
+	# carrying only its own importer. This root declares no deps, so that
+	# lockfile holds no member packages.
+	assert_file_exists aube-lock.yaml
+	run grep -qF "is-odd" aube-lock.yaml
+	assert_failure
+	run grep -qF "is-even" aube-lock.yaml
+	assert_failure
 
 	# Each per-project lockfile carries only its own importer (remapped
 	# to `.`). Pull the `importers:` block out and grep within it so the
@@ -723,8 +732,10 @@ _setup_shared_direct_dep_workspace() {
 	assert_file_exists packages/app/aube-lock.yaml
 	assert [ ! -e packages/app/pnpm-lock.yaml ]
 
-	# No root lockfile under this layout.
-	assert [ ! -e aube-lock.yaml ]
+	# The root is a project (it ships a package.json) but had no prior
+	# lockfile, so it gets the workspace-default aube-lock.yaml carrying
+	# only its own (empty) importer — no pnpm-lock.yaml beside it.
+	assert_file_exists aube-lock.yaml
 	assert [ ! -e pnpm-lock.yaml ]
 
 	# node_modules still get linked correctly per package.
