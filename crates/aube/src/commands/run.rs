@@ -929,8 +929,6 @@ async fn build_script_command(
         )
         .env("AUBE_NODE_GYP_PROJECT_DIR", node_gyp_project_dir)
         .env("npm_lifecycle_event", script)
-        .env("npm_lifecycle_script", &lifecycle_script)
-        .env("npm_package_json", script_dir.join("package.json"))
         // `npm_command` is "run-script" for every script-running command
         // (run/test/start/stop/restart). `spawn_shell` already stamped it
         // from the process-global ScriptSettings, but a preceding
@@ -939,9 +937,10 @@ async fn build_script_command(
         // authoritative spawn site rather than depend on call ordering.
         .env("npm_command", "run-script")
         .stderr(aube_scripts::child_stderr());
-    for (key, value) in manifest.npm_package_env() {
-        command.env(key, value);
-    }
+    // name/version/engines/config/bin + npm_package_json +
+    // npm_lifecycle_script, scrubbing any inherited npm_package_* first
+    // so a nested `aube run` matches pnpm's per-package allowlist.
+    aube_scripts::apply_npm_manifest_env(&mut command, manifest, &script_dir, &lifecycle_script);
     // INIT_CWD is the dir the user invoked aube from, NOT the
     // project root. node-gyp and prebuild-install key their
     // caches by INIT_CWD to locate the invoking project. Pulling

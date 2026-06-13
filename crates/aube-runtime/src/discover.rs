@@ -203,10 +203,21 @@ fn probe_path_node_uncached() -> Option<(node_semver::Version, PathBuf)> {
 /// [`probe_path_node`], which runs `node --version`). Cheap enough to
 /// call on the hot install/run path to populate `npm_node_execpath` /
 /// `NODE` for lifecycle scripts when no runtime switch is active.
-/// Returns the absolute path of the first `node` (`node.exe` on
-/// Windows) found in `PATH`.
+/// Returns the first `node` (`node.exe` on Windows) on `PATH` as an
+/// absolute, executable path, or `None` if none qualifies.
 pub fn node_on_path() -> Option<PathBuf> {
-    find_on_path(node_exe_name())
+    let node = find_on_path(node_exe_name())?;
+    // `npm_node_execpath` / `NODE` are contracted to be an absolute,
+    // runnable node. `find_on_path` only guarantees an existing file,
+    // and a relative `PATH` segment yields a relative match, so make
+    // the path absolute and require the exec bit — better to leave the
+    // vars unset than hand tools a path they can't run.
+    let node = if node.is_absolute() {
+        node
+    } else {
+        std::env::current_dir().ok()?.join(node)
+    };
+    is_executable_file(&node).then_some(node)
 }
 
 /// Minimal PATH walk (std-only). Returns the first existing,

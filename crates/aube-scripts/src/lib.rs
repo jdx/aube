@@ -511,7 +511,9 @@ fn apply_script_settings_env(cmd: &mut tokio::process::Command, settings: &Scrip
     // Tools (and pnpm's own `$npm_execpath run …` postinstalls) read it
     // to re-invoke the *same* PM. `current_exe()` is the aube binary;
     // ignore the rare resolution failure rather than abort the script.
-    if let Ok(exe) = std::env::current_exe() {
+    // Reused below for `AUBE_NODE_GYP_EXE` (same binary), so resolve once.
+    let aube_exe = std::env::current_exe().ok();
+    if let Some(exe) = aube_exe.as_deref() {
         cmd.env("npm_execpath", exe);
     }
     // `npm_node_execpath` / `NODE`: the node binary scripts should use
@@ -526,16 +528,17 @@ fn apply_script_settings_env(cmd: &mut tokio::process::Command, settings: &Scrip
     }
     // `npm_config_node_gyp`: path to a runnable node-gyp. npm/pnpm bundle
     // node-gyp and point this at its `bin/node-gyp.js`; aube hands out a
-    // lazy shim that resolves the bootstrapped node-gyp on first use.
-    // The shim self-resolves via `AUBE_NODE_GYP_EXE` (the aube binary),
-    // so stamp that too unless a caller (e.g. `aube run`) already set a
-    // more specific value. `AUBE_NODE_GYP_PROJECT_DIR` is optional — the
-    // shim falls back to the script's cwd.
+    // lazy shim that resolves the bootstrapped node-gyp on first use. The
+    // shim trampolines back into aube via `AUBE_NODE_GYP_EXE`, so always
+    // stamp the running aube — it must be a real aube that implements
+    // `__node-gyp-bootstrap`, never an inherited/user-set value (which
+    // could be stale or wrong). `aube run` stamps the same value at its
+    // own spawn site; keeping both unconditional holds the two paths in
+    // lockstep. `AUBE_NODE_GYP_PROJECT_DIR` is optional — the shim falls
+    // back to the script's cwd.
     if let Some(node_gyp_js) = settings.node_gyp_js.as_deref() {
         cmd.env("npm_config_node_gyp", node_gyp_js);
-        if std::env::var_os("AUBE_NODE_GYP_EXE").is_none()
-            && let Ok(exe) = std::env::current_exe()
-        {
+        if let Some(exe) = aube_exe.as_deref() {
             cmd.env("AUBE_NODE_GYP_EXE", exe);
         }
     }
@@ -556,18 +559,33 @@ fn apply_script_settings_env(cmd: &mut tokio::process::Command, settings: &Scrip
 /// Apply the manifest-derived `npm_package_*` env (name, version,
 /// absolute `npm_package_json` path, and the deep-flattened
 /// `engines`/`config`/`bin`) plus `npm_lifecycle_script` (the raw
-/// script body) to a lifecycle command. Called last in `run_script`
-/// so the values land *after* any jail `env_clear` and override a
-/// parent aube invocation's leaked `npm_package_*` on the unjailed
-/// path. `script_dir` is the directory the script runs in, whose
-/// `package.json` is the manifest being executed.
-fn apply_npm_manifest_env(
+/// script body) to a lifecycle or `aube run` command. Call last so the
+/// values land *after* any jail `env_clear`. `script_dir` is the
+/// directory the script runs in, whose `package.json` is the manifest
+/// being executed; `lifecycle_script` is the raw script body exported
+/// as `npm_lifecycle_script`.
+///
+/// pnpm rebuilds the `npm_package_*` namespace per package: it drops
+/// every inherited `npm_package_*` key and stamps only the running
+/// manifest's allowlist. We mirror that — scrub first, then re-stamp —
+/// so a script never sees a parent/sibling package's fields (verified
+/// against pnpm 11.5). Without the scrub, non-allowlisted inherited
+/// keys (e.g. an outer `npm run`'s `npm_package_description`) would
+/// leak through on the unjailed path and break allowlist parity. On
+/// the jailed path the prior `env_clear` already dropped them, so the
+/// scrub is a harmless no-op there.
+pub fn apply_npm_manifest_env(
     cmd: &mut tokio::process::Command,
     manifest: &PackageJson,
     script_dir: &Path,
-    script_cmd: &str,
+    lifecycle_script: &str,
 ) {
-    cmd.env("npm_lifecycle_script", script_cmd);
+    for (key, _) in std::env::vars_os() {
+        if key.to_str().is_some_and(|k| k.starts_with("npm_package_")) {
+            cmd.env_remove(&key);
+        }
+    }
+    cmd.env("npm_lifecycle_script", lifecycle_script);
     cmd.env("npm_package_json", script_dir.join("package.json"));
     for (key, value) in manifest.npm_package_env() {
         cmd.env(key, value);
