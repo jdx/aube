@@ -819,7 +819,7 @@ fn configure_script_settings_for_project(cwd: &Path) -> miette::Result<bool> {
     let env_snapshot = aube_settings::values::capture_env();
     let ctx = files.ctx(&raw_workspace, &env_snapshot, &[]);
     let enable_pre_post_scripts = aube_settings::resolved::enable_pre_post_scripts(&ctx);
-    super::configure_script_settings(&ctx);
+    super::configure_script_settings(&ctx, Some("run-script"));
     Ok(enable_pre_post_scripts)
 }
 
@@ -863,6 +863,11 @@ async fn build_script_command(
     args: &[String],
     node_args: &[String],
 ) -> miette::Result<tokio::process::Command> {
+    // Raw script body as written in package.json, exported as
+    // `npm_lifecycle_script` (pnpm parity). Captured before node-arg
+    // injection and arg quoting so it mirrors the manifest, not the
+    // spliced shell command line.
+    let lifecycle_script = cmd.to_string();
     let cmd = inject_node_args(cmd, node_args);
     let shell_cmd = if args.is_empty() {
         cmd
@@ -906,14 +911,15 @@ async fn build_script_command(
     let node_gyp_project_dir =
         crate::dirs::find_workspace_root(&script_dir).unwrap_or_else(|| script_dir.clone());
 
-    // npm-compat env vars. Lifecycle path sets these in
-    // aube-scripts::run_root_hook, `aube run` was bare env before.
-    // Build scripts that stamp `$npm_package_version` or branch on
-    // `$npm_lifecycle_event` got empty strings under `aube run`
-    // while working fine under `aube install` postinstall. npm
-    // and pnpm set these on every script exec.
+    // npm-compat env vars. `spawn_shell` already stamped the
+    // invocation-level vars (`npm_execpath`, `npm_node_execpath` /
+    // `NODE`, `npm_command`, `npm_config_user_agent`) from the
+    // process-global ScriptSettings configured for this run. Here we
+    // add the per-script + manifest vars so build scripts that branch
+    // on `$npm_lifecycle_event`, stamp `$npm_package_version`, or read
+    // `$npm_package_engines_node` behave the same under `aube run` as
+    // under `aube install` postinstall.
     let mut command = aube_scripts::spawn_shell(&shell_cmd);
-    crate::runtime::apply_child_env(&mut command);
     command
         .env("PATH", &new_path)
         .current_dir(cwd)
@@ -923,12 +929,18 @@ async fn build_script_command(
         )
         .env("AUBE_NODE_GYP_PROJECT_DIR", node_gyp_project_dir)
         .env("npm_lifecycle_event", script)
+        .env("npm_lifecycle_script", &lifecycle_script)
+        .env("npm_package_json", script_dir.join("package.json"))
+        // `npm_command` is "run-script" for every script-running command
+        // (run/test/start/stop/restart). `spawn_shell` already stamped it
+        // from the process-global ScriptSettings, but a preceding
+        // `ensure_installed` reconfigures those settings to "install"
+        // (its own `npm_command`), so re-assert the run value here at the
+        // authoritative spawn site rather than depend on call ordering.
+        .env("npm_command", "run-script")
         .stderr(aube_scripts::child_stderr());
-    if let Some(ref name) = manifest.name {
-        command.env("npm_package_name", name);
-    }
-    if let Some(ref version) = manifest.version {
-        command.env("npm_package_version", version);
+    for (key, value) in manifest.npm_package_env() {
+        command.env(key, value);
     }
     // INIT_CWD is the dir the user invoked aube from, NOT the
     // project root. node-gyp and prebuild-install key their

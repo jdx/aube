@@ -407,6 +407,42 @@ JSON
 	assert_file_exists shell.log
 }
 
+@test "aube run exports the full npm_* env set (pnpm parity)" {
+	# A pnpm/aube bridge keys off these npm_* vars to detect the running
+	# PM (npm_execpath) and read package metadata. aube used to omit
+	# npm_execpath, npm_node_execpath, npm_package_json, npm_command,
+	# npm_config_node_gyp, npm_package_engines_*, and npm_lifecycle_script
+	# on the `run` path; assert they're all present and well-formed now.
+	cat >package.json <<'JSON'
+{
+  "name": "@scope/run-env-probe",
+  "version": "2.0.1",
+  "engines": { "node": ">=18.0.0" },
+  "scripts": {
+    "probe": "node -e 'for (const k of [\"npm_execpath\",\"npm_node_execpath\",\"npm_package_json\",\"npm_command\",\"npm_config_node_gyp\",\"npm_package_engines_node\",\"npm_package_name\",\"npm_package_version\",\"npm_lifecycle_script\"]) console.log(k + \"=\" + (process.env[k] || \"\"))'"
+  }
+}
+JSON
+	run aube run probe
+	assert_success
+	# npm_command is "run-script" for every script-running command.
+	assert_output --partial "npm_command=run-script"
+	# npm_execpath points back at the aube binary that drove the script.
+	assert_output --regexp "npm_execpath=[^[:space:]]*aube"
+	# npm_node_execpath / NODE resolve to a node binary (non-empty).
+	assert_output --regexp "npm_node_execpath=[^[:space:]]+"
+	# Absolute path to the package.json being run.
+	assert_output --regexp "npm_package_json=[^[:space:]]*package\.json"
+	# Lazy node-gyp stand-in for npm_config_node_gyp parity.
+	assert_output --regexp "npm_config_node_gyp=[^[:space:]]*node-gyp\.js"
+	# Deep-flattened manifest fields.
+	assert_output --partial "npm_package_engines_node=>=18.0.0"
+	assert_output --partial "npm_package_name=@scope/run-env-probe"
+	assert_output --partial "npm_package_version=2.0.1"
+	# Raw script body (pnpm exports this for tools that re-run it).
+	assert_output --regexp "npm_lifecycle_script=.*node -e"
+}
+
 # discussion #228: a package's own `bin` should resolve from its own
 # scripts without `npx`, matching yarn/pnpm behavior.
 @test "aube run resolves package's own bin (string form)" {

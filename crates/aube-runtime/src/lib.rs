@@ -26,7 +26,8 @@ mod sources;
 mod spec;
 
 pub use discover::{
-    InstallOrigin, InstalledNode, list_installed, mise_node_installs_dir, probe_path_node,
+    InstallOrigin, InstalledNode, list_installed, mise_node_installs_dir, node_on_path,
+    probe_path_node,
 };
 pub use error::Error;
 pub use mise::mise_on_path;

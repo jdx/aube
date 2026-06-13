@@ -542,6 +542,38 @@ JSON
 	assert_output --regexp "UA=aube/[0-9]+\.[0-9]+\.[0-9]+"
 }
 
+@test "aube install: lifecycle hooks export the full npm_* env set (pnpm parity)" {
+	# Companion to the run-path test in run.bats: install lifecycle hooks
+	# must see the same npm_* surface pnpm provides — npm_execpath,
+	# npm_node_execpath, npm_package_json, npm_command (=install here),
+	# npm_config_node_gyp, the deep-flattened engines/config/bin, and the
+	# raw npm_lifecycle_script. Tools like node-pre-gyp / husky branch on
+	# these during a dependency build.
+	cat >package.json <<'JSON'
+{
+  "name": "@scope/install-env-probe",
+  "version": "4.5.6",
+  "engines": { "node": ">=18.0.0" },
+  "config": { "port": "8080" },
+  "bin": { "probe-cli": "./cli.js" },
+  "scripts": {
+    "postinstall": "node -e 'for (const k of [\"npm_execpath\",\"npm_node_execpath\",\"npm_package_json\",\"npm_command\",\"npm_config_node_gyp\",\"npm_package_engines_node\",\"npm_package_config_port\",\"npm_package_bin_probe_cli\",\"npm_lifecycle_script\"]) console.log(k + \"=\" + (process.env[k] || \"\"))'"
+  }
+}
+JSON
+	run aube install
+	assert_success
+	assert_output --partial "npm_command=install"
+	assert_output --regexp "npm_execpath=[^[:space:]]*aube"
+	assert_output --regexp "npm_node_execpath=[^[:space:]]+"
+	assert_output --regexp "npm_package_json=[^[:space:]]*package\.json"
+	assert_output --regexp "npm_config_node_gyp=[^[:space:]]*node-gyp\.js"
+	assert_output --partial "npm_package_engines_node=>=18.0.0"
+	assert_output --partial "npm_package_config_port=8080"
+	assert_output --partial "npm_package_bin_probe_cli=./cli.js"
+	assert_output --regexp "npm_lifecycle_script=.*node -e"
+}
+
 @test "aube add: root postinstall is NOT triggered when adding a named dep" {
 	# Ported from pnpm/test/install/lifecycleScripts.ts:69
 	# ('postinstall is not executed after named installation').

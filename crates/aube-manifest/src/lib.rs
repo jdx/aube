@@ -488,6 +488,51 @@ impl PackageJson {
         out
     }
 
+    /// pnpm-compatible `npm_package_*` environment pairs for lifecycle
+    /// scripts. Mirrors what pnpm exports from a manifest: `name`,
+    /// `version`, plus the deep-flattened `engines`, `config`, and
+    /// `bin` fields (string `bin` → unsuffixed `npm_package_bin`).
+    /// Other fields (`description`, `main`, `license`, `author`, …)
+    /// are intentionally **not** exported — pnpm dropped whole-manifest
+    /// flattening, and matching its exact allowlist keeps scripts that
+    /// sniff these vars (`husky`, `node-pre-gyp`, …) behaving
+    /// identically under aube.
+    ///
+    /// The `npm_package_json` path is set by the caller, which knows
+    /// where the manifest lives on disk.
+    ///
+    /// Keys are "envified" the npm way: every character outside
+    /// `[A-Za-z0-9_]` becomes `_`, so `config.my-key` →
+    /// `npm_package_config_my_key`. Returned in a stable order
+    /// (name, version, then engines/config/bin in key order) so the
+    /// emitted environment is deterministic.
+    pub fn npm_package_env(&self) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        if let Some(name) = &self.name {
+            out.push(("npm_package_name".to_string(), name.clone()));
+        }
+        if let Some(version) = &self.version {
+            out.push(("npm_package_version".to_string(), version.clone()));
+        }
+        for (key, value) in &self.engines {
+            out.push((
+                format!("npm_package_engines_{}", envify_env_key(key)),
+                value.clone(),
+            ));
+        }
+        if let Some(config) = self.extra.get("config") {
+            flatten_json_env("npm_package_config", config, &mut out);
+        }
+        if let Some(bin) = self.extra.get("bin") {
+            // Generic flatten, same as `config`: a string `bin` →
+            // unsuffixed `npm_package_bin`, an object → `npm_package_bin_<key>`.
+            // This mirrors pnpm exactly (verified against 11.5); npm instead
+            // normalizes a string `bin` to the package's unscoped name first.
+            flatten_json_env("npm_package_bin", bin, &mut out);
+        }
+        out
+    }
+
     /// Extract `pnpm.catalog` / `aube.catalog` — a default catalog
     /// defined inline in package.json under the `pnpm`/`aube` object.
     /// pnpm itself reads catalogs only from `pnpm-workspace.yaml`, but
@@ -936,6 +981,43 @@ fn push_unique_strs(dst: &mut Vec<String>, arr: &[serde_json::Value]) {
     }
 }
 
+/// npm/pnpm "envify": replace every character that is not
+/// `[A-Za-z0-9_]` with `_`, leaving case untouched. Used to build the
+/// `npm_package_*` env-var keys from manifest field names.
+fn envify_env_key(key: &str) -> String {
+    key.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Deep-flatten a JSON value into `prefix`-rooted `npm_package_*`
+/// pairs, npm-style: objects recurse with `_`-joined keys, arrays
+/// index with `_<i>`, scalars stringify, `null` is skipped.
+fn flatten_json_env(prefix: &str, value: &serde_json::Value, out: &mut Vec<(String, String)>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                flatten_json_env(&format!("{prefix}_{}", envify_env_key(k)), v, out);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for (i, v) in arr.iter().enumerate() {
+                flatten_json_env(&format!("{prefix}_{i}"), v, out);
+            }
+        }
+        serde_json::Value::String(s) => out.push((prefix.to_string(), s.clone())),
+        serde_json::Value::Number(n) => out.push((prefix.to_string(), n.to_string())),
+        serde_json::Value::Bool(b) => out.push((prefix.to_string(), b.to_string())),
+        serde_json::Value::Null => {}
+    }
+}
+
 /// Union of `package.json`'s `{pnpm,aube}.supportedArchitectures.*` and
 /// `pnpm-workspace.yaml`'s `supportedArchitectures.*`. pnpm v10 treats
 /// the workspace yaml as the canonical home for shared platform
@@ -1180,6 +1262,87 @@ mod tests {
 
     fn parse(json: &str) -> PackageJson {
         serde_json::from_str(json).unwrap()
+    }
+
+    /// `npm_package_env` mirrors pnpm's exact flattening: name, version,
+    /// and deep `engines`/`config`/`bin` — and nothing else.
+    #[test]
+    fn npm_package_env_matches_pnpm_allowlist() {
+        let pkg = parse(
+            r#"{
+                "name": "@scope/envprobe",
+                "version": "4.5.6",
+                "description": "ignored",
+                "main": "index.js",
+                "type": "module",
+                "private": true,
+                "os": ["darwin"],
+                "engines": { "node": ">=18", "npm": ">=9" },
+                "config": { "port": "8080", "nested": { "deep-key": "x" } },
+                "bin": { "probe": "./cli.js" }
+            }"#,
+        );
+        let env: std::collections::BTreeMap<String, String> =
+            pkg.npm_package_env().into_iter().collect();
+
+        assert_eq!(
+            env.get("npm_package_name").map(String::as_str),
+            Some("@scope/envprobe")
+        );
+        assert_eq!(
+            env.get("npm_package_version").map(String::as_str),
+            Some("4.5.6")
+        );
+        assert_eq!(
+            env.get("npm_package_engines_node").map(String::as_str),
+            Some(">=18")
+        );
+        assert_eq!(
+            env.get("npm_package_engines_npm").map(String::as_str),
+            Some(">=9")
+        );
+        assert_eq!(
+            env.get("npm_package_config_port").map(String::as_str),
+            Some("8080")
+        );
+        // Nested objects flatten with `_`-joined, envified keys.
+        assert_eq!(
+            env.get("npm_package_config_nested_deep_key")
+                .map(String::as_str),
+            Some("x")
+        );
+        assert_eq!(
+            env.get("npm_package_bin_probe").map(String::as_str),
+            Some("./cli.js")
+        );
+        // Fields pnpm does not export must be absent.
+        for absent in [
+            "npm_package_description",
+            "npm_package_main",
+            "npm_package_type",
+            "npm_package_private",
+            "npm_package_os_0",
+        ] {
+            assert!(!env.contains_key(absent), "{absent} should not be exported");
+        }
+    }
+
+    /// A bare-string `bin` flattens to the unsuffixed `npm_package_bin`
+    /// (pnpm verified against 11.5) — the same generic flattening as
+    /// `config`, not npm's normalize-to-unscoped-name behavior.
+    #[test]
+    fn npm_package_env_string_bin_is_unsuffixed() {
+        let pkg = parse(r#"{ "name": "@scope/tool", "version": "1.0.0", "bin": "./cli.js" }"#);
+        let env: std::collections::BTreeMap<String, String> =
+            pkg.npm_package_env().into_iter().collect();
+        assert_eq!(
+            env.get("npm_package_bin").map(String::as_str),
+            Some("./cli.js")
+        );
+        assert!(
+            !env.keys().any(|k| k.starts_with("npm_package_bin_")),
+            "string bin must stay unsuffixed: {env:?}"
+        );
     }
 
     /// Pre-npm-2.x publishes (e.g. `extsprintf@1.4.1`, `coffee-script@1.3.3`)

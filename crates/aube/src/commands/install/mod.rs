@@ -215,7 +215,7 @@ pub async fn run(opts: InstallOptions) -> miette::Result<()> {
         crate::runtime::lockfile_node_pin(&cwd, &manifest).as_ref(),
     )
     .await?;
-    super::configure_script_settings(&settings_ctx);
+    super::configure_script_settings(&settings_ctx, Some("install"));
 
     let layout::InstallLayoutConfig {
         lockfile_dir,

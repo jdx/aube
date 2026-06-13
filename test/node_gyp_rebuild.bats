@@ -215,8 +215,11 @@ JSON
 	assert_success
 	# The shim wrote the marker, proving the on-PATH copy was used.
 	assert_file_exists node-gyp.marker
-	# And the aube cache must NOT have a bootstrapped node-gyp dir.
-	assert_dir_not_exists "$XDG_CACHE_HOME/aube/tools/node-gyp"
+	# And the aube cache must NOT have a *bootstrapped* node-gyp (the
+	# `v12/` bucket). A cheap network-free lazy shim (`lazy-bin/`) may
+	# exist — it backs `npm_config_node_gyp` and never bootstraps unless
+	# something executes it — so assert specifically on the bootstrap dir.
+	assert_dir_not_exists "$XDG_CACHE_HOME/aube/tools/node-gyp/v12"
 }
 
 @test "--ignore-scripts suppresses the implicit node-gyp rebuild" {

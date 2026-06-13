@@ -198,5 +198,8 @@ JSON
 	run aube test --no-install
 	assert_success
 	assert_file_exists project-node-gyp
-	assert_dir_not_exists "$XDG_CACHE_HOME/aube/tools/node-gyp"
+	# No *bootstrap* (the `v12/` bucket) — the project's own node-gyp was
+	# used. A cheap network-free lazy shim under `lazy-bin/` (backing
+	# `npm_config_node_gyp`) may exist; it never triggers an install.
+	assert_dir_not_exists "$XDG_CACHE_HOME/aube/tools/node-gyp/v12"
 }

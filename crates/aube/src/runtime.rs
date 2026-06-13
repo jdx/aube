@@ -114,14 +114,21 @@ pub fn path_entries() -> Vec<PathBuf> {
         .collect()
 }
 
-/// Set the npm-compat env vars naming the selected node on a child
+/// Set the npm-compat env vars naming the node binary on a child
 /// command (`npm_node_execpath`, and `NODE` which npm also exports).
+///
+/// Prefers the switched runtime's node; when no switch is active,
+/// falls back to the ambient `node` resolved on `PATH` so these vars
+/// are populated on every spawn — pnpm/npm always set them, and tools
+/// (`node-gyp`, `node-pre-gyp`, re-spawners) read `npm_node_execpath`
+/// to locate the exact node that drove the package manager.
 pub fn apply_child_env(cmd: &mut tokio::process::Command) {
-    if let Some(ctx) = current()
-        && let Some(node_bin) = &ctx.node_bin
-    {
-        cmd.env("npm_node_execpath", node_bin);
-        cmd.env("NODE", node_bin);
+    let node_bin = current()
+        .and_then(|ctx| ctx.node_bin.clone())
+        .or_else(aube_runtime::node_on_path);
+    if let Some(node_bin) = node_bin {
+        cmd.env("npm_node_execpath", &node_bin);
+        cmd.env("NODE", &node_bin);
     }
 }
 

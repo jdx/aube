@@ -122,6 +122,23 @@ pub(crate) fn lazy_shim_bin_dir(project_bin_dir: &Path) -> miette::Result<Option
     Ok(Some(shim_dir))
 }
 
+/// Path to the lazy `node-gyp.js` shim, exported as `npm_config_node_gyp`
+/// for parity with npm/pnpm (which point it at their bundled
+/// `node-gyp/bin/node-gyp.js`). Unlike [`lazy_shim_bin_dir`], this is
+/// returned unconditionally — `npm_config_node_gyp` is a separate channel
+/// from `PATH`, and npm/pnpm always set it even when a system node-gyp
+/// exists. Writing the shim is cheap (a few tiny files) and never
+/// bootstraps; the real node-gyp install is deferred until a tool runs
+/// `node $npm_config_node_gyp`. Rewritten on every call (like
+/// [`lazy_shim_bin_dir`]) so a shipped shim fix self-heals rather than
+/// being pinned to whatever first landed in the cache.
+pub(crate) fn lazy_js_shim_path() -> miette::Result<PathBuf> {
+    let shim_dir = tool_root()?.join("lazy-bin");
+    std::fs::create_dir_all(&shim_dir).into_diagnostic()?;
+    write_lazy_shims(&shim_dir)?;
+    Ok(shim_dir.join("node-gyp.js"))
+}
+
 pub(crate) async fn print_bootstrapped_binary(project_dir: &Path) -> miette::Result<()> {
     let bin_dir = ensure_cached(project_dir).await?;
     println!("{}", bin_dir.join(primary_binary_name()).display());
@@ -140,6 +157,45 @@ exec "$real" "$@"
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&sh_path, std::fs::Permissions::from_mode(0o755))
+            .into_diagnostic()?;
+    }
+
+    // `node-gyp.js`: the value of `npm_config_node_gyp`. Consumers run it
+    // as `node $npm_config_node_gyp …`, so it must be a Node script (not
+    // the shell `node-gyp` shim above). It resolves the real node-gyp the
+    // same way — via the hidden `__node-gyp-bootstrap` subcommand — then
+    // forwards argv. Falls back to a `node-gyp` on PATH when aube's env
+    // markers are absent (e.g. a script spawned outside aube's wrappers).
+    let js = r#"#!/usr/bin/env node
+"use strict";
+// aube lazy node-gyp stand-in for npm_config_node_gyp. Resolves (and
+// bootstraps on first use) aube's node-gyp, then forwards argv. Kept
+// dependency-free; writing this file is free, the bootstrap only fires
+// when something actually invokes it. Bare `require` (no `node:` prefix)
+// so the shim runs under any Node the user drives, including pre-16.
+const { execFileSync, spawnSync } = require("child_process");
+const isWin = process.platform === "win32";
+let real;
+const exe = process.env.AUBE_NODE_GYP_EXE;
+if (exe) {
+  const dir = process.env.AUBE_NODE_GYP_PROJECT_DIR || process.cwd();
+  real = execFileSync(exe, ["__node-gyp-bootstrap", dir], { encoding: "utf8" }).trim();
+} else {
+  real = isWin ? "node-gyp.cmd" : "node-gyp";
+}
+const result = spawnSync(real, process.argv.slice(2), { stdio: "inherit", shell: isWin });
+if (result.error) {
+  console.error("aube: failed to run node-gyp (" + real + "): " + result.error.message);
+  process.exit(1);
+}
+process.exit(result.status === null ? 1 : result.status);
+"#;
+    let js_path = shim_dir.join("node-gyp.js");
+    aube_util::fs_atomic::atomic_write(&js_path, js.as_bytes()).into_diagnostic()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&js_path, std::fs::Permissions::from_mode(0o755))
             .into_diagnostic()?;
     }
 
