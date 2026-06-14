@@ -988,35 +988,35 @@ fn read_snapshot(path: &Path) -> Option<PersistedSnapshot> {
 
 /**
  * Default location for the global persistent adaptive state file.
- * Honors `XDG_CACHE_HOME` first, then falls back to
- * `~/.cache/aube/adaptive-state.json` on Linux,
- * `~/Library/Caches/aube/adaptive-state.json` on macOS, and
- * `%LOCALAPPDATA%\aube\adaptive-state.json` on Windows.
+ * Honors `XDG_CACHE_HOME` first, then falls back to `~/.cache`,
+ * `~/Library/Caches`, or `%LOCALAPPDATA%`. The cache namespace is the active
+ * embedder's `cache_namespace` (standalone aube → `"aube"`), not a literal.
  */
 pub fn default_persistent_state_path() -> Option<PathBuf> {
+    let ns = crate::embedder().cache_namespace;
     if let Ok(xdg) = std::env::var("XDG_CACHE_HOME")
         && !xdg.is_empty()
     {
-        return Some(PathBuf::from(xdg).join("aube").join("adaptive-state.json"));
+        return Some(PathBuf::from(xdg).join(ns).join("adaptive-state.json"));
     }
     if cfg!(windows) {
         std::env::var("LOCALAPPDATA")
             .ok()
             .filter(|s| !s.is_empty())
-            .map(|p| PathBuf::from(p).join("aube").join("adaptive-state.json"))
+            .map(|p| PathBuf::from(p).join(ns).join("adaptive-state.json"))
     } else if cfg!(target_os = "macos") {
         std::env::var("HOME").ok().map(|h| {
             PathBuf::from(h)
                 .join("Library")
                 .join("Caches")
-                .join("aube")
+                .join(ns)
                 .join("adaptive-state.json")
         })
     } else {
         std::env::var("HOME").ok().map(|h| {
             PathBuf::from(h)
                 .join(".cache")
-                .join("aube")
+                .join(ns)
                 .join("adaptive-state.json")
         })
     }

@@ -49,17 +49,19 @@ pub(crate) fn locks_dir() -> Option<PathBuf> {
     runtime_dir().map(|d| d.join(".locks"))
 }
 
-/// Cache directory shared with the rest of aube
-/// (`$XDG_CACHE_HOME/aube`), mirroring `aube-store`'s `cache_dir`.
+/// Cache directory shared with the rest of aube, mirroring `aube-store`'s
+/// `cache_dir`. Uses the active embedder's `cache_namespace` (standalone aube →
+/// `"aube"`) under `$XDG_CACHE_HOME`, `%LOCALAPPDATA%`, or `~/.cache`.
 pub(crate) fn cache_dir() -> Option<PathBuf> {
+    let ns = aube_util::embedder().cache_namespace;
     if let Some(xdg) = aube_util::env::xdg_cache_home() {
-        return Some(xdg.join("aube"));
+        return Some(xdg.join(ns));
     }
     #[cfg(windows)]
     if let Ok(local) = std::env::var("LOCALAPPDATA") {
-        return Some(PathBuf::from(local).join("aube"));
+        return Some(PathBuf::from(local).join(ns));
     }
-    aube_util::env::home_dir().map(|h| h.join(".cache/aube"))
+    aube_util::env::home_dir().map(|h| h.join(".cache").join(ns))
 }
 
 /// Disk cache for the dist index, segmented by mirror origin so two
