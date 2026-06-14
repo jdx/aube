@@ -351,14 +351,18 @@ fn check_foreign_package_manager_dirs(anchor: &Path, report: &mut Report) {
 fn check_virtual_store_links(anchor: &Path, report: &mut Report) -> miette::Result<()> {
     let links = super::check::run_report(anchor).wrap_err("failed to walk the virtual store")?;
     if !links.issues.is_empty() {
+        // The virtual-store leaf is `.{embedder().name}` (see
+        // `aube-linker`'s `aube_dir`), so route the reported path through
+        // the profile. Standalone aube → `node_modules/.aube/`.
         report.errors.push(format!(
-            "{} broken {} in node_modules/.aube/ (run `aube check` for details)",
+            "{} broken {} in node_modules/.{}/ (run `aube check` for details)",
             links.issues.len(),
             if links.issues.len() == 1 {
                 "dependency link"
             } else {
                 "dependency links"
-            }
+            },
+            aube_util::embedder().name,
         ));
     }
     Ok(())

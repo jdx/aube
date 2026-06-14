@@ -530,6 +530,13 @@ enum Commands {
 /// than calling `std::process::exit` keeps it embed-safe: a host that drives
 /// it in-process is not hard-killed by a non-zero result or an error. The
 /// standalone binary does `std::process::exit(cli_main(..))`.
+///
+/// `#[must_use]`: the `i32` is the exit code, not a side effect. An
+/// embedder migrating off the old `process::exit` entrypoint that drops
+/// it would silently exit 0 on every failure — Rust won't warn on an
+/// ignored return — so the lint nudges them to
+/// `std::process::exit(cli_main(..))`.
+#[must_use]
 pub fn cli_main(embedder: &'static aube_util::Embedder) -> i32 {
     cli_main_with_defaults(embedder, Vec::new())
 }
@@ -553,6 +560,10 @@ pub fn command() -> clap::Command {
 /// (Embedder-*fixed* behavior lives on [`aube_util::Embedder`] itself, not
 /// here.) Standalone aube passes an empty vec, so per-setting built-in
 /// defaults apply unchanged.
+///
+/// `#[must_use]` for the same reason as [`cli_main`]: the returned `i32`
+/// is the exit code the embedder must hand to `std::process::exit`.
+#[must_use]
 pub fn cli_main_with_defaults(
     embedder: &'static aube_util::Embedder,
     defaults: Vec<(String, String)>,

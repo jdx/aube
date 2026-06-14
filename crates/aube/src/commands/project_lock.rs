@@ -68,7 +68,13 @@ pub(crate) fn take_project_lock(cwd: &std::path::Path) -> miette::Result<Project
     let nm_path = super::project_modules_dir(cwd);
     let lock = xx::fslock::FSLock::new(&nm_path)
         .with_callback(|_| {
-            eprintln!("Waiting for another aube process to finish in this project...");
+            // Raw, uncaptured stderr write fired by `xx::fslock` when the
+            // lock is contended, so route the process name through the
+            // embedder profile. Standalone aube → "aube".
+            eprintln!(
+                "Waiting for another {} process to finish in this project...",
+                aube_util::embedder().name
+            );
         })
         .lock()
         .map_err(|e| miette!("failed to acquire project lock: {e}"))?;

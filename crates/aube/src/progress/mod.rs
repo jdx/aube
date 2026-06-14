@@ -88,9 +88,9 @@ fn env_truthy(name: &str) -> bool {
 /// embedder is standalone aube; any other embedder suppresses it, so the
 /// engine's vendor brand never leaks into a host's user-facing install output.
 /// Keyed on name matching standalone aube's, since `embedder()` returns a
-/// copied profile with no stable pointer to compare against `AUBE`.
-fn banner_vendor() -> Option<&'static str> {
-    let id = aube_util::embedder();
+/// copied profile with no stable pointer to compare against `AUBE`. Takes the
+/// caller's already-fetched profile so the banner resolves it once.
+fn banner_vendor(id: &'static aube_util::Embedder) -> Option<&'static str> {
     if id.name == aube_util::AUBE.name {
         id.vendor
     } else {
@@ -107,7 +107,7 @@ fn banner_vendor() -> Option<&'static str> {
 /// the bare header.
 fn product_banner(suffix: &str) -> String {
     let id = aube_util::embedder();
-    match banner_vendor() {
+    match banner_vendor(id) {
         Some(vendor) => format!(
             "{} {} {}{suffix}",
             style::emagenta(id.display_name).bold(),
