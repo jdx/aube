@@ -39,7 +39,10 @@ fn main() {
         return;
     }
 
-    aube::cli_main(embedder)
+    // The binary owns the single `std::process::exit`: `cli_main` returns the
+    // code so the library stays embed-safe (a host driving it in-process is
+    // never hard-killed), and the standalone binary terminates with it here.
+    std::process::exit(aube::cli_main(embedder));
 }
 
 /// True for a standalone `aube usage` invocation: argv[0] resolves to the
