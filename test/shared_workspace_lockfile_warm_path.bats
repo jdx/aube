@@ -59,10 +59,10 @@ _setup_no_shared_workspace() {
 		  }
 		}
 	JSON
-	mkdir -p packages/booking-engine-service
-	cat >packages/booking-engine-service/package.json <<-'JSON'
+	mkdir -p packages/service-name
+	cat >packages/service-name/package.json <<-'JSON'
 		{
-		  "name": "booking-engine-service",
+		  "name": "service-name",
 		  "version": "1.0.0",
 		  "dependencies": {
 		    "is-odd": "3.0.1",
@@ -80,13 +80,13 @@ _setup_no_shared_workspace() {
 	# Per-member layout: each member owns a lockfile, the root owns none.
 	run test -e aube-lock.yaml
 	assert_failure
-	assert_file_exists packages/booking-engine-service/aube-lock.yaml
+	assert_file_exists packages/service-name/aube-lock.yaml
 	assert_dir_exists node_modules/.aube-state
 
 	local root_state_before
 	root_state_before="$(cat node_modules/.aube-state/state.json)"
 
-	cd packages/booking-engine-service
+	cd packages/service-name
 	run aube install
 	assert_success
 	cd ../..
@@ -97,9 +97,9 @@ _setup_no_shared_workspace() {
 
 	# The member never grows its own virtual store or install state —
 	# the install resolved up to the workspace root.
-	run test -d packages/booking-engine-service/node_modules/.aube
+	run test -d packages/service-name/node_modules/.aube
 	assert_failure
-	run test -e packages/booking-engine-service/node_modules/.aube-state
+	run test -e packages/service-name/node_modules/.aube-state
 	assert_failure
 
 	# A true no-op writes nothing: the root state is byte-identical.
@@ -115,16 +115,16 @@ _setup_no_shared_workspace() {
 	# past it to the real root — otherwise `cd member && aube install`
 	# resolves to the member-as-its-own-root, which can't see its
 	# `workspace:*` sibling and re-resolves the whole graph every run.
-	cat >packages/booking-engine-service/pnpm-workspace.yaml <<-'YAML'
+	cat >packages/service-name/pnpm-workspace.yaml <<-'YAML'
 		minimumReleaseAge: 0
 	YAML
 
 	run aube install
 	assert_success
 	# The root install links the workspace sibling into the member.
-	assert_link_exists packages/booking-engine-service/node_modules/@ws/lib-a
+	assert_link_exists packages/service-name/node_modules/@ws/lib-a
 
-	cd packages/booking-engine-service
+	cd packages/service-name
 	run aube install
 	assert_success
 	cd ../..
@@ -136,9 +136,57 @@ _setup_no_shared_workspace() {
 	# Resolved to the parent root: the member grew no install state of
 	# its own, and its workspace sibling is still linked (a member-rooted
 	# resolve would have dropped the sibling and rebuilt the member).
-	run test -e packages/booking-engine-service/node_modules/.aube-state
+	run test -e packages/service-name/node_modules/.aube-state
 	assert_failure
-	assert_link_exists packages/booking-engine-service/node_modules/@ws/lib-a
+	assert_link_exists packages/service-name/node_modules/@ws/lib-a
+}
+
+@test "sharedWorkspaceLockfile=false: deleting a member node_modules relinks on the next root install" {
+	_setup_no_shared_workspace
+
+	run aube install
+	assert_success
+	assert_link_exists packages/service-name/node_modules/is-odd
+	assert_link_exists packages/service-name/node_modules/@ws/lib-a
+
+	# Wipe just the member's node_modules. The lockfile and install state
+	# still claim it's installed, so the freshness check must notice the
+	# member's direct symlinks vanished and relink — not report a bare
+	# "Already up to date" while the member stays broken. Pre-fix the
+	# state only tracked the *root* importer's entries, so a missing
+	# member node_modules was invisible to the warm-path check.
+	rm -rf packages/service-name/node_modules
+
+	run aube install
+	assert_success
+	# A relink links packages, so the summary can't be "Already up to date".
+	refute_output --partial "Already up to date"
+	assert_link_exists packages/service-name/node_modules/is-odd
+	assert_link_exists packages/service-name/node_modules/@ws/lib-a
+}
+
+@test "sharedWorkspaceLockfile=false: member install relinks its own deleted node_modules" {
+	_setup_no_shared_workspace
+
+	run aube install
+	assert_success
+	assert_link_exists packages/service-name/node_modules/is-odd
+	assert_link_exists packages/service-name/node_modules/@ws/lib-a
+
+	# The reported repro: from inside the member, delete its node_modules
+	# and reinstall. The member resolves up to the parent root, which must
+	# detect the missing member layout and relink it — including the
+	# `workspace:*` sibling, which is the analogue of a virtual-store
+	# sibling a dependency loads at runtime. Pre-fix this short-circuited
+	# to "Already up to date" and left the member with no node_modules.
+	rm -rf packages/service-name/node_modules
+	cd packages/service-name
+	run aube install
+	assert_success
+	cd ../..
+	refute_output --partial "Already up to date"
+	assert_link_exists packages/service-name/node_modules/is-odd
+	assert_link_exists packages/service-name/node_modules/@ws/lib-a
 }
 
 @test "sharedWorkspaceLockfile=false: repeat root install short-circuits on the warm path" {
@@ -166,9 +214,9 @@ _setup_no_shared_workspace() {
 	# only a transitive dep of is-odd (it lives in the virtual store,
 	# not the member's own node_modules), so this link appearing proves
 	# the install re-resolved instead of short-circuiting.
-	cat >packages/booking-engine-service/package.json <<-'JSON'
+	cat >packages/service-name/package.json <<-'JSON'
 		{
-		  "name": "booking-engine-service",
+		  "name": "service-name",
 		  "version": "1.0.0",
 		  "dependencies": {
 		    "is-odd": "3.0.1",
@@ -180,7 +228,7 @@ _setup_no_shared_workspace() {
 
 	run aube install
 	assert_success
-	assert_link_exists packages/booking-engine-service/node_modules/is-number
+	assert_link_exists packages/service-name/node_modules/is-number
 }
 
 @test "sharedWorkspaceLockfile=false: adding a new member busts the warm path" {

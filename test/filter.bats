@@ -189,6 +189,89 @@ _setup_filter_workspace() {
 	assert_output --partial "node_modules/is-odd"
 }
 
+@test "aube install --filter <member>... scopes to the member and its workspace deps (sharedWorkspaceLockfile=false)" {
+	# Mirrors a per-project-lockfile monorepo. A plain `aube install` from
+	# anywhere installs every importer (recursiveInstall defaults to true,
+	# matching pnpm). To install just one service plus the workspace
+	# siblings it depends on — without touching unrelated members — scope
+	# with `--filter <member>...`; the trailing `...` pulls in deps so the
+	# symlinked sibling's own node_modules get populated too.
+	cat >pnpm-workspace.yaml <<-EOF
+		packages:
+		  - packages/*
+		sharedWorkspaceLockfile: false
+	EOF
+	cat >package.json <<-'EOF'
+		{"name": "root", "version": "0.0.0", "private": true}
+	EOF
+	mkdir -p packages/svc-a packages/lib packages/svc-b
+	cat >packages/svc-a/package.json <<-'EOF'
+		{
+		  "name": "svc-a",
+		  "version": "1.0.0",
+		  "dependencies": { "lib": "workspace:*", "is-odd": "3.0.1" }
+		}
+	EOF
+	cat >packages/lib/package.json <<-'EOF'
+		{
+		  "name": "lib",
+		  "version": "1.0.0",
+		  "dependencies": { "is-number": "6.0.0" }
+		}
+	EOF
+	cat >packages/svc-b/package.json <<-'EOF'
+		{
+		  "name": "svc-b",
+		  "version": "1.0.0",
+		  "dependencies": { "is-even": "1.0.0" }
+		}
+	EOF
+
+	run aube install --filter 'svc-a...'
+	assert_success
+
+	# svc-a's own deps are linked.
+	assert_link_exists packages/svc-a/node_modules/is-odd
+	# The workspace sibling is symlinked *and* its own deps are populated,
+	# so svc-a -> lib -> is-number resolves at runtime.
+	assert_link_exists packages/svc-a/node_modules/lib
+	assert_link_exists packages/lib/node_modules/is-number
+
+	# The unrelated member is left untouched: no deps linked, no lockfile.
+	run test -e packages/svc-b/node_modules/is-even
+	assert_failure
+	run test -e packages/svc-b/aube-lock.yaml
+	assert_failure
+}
+
+@test "aube install --filter <member> (no dots) skips unrelated members (sharedWorkspaceLockfile=false)" {
+	# pnpm parity: without the trailing `...` only the named member is
+	# installed. The sibling is still symlinked (it's a direct dep of the
+	# selected member) but its transitive deps are not pulled in, and
+	# unrelated members are never touched.
+	cat >pnpm-workspace.yaml <<-EOF
+		packages:
+		  - packages/*
+		sharedWorkspaceLockfile: false
+	EOF
+	cat >package.json <<-'EOF'
+		{"name": "root", "version": "0.0.0", "private": true}
+	EOF
+	mkdir -p packages/svc-a packages/svc-b
+	cat >packages/svc-a/package.json <<-'EOF'
+		{"name": "svc-a", "version": "1.0.0", "dependencies": { "is-odd": "3.0.1" }}
+	EOF
+	cat >packages/svc-b/package.json <<-'EOF'
+		{"name": "svc-b", "version": "1.0.0", "dependencies": { "is-even": "1.0.0" }}
+	EOF
+
+	run aube install --filter 'svc-a'
+	assert_success
+	assert_link_exists packages/svc-a/node_modules/is-odd
+	run test -e packages/svc-b/node_modules/is-even
+	assert_failure
+}
+
 @test "aube -F run: unmatched selector errors" {
 	_setup_filter_workspace
 	run aube -F no-such-pkg run hello

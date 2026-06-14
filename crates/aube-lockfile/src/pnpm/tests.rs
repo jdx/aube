@@ -578,22 +578,22 @@ packages:
   xml2json@0.12.0:
     resolution: {integrity: sha512-xxx}
 
-  node-expat@https://codeload.github.com/PruvoNet/node-expat/tar.gz/0732e16b0b679da2d12e062f78b3a511f419bb65:
-    resolution: {tarball: https://codeload.github.com/PruvoNet/node-expat/tar.gz/0732e16b0b679da2d12e062f78b3a511f419bb65}
+  node-expat@https://codeload.github.com/astro/node-expat/tar.gz/78e559baa908942097330f7967dfbf623ebc2529:
+    resolution: {tarball: https://codeload.github.com/astro/node-expat/tar.gz/78e559baa908942097330f7967dfbf623ebc2529}
     version: 2.4.1
 
 snapshots:
   xml2json@0.12.0:
     dependencies:
-      node-expat: https://codeload.github.com/PruvoNet/node-expat/tar.gz/0732e16b0b679da2d12e062f78b3a511f419bb65
+      node-expat: https://codeload.github.com/astro/node-expat/tar.gz/78e559baa908942097330f7967dfbf623ebc2529
 
-  node-expat@https://codeload.github.com/PruvoNet/node-expat/tar.gz/0732e16b0b679da2d12e062f78b3a511f419bb65: {}
+  node-expat@https://codeload.github.com/astro/node-expat/tar.gz/78e559baa908942097330f7967dfbf623ebc2529: {}
 "#,
         )
         .unwrap();
 
     let graph = parse(&lockfile_path).unwrap();
-    let url = "https://codeload.github.com/PruvoNet/node-expat/tar.gz/0732e16b0b679da2d12e062f78b3a511f419bb65";
+    let url = "https://codeload.github.com/astro/node-expat/tar.gz/78e559baa908942097330f7967dfbf623ebc2529";
     let pkg = graph
         .packages
         .get(&format!("node-expat@{url}"))
@@ -631,8 +631,8 @@ importers:
 
 packages:
 
-  node-expat@https://codeload.github.com/PruvoNet/node-expat/tar.gz/0732e16b0b679da2d12e062f78b3a511f419bb65:
-    resolution: {tarball: https://codeload.github.com/PruvoNet/node-expat/tar.gz/0732e16b0b679da2d12e062f78b3a511f419bb65}
+  node-expat@https://codeload.github.com/astro/node-expat/tar.gz/78e559baa908942097330f7967dfbf623ebc2529:
+    resolution: {tarball: https://codeload.github.com/astro/node-expat/tar.gz/78e559baa908942097330f7967dfbf623ebc2529}
     version: 2.4.1
 
   xml2json@0.12.0:
@@ -640,11 +640,11 @@ packages:
 
 snapshots:
 
-  node-expat@https://codeload.github.com/PruvoNet/node-expat/tar.gz/0732e16b0b679da2d12e062f78b3a511f419bb65: {}
+  node-expat@https://codeload.github.com/astro/node-expat/tar.gz/78e559baa908942097330f7967dfbf623ebc2529: {}
 
   xml2json@0.12.0:
     dependencies:
-      node-expat: https://codeload.github.com/PruvoNet/node-expat/tar.gz/0732e16b0b679da2d12e062f78b3a511f419bb65
+      node-expat: https://codeload.github.com/astro/node-expat/tar.gz/78e559baa908942097330f7967dfbf623ebc2529
 "#;
     std::fs::write(&lockfile_path, src).unwrap();
     let graph = parse(&lockfile_path).unwrap();
@@ -661,7 +661,7 @@ snapshots:
     write(&out_path, &graph, &manifest).unwrap();
     let written = std::fs::read_to_string(&out_path).unwrap();
     assert!(
-            written.contains("node-expat@https://codeload.github.com/PruvoNet/node-expat/tar.gz/0732e16b0b679da2d12e062f78b3a511f419bb65:"),
+            written.contains("node-expat@https://codeload.github.com/astro/node-expat/tar.gz/78e559baa908942097330f7967dfbf623ebc2529:"),
             "URL canonical key missing from output: {written}"
         );
     assert!(
@@ -674,13 +674,13 @@ snapshots:
     // URL and a re-parse would have no way to fetch the package.
     // Hosted git tarballs also carry pnpm's `gitHosted` marker.
     assert!(
-            written.contains("resolution: {gitHosted: true, tarball: https://codeload.github.com/PruvoNet/node-expat/tar.gz/0732e16b0b679da2d12e062f78b3a511f419bb65}"),
+            written.contains("resolution: {gitHosted: true, tarball: https://codeload.github.com/astro/node-expat/tar.gz/78e559baa908942097330f7967dfbf623ebc2529}"),
             "`resolution: {{tarball: …}}` missing from output: {written}"
         );
     // Re-parse the written lockfile and assert the tarball URL
     // makes it all the way back onto `LockedPackage.tarball_url`.
     let reparsed = parse(&out_path).unwrap();
-    let url = "https://codeload.github.com/PruvoNet/node-expat/tar.gz/0732e16b0b679da2d12e062f78b3a511f419bb65";
+    let url = "https://codeload.github.com/astro/node-expat/tar.gz/78e559baa908942097330f7967dfbf623ebc2529";
     let pkg = reparsed
         .packages
         .get(&format!("node-expat@{url}"))

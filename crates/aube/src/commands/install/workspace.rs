@@ -204,6 +204,54 @@ pub(super) fn importer_project_dir(
     }
 }
 
+/// Reconstruct missing workspace-member importer entries from each
+/// member's own per-project lockfile, folding them into `graph`.
+///
+/// Under `sharedWorkspaceLockfile=false` the warm/fresh install path
+/// parses only the *current project's* lockfile, so the graph it hands
+/// the linker carries a single `.` importer. That relinks the root, but
+/// the linker also needs every member's importer entry (and the packages
+/// reachable from it) to relink members. Without this, a member whose
+/// `node_modules` was deleted or left incomplete is never repaired: the
+/// install links the root, finds nothing else to do, and reports
+/// "Already up to date" while the member stays broken.
+///
+/// Each member ships its own lockfile (written by
+/// [`write_per_project_lockfiles`]) whose sole importer is `.`. Parse it,
+/// re-key that importer to the member's path, and merge its package
+/// closure in. Members already present in `graph` (the cold/resolve path
+/// produces every importer) are skipped, so this is a no-op there.
+/// Best-effort: a member without a parseable lockfile is skipped — a
+/// genuinely new member busts the warm path through its manifest hash and
+/// gets a full resolve instead.
+pub(super) fn merge_member_lockfile_graphs(
+    workspace_root: &std::path::Path,
+    graph: &mut aube_lockfile::LockfileGraph,
+    manifests: &[(String, aube_manifest::PackageJson)],
+) {
+    for (importer_path, manifest) in manifests {
+        if importer_path == "." || graph.importers.contains_key(importer_path) {
+            continue;
+        }
+        let member_dir = importer_project_dir(workspace_root, importer_path);
+        let member_graph = match aube_lockfile::parse_lockfile(&member_dir, manifest) {
+            Ok(member_graph) => member_graph,
+            Err(e) => {
+                tracing::debug!(
+                    "sharedWorkspaceLockfile=false: skipping member {importer_path} graph merge: {e}"
+                );
+                continue;
+            }
+        };
+        if let Some(deps) = member_graph.importers.get(".") {
+            graph.importers.insert(importer_path.clone(), deps.clone());
+        }
+        for (dep_path, pkg) in member_graph.packages {
+            graph.packages.entry(dep_path).or_insert(pkg);
+        }
+    }
+}
+
 pub(super) fn order_lifecycle_manifests(
     manifests: Vec<(String, aube_manifest::PackageJson)>,
 ) -> Vec<(String, aube_manifest::PackageJson)> {
@@ -681,5 +729,105 @@ mod per_project_lockfile_tests {
         assert!(!root.path().join("pnpm-lock.yaml").exists());
         // Members still get theirs.
         assert!(lib_dir.join("aube-lock.yaml").exists());
+    }
+}
+
+#[cfg(test)]
+mod member_graph_merge_tests {
+    use super::{merge_member_lockfile_graphs, write_per_project_lockfiles};
+    use aube_lockfile::{DepType, DirectDep, LockedPackage, LockfileGraph, LockfileKind};
+    use std::collections::BTreeMap;
+
+    fn manifest(name: &str) -> aube_manifest::PackageJson {
+        aube_manifest::PackageJson {
+            name: Some(name.to_string()),
+            version: Some("1.0.0".to_string()),
+            ..Default::default()
+        }
+    }
+
+    /// Under `sharedWorkspaceLockfile=false` the warm/fresh path loads only
+    /// the root importer, so member importers (and the packages reachable
+    /// from them) must be folded back in from each member's own per-project
+    /// lockfile before linking — otherwise members never get relinked.
+    /// Round-trips through [`write_per_project_lockfiles`] so the test
+    /// exercises the real on-disk member lockfile, not a hand-rolled graph.
+    #[test]
+    fn merges_member_importers_and_packages_from_per_project_lockfiles() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("packages/app")).unwrap();
+
+        let mut importers = BTreeMap::new();
+        importers.insert(".".to_string(), Vec::new());
+        importers.insert(
+            "packages/app".to_string(),
+            vec![DirectDep {
+                name: "is-odd".to_string(),
+                dep_path: "is-odd@3.0.1".to_string(),
+                dep_type: DepType::Production,
+                specifier: Some("3.0.1".to_string()),
+            }],
+        );
+        let mut packages = BTreeMap::new();
+        packages.insert(
+            "is-odd@3.0.1".to_string(),
+            LockedPackage {
+                name: "is-odd".to_string(),
+                version: "3.0.1".to_string(),
+                dep_path: "is-odd@3.0.1".to_string(),
+                ..Default::default()
+            },
+        );
+        let full = LockfileGraph {
+            importers,
+            packages,
+            ..Default::default()
+        };
+        let manifests = vec![
+            (".".to_string(), manifest("root")),
+            ("packages/app".to_string(), manifest("@test/app")),
+        ];
+        write_per_project_lockfiles(root.path(), &full, &manifests, LockfileKind::Aube, None)
+            .unwrap();
+
+        // Simulate the warm/fresh path: only the root importer is loaded.
+        let mut root_only = LockfileGraph {
+            importers: BTreeMap::from([(".".to_string(), Vec::new())]),
+            ..Default::default()
+        };
+        merge_member_lockfile_graphs(root.path(), &mut root_only, &manifests);
+
+        let app_deps = root_only
+            .importers
+            .get("packages/app")
+            .expect("member importer must be reconstructed from its per-project lockfile");
+        assert_eq!(app_deps.len(), 1);
+        assert_eq!(app_deps[0].name, "is-odd");
+        assert!(
+            root_only.packages.contains_key("is-odd@3.0.1"),
+            "member package closure must be merged in"
+        );
+    }
+
+    /// The cold/resolve path already produces every importer, so a member
+    /// that is already present must be left untouched (and a missing
+    /// member lockfile must not panic the merge).
+    #[test]
+    fn merge_leaves_present_importers_untouched() {
+        let root = tempfile::tempdir().unwrap();
+        let mut graph = LockfileGraph {
+            importers: BTreeMap::from([
+                (".".to_string(), Vec::new()),
+                ("packages/app".to_string(), Vec::new()),
+            ]),
+            ..Default::default()
+        };
+        let before = graph.importers.len();
+        let manifests = vec![
+            (".".to_string(), manifest("root")),
+            ("packages/app".to_string(), manifest("@test/app")),
+        ];
+        merge_member_lockfile_graphs(root.path(), &mut graph, &manifests);
+        assert_eq!(graph.importers.len(), before);
     }
 }

@@ -454,6 +454,66 @@ fn package_extension_selector_matches_scoped_and_versioned_names() {
 }
 
 #[test]
+fn package_extension_selector_matches_wildcard_on_unparseable_version() {
+    // A `name@*` selector must match even when the version isn't valid
+    // semver — git/tarball packages can carry odd version strings, and
+    // `*` means "any version" regardless. Regression guard for
+    // packageExtensions targeting git deps (e.g. injecting a runtime
+    // connector into a github: package) being silently skipped.
+    assert!(package_selector_matches("host@*", "host", "not-a-semver"));
+    assert!(package_selector_matches("host@*", "host", "2.59.3"));
+    assert!(package_selector_matches("host", "host", "whatever-ref"));
+    assert!(!package_selector_matches("host@*", "other", "1.0.0"));
+}
+
+#[test]
+fn package_extensions_inject_into_flat_dep_map() {
+    // The non-registry (git/tarball/dir) resolve path carries a flat
+    // `name -> range` dep map. A matching `@*` extension must inject its
+    // `dependencies` so they get resolved + linked as siblings.
+    let mut deps = BTreeMap::new();
+    deps.insert("existing".to_string(), "1.0.0".to_string());
+    let extension = PackageExtension {
+        selector: "juggler@*".to_string(),
+        dependencies: [
+            (
+                "connector".to_string(),
+                "github:org/connector#abc".to_string(),
+            ),
+            ("existing".to_string(), "9.9.9".to_string()),
+        ]
+        .into_iter()
+        .collect(),
+        optional_dependencies: BTreeMap::new(),
+        peer_dependencies: BTreeMap::new(),
+        peer_dependencies_meta: BTreeMap::new(),
+    };
+
+    apply_package_extensions_to_deps("juggler", "0.0.0-git", &mut deps, &[extension]);
+
+    // Injected dep is added...
+    assert_eq!(deps.get("connector").unwrap(), "github:org/connector#abc");
+    // ...but the package's own declared dep stays authoritative.
+    assert_eq!(deps.get("existing").unwrap(), "1.0.0");
+}
+
+#[test]
+fn package_extensions_skip_flat_dep_map_on_selector_mismatch() {
+    let mut deps = BTreeMap::new();
+    let extension = PackageExtension {
+        selector: "other@*".to_string(),
+        dependencies: [("connector".to_string(), "1.0.0".to_string())]
+            .into_iter()
+            .collect(),
+        optional_dependencies: BTreeMap::new(),
+        peer_dependencies: BTreeMap::new(),
+        peer_dependencies_meta: BTreeMap::new(),
+    };
+    apply_package_extensions_to_deps("juggler", "1.0.0", &mut deps, &[extension]);
+    assert!(deps.is_empty());
+}
+
+#[test]
 fn package_extensions_merge_dependency_maps() {
     let mut pkg = make_version("host", "1.0.0");
     let extension = PackageExtension {

@@ -912,19 +912,25 @@ impl InstallLayoutState {
             aube_linker::NodeLinker::Isolated => InstallLayoutMode::Isolated,
             aube_linker::NodeLinker::Hoisted => InstallLayoutMode::Hoisted,
         };
+        // Record each importer's direct-dependency symlinks — the root
+        // (`.`) *and* every workspace member — relative to `project_dir`.
+        // `verify_install_layout` walks these, so tracking members means a
+        // deleted or incompletely-linked member `node_modules` busts the
+        // warm path. Previously only `.` was tracked, so `rm -rf
+        // <member>/node_modules && aube install` short-circuited to
+        // "Already up to date" and never relinked the member.
         let mut direct_entries = BTreeMap::new();
-        if let Some(deps) = graph.importers.get(".") {
-            let mut entries = Vec::with_capacity(deps.len());
-            for dep in deps {
-                entries.push(project_dir.join(modules_dir_name).join(&dep.name));
-            }
-            direct_entries.insert(
-                ".".to_string(),
-                entries
-                    .into_iter()
-                    .map(|p| relative_path_or_original(&p, project_dir))
-                    .collect(),
-            );
+        for (importer, deps) in &graph.importers {
+            let modules_base = if importer == "." {
+                project_dir.join(modules_dir_name)
+            } else {
+                project_dir.join(importer).join(modules_dir_name)
+            };
+            let entries = deps
+                .iter()
+                .map(|dep| relative_path_or_original(&modules_base.join(&dep.name), project_dir))
+                .collect();
+            direct_entries.insert(importer.clone(), entries);
         }
 
         let mut packages = BTreeMap::new();
@@ -1330,6 +1336,51 @@ mod tests {
                 "installed package metadata missing: node_modules/.aube/missing/node_modules/is-odd/package.json"
                     .to_string()
             )
+        );
+    }
+
+    #[test]
+    fn from_graph_records_direct_entries_for_every_importer() {
+        let project_dir = temp_project_dir("layout-all-importers");
+        let aube_dir = project_dir.join("node_modules/.aube");
+        let dep = |name: &str, dep_path: &str| aube_lockfile::DirectDep {
+            name: name.to_string(),
+            dep_path: dep_path.to_string(),
+            dep_type: aube_lockfile::DepType::Production,
+            specifier: None,
+        };
+        let mut importers = BTreeMap::new();
+        importers.insert(".".to_string(), vec![dep("is-odd", "is-odd@3.0.1")]);
+        importers.insert("packages/svc".to_string(), vec![dep("zod", "zod@3.23.8")]);
+        let graph = aube_lockfile::LockfileGraph {
+            importers,
+            ..Default::default()
+        };
+
+        let layout = InstallLayoutState::from_graph(
+            &project_dir,
+            &graph,
+            aube_linker::NodeLinker::Isolated,
+            "node_modules",
+            &aube_dir,
+            120,
+            None,
+        );
+
+        // The root importer's direct symlink sits under the workspace
+        // root's node_modules.
+        assert_eq!(
+            layout.direct_entries.get("."),
+            Some(&vec!["node_modules/is-odd".to_string()])
+        );
+        // Every member's direct symlink is tracked under its own
+        // node_modules so a deleted/incomplete member node_modules busts
+        // the warm path instead of reporting "Already up to date". This is
+        // the regression guard for the member-only `node_modules` not
+        // being verified.
+        assert_eq!(
+            layout.direct_entries.get("packages/svc"),
+            Some(&vec!["packages/svc/node_modules/zod".to_string()])
         );
     }
 

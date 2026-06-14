@@ -156,6 +156,58 @@ EOF
 	assert_output --partial "repo: file://$TEST_TEMP_DIR/git-src.git"
 }
 
+# A `packageExtensions` entry that injects a dependency into a *git*
+# package must be honored. The non-registry resolve path (git / remote
+# tarball / directory) used to skip packageExtensions entirely — only the
+# registry path applied them — so a dep injected into a git package (e.g.
+# a connector the package `require()`s dynamically at runtime, which must
+# land as a sibling in the virtual store) was never resolved or linked.
+@test "packageExtensions inject a dependency into a git package" {
+	_make_git_repo "$TEST_TEMP_DIR/ext-host.git" exthost 1.0.0 >/dev/null
+	conn_sha="$(_make_git_repo "$TEST_TEMP_DIR/ext-conn.git" extconn 2.0.0)"
+
+	mkdir -p app
+	cd app
+	# The injected connector is itself a git (exotic) dep, so trust
+	# exotic transitives — mirrors the real-world config that injects
+	# git connectors via packageExtensions.
+	cat >.npmrc <<EOF
+blockExoticSubdeps=false
+EOF
+	# exthost declares no deps of its own; extconn is added purely via
+	# packageExtensions, exactly like the injected-connector case.
+	cat >package.json <<EOF
+{
+  "name": "app",
+  "version": "0.0.0",
+  "dependencies": {
+    "exthost": "git+file://$TEST_TEMP_DIR/ext-host.git"
+  },
+  "pnpm": {
+    "packageExtensions": {
+      "exthost@*": {
+        "dependencies": {
+          "extconn": "git+file://$TEST_TEMP_DIR/ext-conn.git#$conn_sha"
+        }
+      }
+    }
+  }
+}
+EOF
+
+	run aube install
+	assert_success
+
+	# The injected dep is resolved (recorded in the lockfile)...
+	run cat aube-lock.yaml
+	assert_output --partial "extconn"
+	# ...and linked as a sibling inside the git host's own virtual-store
+	# node_modules, so the host can require() it at runtime.
+	run bash -c 'ls -d node_modules/.aube/exthost@*/node_modules/extconn'
+	assert_success
+	assert_file_exists "$(ls -d node_modules/.aube/exthost@*/node_modules/extconn)/package.json"
+}
+
 @test "aube install handles git ref (#branch) and pins it" {
 	sha="$(_make_git_repo "$TEST_TEMP_DIR/git-ref.git" gitref 1.0.0)"
 

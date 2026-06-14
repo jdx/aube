@@ -1135,7 +1135,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::at(dir.path().join("files"));
         let index = index_with_manifest(&store, "datejs", "1.0.0-rc3");
-        let url = "https://codeload.github.com/PruvoNet/datejs/tar.gz/e2cde1e";
+        let url = "https://codeload.github.com/abritinthebay/datejs/tar.gz/3675d46ed96d57e30aeddf9b1d1026ac81d37ae3";
         assert!(validate_pkg_content(&index, "datejs", url).is_ok());
         // Name mismatch still rejects.
         let err = validate_pkg_content(&index, "evil", url).unwrap_err();
