@@ -23,7 +23,9 @@ use crate::local_source::{
     dep_path_for, is_non_registry_specifier, read_local_manifest, rebase_local,
     resolve_exec_manifest, resolve_git_source, resolve_remote_tarball, should_block_exotic_subdep,
 };
-use crate::package_ext::{apply_package_extensions, pick_override_spec};
+use crate::package_ext::{
+    apply_package_extensions, apply_package_extensions_to_deps, pick_override_spec,
+};
 use crate::semver_util::{PickResult, pick_version, version_satisfies};
 use crate::{
     Error, ExoticSubdepDetails, FxHashMap, FxHashSet, ResolutionMode, ResolveTask, ResolvedPackage,
@@ -1319,7 +1321,7 @@ impl<'a> ResolveDriver<'a> {
                 ),
             ));
         }
-        let (mut local, real_version, target_deps, integrity) = if let LocalSource::Git(ref g) =
+        let (mut local, real_version, mut target_deps, integrity) = if let LocalSource::Git(ref g) =
             raw_local
         {
             let shallow = aube_store::git_host_in_list(&g.url, &self.resolver.git_shallow_hosts);
@@ -1382,6 +1384,19 @@ impl<'a> ResolveDriver<'a> {
             (local, version, deps, None)
         };
         attach_integrity_to_git_source(&mut local, integrity.as_deref());
+        // Apply `packageExtensions` to non-registry packages too. The
+        // registry path applies them to the picked VersionMetadata; git /
+        // remote-tarball / directory packages resolve through this path
+        // with a flat dependency map, so without this an extension
+        // targeting a git dep (e.g. a connector the package require()s at
+        // runtime) is dropped and never linked as a sibling under the
+        // global virtual store.
+        apply_package_extensions_to_deps(
+            &task.name,
+            &real_version,
+            &mut target_deps,
+            &self.resolver.dependency_policy.package_extensions,
+        );
         let dep_path = local.dep_path(&task.name);
         let linked_name = task.name.clone();
 

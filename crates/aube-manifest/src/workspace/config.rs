@@ -632,19 +632,25 @@ impl WorkspaceConfig {
         if let Some(hit) = typed_cache_lookup(project_dir) {
             return Ok(hit);
         }
-        let value = Self::load_uncached(project_dir)?;
+        let value = Self::load_present(project_dir)?.unwrap_or_default();
         typed_cache_insert(project_dir, value.clone());
         Ok(value)
     }
 
-    fn load_uncached(project_dir: &Path) -> Result<Self, crate::Error> {
+    /// Parse the workspace yaml in `project_dir`, distinguishing an
+    /// *absent* file (`None`) from a *present* one (`Some`, possibly the
+    /// empty default). [`load`](Self::load) folds both into
+    /// `Self::default()`, but workspace-root discovery must tell them
+    /// apart — a present-but-memberless yaml is a settings-only root
+    /// candidate, an absent one is not. See [`workspace_yaml_kind`].
+    fn load_present(project_dir: &Path) -> Result<Option<Self>, crate::Error> {
         let Some((path, content)) = find_and_read(project_dir)? else {
-            return Ok(Self::default());
+            return Ok(None);
         };
         if content.trim().is_empty() {
-            return Ok(Self::default());
+            return Ok(Some(Self::default()));
         }
-        crate::parse_yaml(&path, content)
+        Ok(Some(crate::parse_yaml(&path, content)?))
     }
 }
 
@@ -758,6 +764,62 @@ pub fn workspace_yaml_existing(project_dir: &Path) -> Option<PathBuf> {
     None
 }
 
+/// How a directory participates in workspace-root discovery, derived
+/// from its workspace yaml (`aube-workspace.yaml` / `pnpm-workspace.yaml`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceYamlKind {
+    /// No workspace yaml in this directory.
+    Absent,
+    /// A yaml exists but declares no members — settings-only:
+    /// per-package config (`minimumReleaseAge`, `pnpmfile`, `catalog`,
+    /// etc.) with no `packages:` list.
+    SettingsOnly,
+    /// A yaml exists and declares members (a non-empty `packages:` list).
+    DeclaresMembers,
+}
+
+/// Classify `project_dir`'s workspace yaml in a single file probe.
+///
+/// Workspace-root discovery needs three outcomes per directory:
+/// `DeclaresMembers` (stop — this is the root), `SettingsOnly` (remember
+/// as a fallback root, keep walking), and `Absent` (keep walking).
+/// [`WorkspaceConfig::load`] collapses the latter two — an absent file
+/// and a memberless one both yield an empty `packages` list — so
+/// classifying here lets the ancestor walk use one probe per directory
+/// instead of a memoized load plus a redundant existence stat.
+///
+/// pnpm treats *any* `pnpm-workspace.yaml` as a workspace root, but a
+/// member of an enclosing workspace that drops a settings-only yaml into
+/// its own directory is configuring itself, not declaring a new
+/// workspace. Discovery walks past such a file to the real root so `cd
+/// member && aube install` still targets the workspace the member
+/// belongs to — otherwise the member resolves to itself, its workspace
+/// siblings can't be linked, and the install never settles.
+///
+/// A successful parse is memoized through the typed cache, so a later
+/// [`WorkspaceConfig::load`] for the same directory stays warm.
+pub fn workspace_yaml_kind(project_dir: &Path) -> WorkspaceYamlKind {
+    match WorkspaceConfig::load_present(project_dir) {
+        Ok(Some(config)) => {
+            let kind = if config.packages.is_empty() {
+                WorkspaceYamlKind::SettingsOnly
+            } else {
+                WorkspaceYamlKind::DeclaresMembers
+            };
+            typed_cache_insert(project_dir, config);
+            kind
+        }
+        Ok(None) => {
+            typed_cache_insert(project_dir, WorkspaceConfig::default());
+            WorkspaceYamlKind::Absent
+        }
+        // A present-but-unreadable/unparseable yaml is not a members
+        // root, but it still exists — treat it as a settings-only root
+        // candidate, matching the prior existence-stat behavior.
+        Err(_) => WorkspaceYamlKind::SettingsOnly,
+    }
+}
+
 /// Resolve which workspace-yaml path a writer should mutate in
 /// `project_dir`. Existing `aube-workspace.yaml` wins over
 /// `pnpm-workspace.yaml`; when neither exists, falls back to
@@ -818,5 +880,57 @@ pub fn config_write_target(project_dir: &Path) -> ConfigWriteTarget {
     match workspace_yaml_existing(project_dir) {
         Some(path) => ConfigWriteTarget::WorkspaceYaml(path),
         None => ConfigWriteTarget::PackageJson,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workspace_yaml_kind_classifies_absent_settings_only_and_members() {
+        // Absent: no workspace yaml at all — discovery keeps walking.
+        let absent = tempfile::tempdir().unwrap();
+        assert_eq!(
+            workspace_yaml_kind(absent.path()),
+            WorkspaceYamlKind::Absent
+        );
+
+        // Settings-only: a yaml with no `packages:` list, i.e. the
+        // per-package config a member drops into its own directory.
+        let settings = tempfile::tempdir().unwrap();
+        std::fs::write(
+            settings.path().join("pnpm-workspace.yaml"),
+            "minimumReleaseAge: 0\nenableGlobalVirtualStore: true\n",
+        )
+        .unwrap();
+        assert_eq!(
+            workspace_yaml_kind(settings.path()),
+            WorkspaceYamlKind::SettingsOnly
+        );
+
+        // Declares members: a non-empty `packages:` list — the real root.
+        let members = tempfile::tempdir().unwrap();
+        std::fs::write(
+            members.path().join("pnpm-workspace.yaml"),
+            "packages:\n  - 'packages/*'\n",
+        )
+        .unwrap();
+        assert_eq!(
+            workspace_yaml_kind(members.path()),
+            WorkspaceYamlKind::DeclaresMembers
+        );
+    }
+
+    #[test]
+    fn workspace_yaml_kind_treats_empty_yaml_as_settings_only() {
+        // A present-but-empty yaml is settings-only, not absent: the file
+        // exists, so it is still a settings-root candidate.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("pnpm-workspace.yaml"), "\n").unwrap();
+        assert_eq!(
+            workspace_yaml_kind(dir.path()),
+            WorkspaceYamlKind::SettingsOnly
+        );
     }
 }

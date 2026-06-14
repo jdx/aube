@@ -58,7 +58,10 @@ use error::{
 #[cfg(test)]
 use local_source::{dep_path_for, should_block_exotic_subdep};
 #[cfg(test)]
-use package_ext::{apply_package_extensions, package_selector_matches, pick_override_spec};
+use package_ext::{
+    apply_package_extensions, apply_package_extensions_to_deps, package_selector_matches,
+    pick_override_spec,
+};
 #[cfg(test)]
 use peer_context::{
     apply_dedupe_peers_to_key, contains_canonical_back_ref, dedupe_peer_suffixes,

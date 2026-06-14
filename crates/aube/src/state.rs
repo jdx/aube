@@ -54,6 +54,26 @@ pub struct InstallState {
     pub lockfile_hash: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lockfile_snapshot_name: Option<String>,
+    /// Per-member lockfile fingerprints for `sharedWorkspaceLockfile=false`
+    /// workspaces, keyed by the member's importer path (relative to the
+    /// workspace root). That layout writes one lockfile per member and
+    /// *no* shared root lockfile, so `lockfile_hash` above is empty and
+    /// the single-lockfile freshness check would treat every install as
+    /// "no lockfile found" and re-run the full pipeline. Recording each
+    /// member here lets the warm path verify the per-member lockfiles
+    /// instead. Every current member is recorded — a depless member with
+    /// no lockfile maps to an empty hash — so an added or removed member
+    /// also invalidates the warm path. Empty for the default shared
+    /// layout and for non-workspace projects.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub member_lockfile_hashes: BTreeMap<String, String>,
+    /// `(size, mtime)` per member lockfile, mirroring
+    /// `package_json_meta`'s fast path: stat each member lockfile and
+    /// only re-hash when the snapshot moved. Keyed identically to
+    /// `member_lockfile_hashes`. Members without a lockfile have no
+    /// entry here.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub member_lockfile_meta: BTreeMap<String, FileMeta>,
     pub package_json_hashes: BTreeMap<String, String>,
     /// Mirrors `FreshnessState::package_json_meta`. See R1 docstring
     /// there for the freshness-check fast-path semantics.
@@ -108,6 +128,13 @@ struct FreshnessState {
     lockfile_hash: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     lockfile_snapshot_name: Option<String>,
+    /// See [`InstallState::member_lockfile_hashes`]. Mirrored into the
+    /// freshness sidecar so `check_needs_install` can verify per-member
+    /// lockfiles without loading the full state file.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    member_lockfile_hashes: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    member_lockfile_meta: BTreeMap<String, FileMeta>,
     package_json_hashes: BTreeMap<String, String>,
     /// Mtime + size per `package.json` keyed identically to
     /// `package_json_hashes`. Lets `package_jsons_stale` skip the
@@ -178,6 +205,8 @@ impl From<&InstallState> for FreshnessState {
         Self {
             lockfile_hash: state.lockfile_hash.clone(),
             lockfile_snapshot_name: state.lockfile_snapshot_name.clone(),
+            member_lockfile_hashes: state.member_lockfile_hashes.clone(),
+            member_lockfile_meta: state.member_lockfile_meta.clone(),
             package_json_hashes: state.package_json_hashes.clone(),
             package_json_meta: state.package_json_meta.clone(),
             section_filtered: state.section_filtered,
@@ -233,6 +262,31 @@ fn check_needs_install_inner(
     project_dir: &Path,
     cli_flags: Option<&[(String, String)]>,
 ) -> Option<String> {
+    // Surface the warm-path verdict on the diagnostic pipeline. A miss
+    // re-runs the full resolve/fetch/delta/link pipeline (the visible
+    // "re-link even though nothing changed" symptom), so when someone
+    // reports an install that won't settle, `AUBE_LOG=debug aube
+    // install` now names the exact freshness input that drifted instead
+    // of leaving them to guess. Trace-level on a hit keeps the default
+    // output clean.
+    let reason = check_needs_install_compute(project_dir, cli_flags);
+    match &reason {
+        Some(reason) => tracing::debug!(
+            project_dir = %project_dir.display(),
+            "install warm path miss: {reason}"
+        ),
+        None => tracing::trace!(
+            project_dir = %project_dir.display(),
+            "install warm path hit: nothing to do"
+        ),
+    }
+    reason
+}
+
+fn check_needs_install_compute(
+    project_dir: &Path,
+    cli_flags: Option<&[(String, String)]>,
+) -> Option<String> {
     let _diag =
         aube_util::diag::Span::new(aube_util::diag::Category::Frozen, "check_needs_install");
     let (modules_dir, state_path) = resolve_paths(project_dir);
@@ -269,9 +323,27 @@ fn check_needs_install_inner(
     let (lockfile_name, lockfile_path) = active_lockfile(project_dir);
     let mut lockfile_missing = false;
     if let Some(path) = lockfile_path {
+        // This branch also absorbs a `sharedWorkspaceLockfile` flip from
+        // false to true. The previous false-layout install left a
+        // non-empty `member_lockfile_hashes` and an empty `lockfile_hash`
+        // (no shared root lockfile then), but a shared root lockfile now
+        // exists, so we land here rather than the member-lockfile branch
+        // below. Its hash can't match the empty recorded one, so we
+        // report a change and the full reinstall rewrites the state into
+        // the shared shape — the `member_lockfile_hashes.is_empty()`
+        // guard below is not the only path that handles the transition.
         let current_hash = hash_file(&path);
         if current_hash != state.lockfile_hash {
             return Some(format!("{lockfile_name} has changed"));
+        }
+    } else if !state.member_lockfile_hashes.is_empty() {
+        // No shared root lockfile, but the last install recorded
+        // per-member lockfiles — this is a `sharedWorkspaceLockfile=false`
+        // workspace. The members own the lockfiles, so verify those
+        // instead of falling through to "no lockfile found" (which would
+        // make every install/run re-run the full pipeline).
+        if let Some(reason) = member_lockfiles_stale(project_dir, &state) {
+            return Some(reason);
         }
     } else {
         lockfile_missing = true;
@@ -395,6 +467,91 @@ fn package_jsons_stale(project_dir: &Path, state: &FreshnessState) -> Option<Str
     None
 }
 
+/// Fingerprint every workspace member's lockfile for the
+/// `sharedWorkspaceLockfile=false` layout. Returns `(hashes, meta)`
+/// keyed by the member's importer path relative to `project_dir`.
+///
+/// Only meaningful when `sharedWorkspaceLockfile` is off; returns empty
+/// maps for the default shared layout and for non-workspace projects so
+/// the warm path's `member_lockfile_hashes.is_empty()` gate stays
+/// inert there. *Every* current member is recorded — a member that has
+/// no lockfile yet (e.g. a depless package) maps to an empty hash —
+/// so the freshness check can also notice a member being added or
+/// removed, not just edited.
+fn collect_member_lockfile_state(
+    project_dir: &Path,
+) -> (BTreeMap<String, String>, BTreeMap<String, FileMeta>) {
+    let mut hashes = BTreeMap::new();
+    let mut metas = BTreeMap::new();
+    let shared = crate::commands::with_settings_ctx(project_dir, |ctx| {
+        aube_settings::resolved::shared_workspace_lockfile(ctx)
+    });
+    if shared {
+        return (hashes, metas);
+    }
+    let Ok(members) = aube_workspace::find_workspace_packages(project_dir) else {
+        return (hashes, metas);
+    };
+    for member_dir in members {
+        let key = relative_path_or_original(&member_dir, project_dir);
+        match active_lockfile(&member_dir).1 {
+            Some(path) => {
+                hashes.insert(key.clone(), hash_file(&path));
+                if let Some(meta) = FileMeta::capture(&path) {
+                    metas.insert(key, meta);
+                }
+            }
+            None => {
+                hashes.insert(key, String::new());
+            }
+        }
+    }
+    (hashes, metas)
+}
+
+/// Freshness check for the per-member lockfiles recorded under
+/// `sharedWorkspaceLockfile=false`. Re-enumerates the current workspace
+/// members so an added or removed member invalidates the warm path,
+/// and compares each member's lockfile with the same mtime-then-hash
+/// fast path [`package_jsons_stale`] uses. Returns `Some(reason)` on
+/// the first drift, `None` when every member lockfile matches what the
+/// last install recorded.
+fn member_lockfiles_stale(project_dir: &Path, state: &FreshnessState) -> Option<String> {
+    let members = aube_workspace::find_workspace_packages(project_dir).unwrap_or_default();
+    let mut seen = std::collections::BTreeSet::new();
+    for member_dir in &members {
+        let key = relative_path_or_original(member_dir, project_dir);
+        let Some(stored_hash) = state.member_lockfile_hashes.get(&key) else {
+            return Some(format!("{key} is a new workspace member"));
+        };
+        seen.insert(key.clone());
+        let Some(path) = active_lockfile(member_dir).1 else {
+            // An empty stored hash means "member had no lockfile last
+            // install" — still none now is consistent. A non-empty hash
+            // means the member's lockfile vanished, which is drift.
+            if stored_hash.is_empty() {
+                continue;
+            }
+            return Some(format!("{key} lockfile is missing"));
+        };
+        if let Some(stored_meta) = state.member_lockfile_meta.get(&key)
+            && let Some(current_meta) = FileMeta::capture(&path)
+            && current_meta == *stored_meta
+        {
+            continue;
+        }
+        if hash_file(&path) != *stored_hash {
+            return Some(format!("{key} lockfile has changed"));
+        }
+    }
+    for key in state.member_lockfile_hashes.keys() {
+        if !seen.contains(key) {
+            return Some(format!("{key} was removed from the workspace"));
+        }
+    }
+    None
+}
+
 /// Write state file after a successful install. `section_filtered` should be
 /// `true` when the install omitted dependency sections, so that
 /// `check_needs_install` knows to trigger a full re-install before commands
@@ -480,9 +637,17 @@ pub fn write_state(project_dir: &Path, input: WriteStateInput<'_>) -> Result<(),
         })
         .collect();
 
+    // `sharedWorkspaceLockfile=false` writes one lockfile per member and
+    // no shared root lockfile, so `lockfile_hash` is empty above.
+    // Fingerprint each member's lockfile so the warm path has something
+    // to verify; empty for the default shared layout.
+    let (member_lockfile_hashes, member_lockfile_meta) = collect_member_lockfile_state(project_dir);
+
     let state = InstallState {
         lockfile_hash,
         lockfile_snapshot_name,
+        member_lockfile_hashes,
+        member_lockfile_meta,
         package_json_hashes,
         package_json_meta,
         aube_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -747,19 +912,25 @@ impl InstallLayoutState {
             aube_linker::NodeLinker::Isolated => InstallLayoutMode::Isolated,
             aube_linker::NodeLinker::Hoisted => InstallLayoutMode::Hoisted,
         };
+        // Record each importer's direct-dependency symlinks — the root
+        // (`.`) *and* every workspace member — relative to `project_dir`.
+        // `verify_install_layout` walks these, so tracking members means a
+        // deleted or incompletely-linked member `node_modules` busts the
+        // warm path. Previously only `.` was tracked, so `rm -rf
+        // <member>/node_modules && aube install` short-circuited to
+        // "Already up to date" and never relinked the member.
         let mut direct_entries = BTreeMap::new();
-        if let Some(deps) = graph.importers.get(".") {
-            let mut entries = Vec::with_capacity(deps.len());
-            for dep in deps {
-                entries.push(project_dir.join(modules_dir_name).join(&dep.name));
-            }
-            direct_entries.insert(
-                ".".to_string(),
-                entries
-                    .into_iter()
-                    .map(|p| relative_path_or_original(&p, project_dir))
-                    .collect(),
-            );
+        for (importer, deps) in &graph.importers {
+            let modules_base = if importer == "." {
+                project_dir.join(modules_dir_name)
+            } else {
+                project_dir.join(importer).join(modules_dir_name)
+            };
+            let entries = deps
+                .iter()
+                .map(|dep| relative_path_or_original(&modules_base.join(&dep.name), project_dir))
+                .collect();
+            direct_entries.insert(importer.clone(), entries);
         }
 
         let mut packages = BTreeMap::new();
@@ -1107,8 +1278,8 @@ mod tests {
     use super::{
         InstallLayoutMode, InstallLayoutState, InstallState, InstalledPackageState,
         collect_package_json_hashes_from_manifests, empty_blake3_hash, fresh_state_file, hash_file,
-        install_state_file, read_or_migrate_fresh_state, relative_path_or_original, remove_state,
-        verify_install_layout,
+        install_state_file, member_lockfiles_stale, read_or_migrate_fresh_state,
+        relative_path_or_original, remove_state, verify_install_layout,
     };
     use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
@@ -1130,6 +1301,8 @@ mod tests {
         let state = InstallState {
             lockfile_hash: String::new(),
             lockfile_snapshot_name: None,
+            member_lockfile_hashes: BTreeMap::new(),
+            member_lockfile_meta: BTreeMap::new(),
             package_json_hashes: BTreeMap::new(),
             package_json_meta: BTreeMap::new(),
             aube_version: String::new(),
@@ -1163,6 +1336,51 @@ mod tests {
                 "installed package metadata missing: node_modules/.aube/missing/node_modules/is-odd/package.json"
                     .to_string()
             )
+        );
+    }
+
+    #[test]
+    fn from_graph_records_direct_entries_for_every_importer() {
+        let project_dir = temp_project_dir("layout-all-importers");
+        let aube_dir = project_dir.join("node_modules/.aube");
+        let dep = |name: &str, dep_path: &str| aube_lockfile::DirectDep {
+            name: name.to_string(),
+            dep_path: dep_path.to_string(),
+            dep_type: aube_lockfile::DepType::Production,
+            specifier: None,
+        };
+        let mut importers = BTreeMap::new();
+        importers.insert(".".to_string(), vec![dep("is-odd", "is-odd@3.0.1")]);
+        importers.insert("packages/svc".to_string(), vec![dep("zod", "zod@3.23.8")]);
+        let graph = aube_lockfile::LockfileGraph {
+            importers,
+            ..Default::default()
+        };
+
+        let layout = InstallLayoutState::from_graph(
+            &project_dir,
+            &graph,
+            aube_linker::NodeLinker::Isolated,
+            "node_modules",
+            &aube_dir,
+            120,
+            None,
+        );
+
+        // The root importer's direct symlink sits under the workspace
+        // root's node_modules.
+        assert_eq!(
+            layout.direct_entries.get("."),
+            Some(&vec!["node_modules/is-odd".to_string()])
+        );
+        // Every member's direct symlink is tracked under its own
+        // node_modules so a deleted/incomplete member node_modules busts
+        // the warm path instead of reporting "Already up to date". This is
+        // the regression guard for the member-only `node_modules` not
+        // being verified.
+        assert_eq!(
+            layout.direct_entries.get("packages/svc"),
+            Some(&vec!["packages/svc/node_modules/zod".to_string()])
         );
     }
 
@@ -1201,6 +1419,8 @@ mod tests {
         let state = InstallState {
             lockfile_hash: "blake3:lock".to_string(),
             lockfile_snapshot_name: None,
+            member_lockfile_hashes: BTreeMap::new(),
+            member_lockfile_meta: BTreeMap::new(),
             package_json_hashes: BTreeMap::from([(".".to_string(), "blake3:pkg".to_string())]),
             package_json_meta: BTreeMap::new(),
             aube_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -1254,6 +1474,8 @@ mod tests {
         let state = InstallState {
             lockfile_hash: "blake3:lock".to_string(),
             lockfile_snapshot_name: None,
+            member_lockfile_hashes: BTreeMap::new(),
+            member_lockfile_meta: BTreeMap::new(),
             package_json_hashes: BTreeMap::new(),
             package_json_meta: BTreeMap::new(),
             aube_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -1351,6 +1573,8 @@ mod tests {
         let state = InstallState {
             lockfile_hash: String::new(),
             lockfile_snapshot_name: None,
+            member_lockfile_hashes: BTreeMap::new(),
+            member_lockfile_meta: BTreeMap::new(),
             package_json_hashes: pjh,
             package_json_meta: BTreeMap::new(),
             aube_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -1377,6 +1601,79 @@ mod tests {
         assert_eq!(
             new_shape, state.package_json_shape_digests["."],
             "shape digest should ignore scripts + whitespace"
+        );
+    }
+
+    #[test]
+    fn member_lockfiles_stale_detects_edit_add_and_remove() {
+        // Config-only `sharedWorkspaceLockfile=false` layout: with no
+        // shared root lockfile to anchor on, the warm path verifies each
+        // member's own lockfile. Drive the edit / add / remove detection
+        // directly — no install or registry needed.
+        let dir = temp_project_dir("member-lockfiles-stale");
+        std::fs::write(
+            dir.join("pnpm-workspace.yaml"),
+            "packages:\n  - 'packages/*'\n",
+        )
+        .unwrap();
+        let write_member = |name: &str, lock: &str| -> PathBuf {
+            let d = dir.join("packages").join(name);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(
+                d.join("package.json"),
+                format!("{{\"name\":\"@ws/{name}\"}}"),
+            )
+            .unwrap();
+            let lockfile = d.join("aube-lock.yaml");
+            std::fs::write(&lockfile, lock).unwrap();
+            lockfile
+        };
+        let a_lock = write_member("a", "lockfileVersion: '9.0'\n# a\n");
+        let b_lock = write_member("b", "lockfileVersion: '9.0'\n# b\n");
+
+        let mut hashes = BTreeMap::new();
+        hashes.insert("packages/a".to_string(), hash_file(&a_lock));
+        hashes.insert("packages/b".to_string(), hash_file(&b_lock));
+        let state = super::FreshnessState {
+            lockfile_hash: String::new(),
+            lockfile_snapshot_name: None,
+            member_lockfile_hashes: hashes,
+            member_lockfile_meta: BTreeMap::new(),
+            package_json_hashes: BTreeMap::new(),
+            package_json_meta: BTreeMap::new(),
+            section_filtered: false,
+            settings_hash: String::new(),
+            package_json_shape_digests: BTreeMap::new(),
+            layout: None,
+            unreviewed_builds: Vec::new(),
+        };
+
+        // Every recorded member matches what is on disk → fresh.
+        assert_eq!(member_lockfiles_stale(&dir, &state), None);
+
+        // Editing a member's lockfile busts the warm path.
+        std::fs::write(&a_lock, "lockfileVersion: '9.0'\n# a edited\n").unwrap();
+        assert_eq!(
+            member_lockfiles_stale(&dir, &state),
+            Some("packages/a lockfile has changed".to_string())
+        );
+        std::fs::write(&a_lock, "lockfileVersion: '9.0'\n# a\n").unwrap();
+        assert_eq!(member_lockfiles_stale(&dir, &state), None);
+
+        // A brand-new member (absent from the recorded state) busts it.
+        let c_dir = dir.join("packages/c");
+        write_member("c", "lockfileVersion: '9.0'\n# c\n");
+        assert_eq!(
+            member_lockfiles_stale(&dir, &state),
+            Some("packages/c is a new workspace member".to_string())
+        );
+        std::fs::remove_dir_all(&c_dir).unwrap();
+
+        // A removed member (recorded but gone) busts it.
+        std::fs::remove_dir_all(dir.join("packages/b")).unwrap();
+        assert_eq!(
+            member_lockfiles_stale(&dir, &state),
+            Some("packages/b was removed from the workspace".to_string())
         );
     }
 }

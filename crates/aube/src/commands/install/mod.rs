@@ -71,7 +71,8 @@ use startup::{
 use summary::print_already_up_to_date;
 use workspace::{
     discover_workspace_plan, filter_graph_to_importers, filter_graph_to_workspace_selection,
-    importer_project_dir, per_project_write_selection, write_per_project_lockfiles,
+    importer_project_dir, merge_member_lockfile_graphs, per_project_write_selection,
+    write_per_project_lockfiles,
 };
 
 #[derive(Default)]
@@ -575,7 +576,19 @@ pub async fn run(opts: InstallOptions) -> miette::Result<()> {
     let mut prewarm_graph_hashes: Option<std::sync::Arc<aube_lockfile::graph_hash::GraphHashes>> =
         None;
     let (graph, package_indices, cached_count, fetch_count) = match lockfile_result {
-        Ok((graph, kind)) => {
+        Ok((mut graph, kind)) => {
+            // Under `sharedWorkspaceLockfile=false` the project's own
+            // lockfile only carries the `.` importer, so the reuse path
+            // would hand the linker a root-only graph and never relink
+            // members (a deleted/incomplete member `node_modules` would
+            // be reported "up to date" yet stay broken). Fold every
+            // member's per-project lockfile back in so the linker sees
+            // all importers. No-op for shared lockfiles, non-workspace
+            // projects, and the cold resolve path (which already
+            // produces every importer).
+            if !shared_workspace_lockfile && has_workspace {
+                merge_member_lockfile_graphs(&cwd, &mut graph, &manifests);
+            }
             let graph = resolve::apply_lockfile_graph_platform_rules(
                 graph,
                 kind,

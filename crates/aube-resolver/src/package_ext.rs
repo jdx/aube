@@ -1,6 +1,6 @@
 use crate::PackageExtension;
 use crate::override_rule;
-use crate::semver_util::{strip_alias_prefix, version_satisfies};
+use crate::semver_util::{normalize_range, strip_alias_prefix, version_satisfies};
 use std::collections::BTreeMap;
 
 /// Find the best-matching override rule for a task and return its
@@ -66,6 +66,38 @@ pub(crate) fn apply_package_extensions(
     }
 }
 
+/// Apply `packageExtensions` to a non-registry (git / remote-tarball /
+/// directory) package's flat `name -> range` dependency map.
+///
+/// The registry resolve path applies extensions to the picked
+/// [`aube_registry::VersionMetadata`] via [`apply_package_extensions`],
+/// but git/tarball/directory packages resolve through a separate path
+/// whose only dependency surface is a flat map (the package's own
+/// `dependencies`). Without this, a `packageExtensions` entry targeting
+/// a git dependency — e.g. injecting a connector a package `require()`s
+/// dynamically at runtime so it lands as a sibling in the global virtual
+/// store — is silently dropped, never resolved, and never linked.
+///
+/// Only `dependencies` are merged: the non-registry resolve path models
+/// a package's transitive surface as `dependencies` alone (it does not
+/// enqueue a git package's own `optionalDependencies`/`peerDependencies`),
+/// so injecting the other maps here would resolve them under stricter
+/// semantics than the package's own deps. `extend_missing` keeps the
+/// package's declared deps authoritative.
+pub(crate) fn apply_package_extensions_to_deps(
+    name: &str,
+    version: &str,
+    deps: &mut BTreeMap<String, String>,
+    extensions: &[PackageExtension],
+) {
+    for extension in extensions {
+        if !package_selector_matches(&extension.selector, name, version) {
+            continue;
+        }
+        extend_missing(deps, &extension.dependencies);
+    }
+}
+
 fn extend_missing<K, V>(target: &mut BTreeMap<K, V>, additions: &BTreeMap<K, V>)
 where
     K: Ord + Clone,
@@ -84,7 +116,20 @@ pub(crate) fn package_selector_matches(selector: &str, name: &str, version: &str
     let Some((selector_name, range)) = split_package_selector(selector) else {
         return false;
     };
-    selector_name == name && version_satisfies(version, range)
+    if selector_name != name {
+        return false;
+    }
+    // A `*` (or empty) range means "any version" and must hold even when
+    // `version` isn't parseable semver — git/tarball packages can carry
+    // odd version strings. `version_satisfies` returns false for an
+    // unparseable version, so short-circuit `*` to keep `name@*`
+    // extensions matching non-registry packages. Registry packages
+    // always have valid semver, so this never changes their outcome.
+    let range = normalize_range(range);
+    if range == "*" {
+        return true;
+    }
+    version_satisfies(version, range)
 }
 
 fn split_package_selector(selector: &str) -> Option<(&str, &str)> {
