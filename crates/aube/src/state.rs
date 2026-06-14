@@ -323,6 +323,15 @@ fn check_needs_install_compute(
     let (lockfile_name, lockfile_path) = active_lockfile(project_dir);
     let mut lockfile_missing = false;
     if let Some(path) = lockfile_path {
+        // This branch also absorbs a `sharedWorkspaceLockfile` flip from
+        // false to true. The previous false-layout install left a
+        // non-empty `member_lockfile_hashes` and an empty `lockfile_hash`
+        // (no shared root lockfile then), but a shared root lockfile now
+        // exists, so we land here rather than the member-lockfile branch
+        // below. Its hash can't match the empty recorded one, so we
+        // report a change and the full reinstall rewrites the state into
+        // the shared shape — the `member_lockfile_hashes.is_empty()`
+        // guard below is not the only path that handles the transition.
         let current_hash = hash_file(&path);
         if current_hash != state.lockfile_hash {
             return Some(format!("{lockfile_name} has changed"));

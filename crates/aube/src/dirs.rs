@@ -144,19 +144,21 @@ fn find_workspace_root_uncached(start: &Path) -> Option<PathBuf> {
     // to the nearest settings-only yaml: a standalone single package
     // that keeps its config in `pnpm-workspace.yaml` is still its own
     // root.
+    use aube_manifest::workspace::{WorkspaceYamlKind, workspace_yaml_kind};
     let mut settings_only_root: Option<PathBuf> = None;
     for dir in start.ancestors() {
-        if aube_manifest::workspace::workspace_yaml_declares_members(dir) {
-            return Some(dir.to_path_buf());
+        // One probe per dir classifies the yaml as members-declaring,
+        // settings-only, or absent — no separate existence stat.
+        match workspace_yaml_kind(dir) {
+            WorkspaceYamlKind::DeclaresMembers => return Some(dir.to_path_buf()),
+            WorkspaceYamlKind::SettingsOnly if settings_only_root.is_none() => {
+                settings_only_root = Some(dir.to_path_buf());
+            }
+            _ => {}
         }
         let pkg = dir.join("package.json");
         if pkg.is_file() && package_json_has_workspaces(&pkg) {
             return Some(dir.to_path_buf());
-        }
-        if settings_only_root.is_none()
-            && aube_manifest::workspace::workspace_yaml_existing(dir).is_some()
-        {
-            settings_only_root = Some(dir.to_path_buf());
         }
         if stop.as_deref() == Some(dir) {
             break;
