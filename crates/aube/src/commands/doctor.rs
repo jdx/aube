@@ -127,7 +127,8 @@ fn build_report(anchor: &Path, in_project: bool) -> miette::Result<Report> {
 
 fn version_section() -> Section {
     let mut s = Section::new("version");
-    s.push("aube", env!("CARGO_PKG_VERSION"));
+    let id = aube_util::embedder();
+    s.push(id.name, id.version);
     s.push(
         "build-profile",
         if cfg!(debug_assertions) {
@@ -211,6 +212,8 @@ fn project_section(anchor: &Path, report: &mut Report) -> Section {
             };
             s.push("package", label);
             // Self-version pin (packageManager / devEngines.packageManager).
+            // Tool name from the active embedder (standalone aube → "aube").
+            let name = aube_util::embedder().name;
             let self_pin = manifest
                 .dev_engines
                 .as_ref()
@@ -222,11 +225,11 @@ fn project_section(anchor: &Path, report: &mut Report) -> Section {
                         .extra
                         .get("packageManager")
                         .and_then(|v| v.as_str())
-                        .and_then(|raw| raw.strip_prefix("aube@"))
+                        .and_then(|raw| raw.strip_prefix(&format!("{name}@")))
                         .map(|v| (v.to_string(), "packageManager"))
                 });
             if let Some((pin, source)) = self_pin {
-                s.push("aube-pin", format!("{pin} (via {source})"));
+                s.push(format!("{name}-pin"), format!("{pin} (via {source})"));
             }
             if let Some(range) = manifest.engines.get("node")
                 && let Some(node) = crate::engines::effective_node_version(None)
@@ -348,14 +351,18 @@ fn check_foreign_package_manager_dirs(anchor: &Path, report: &mut Report) {
 fn check_virtual_store_links(anchor: &Path, report: &mut Report) -> miette::Result<()> {
     let links = super::check::run_report(anchor).wrap_err("failed to walk the virtual store")?;
     if !links.issues.is_empty() {
+        // The virtual-store leaf is `.{embedder().name}` (see
+        // `aube-linker`'s `aube_dir`), so route the reported path through
+        // the profile. Standalone aube → `node_modules/.aube/`.
         report.errors.push(format!(
-            "{} broken {} in node_modules/.aube/ (run `aube check` for details)",
+            "{} broken {} in node_modules/.{}/ (run `aube check` for details)",
             links.issues.len(),
             if links.issues.len() == 1 {
                 "dependency link"
             } else {
                 "dependency links"
-            }
+            },
+            aube_util::embedder().name,
         ));
     }
     Ok(())

@@ -98,16 +98,19 @@ impl Linker {
         self
     }
 
-    /// Compute the effective `.aube/` path for `project_dir`.
+    /// Compute the effective virtual-store path for `project_dir`.
     /// Consults the override installed by `with_aube_dir_override` if
-    /// any; otherwise falls back to `<project_dir>/<modules_dir>/.aube`.
+    /// any; otherwise falls back to `<project_dir>/<modules_dir>/.<name>`.
     /// Used internally by `link_all`; also called by the install
     /// driver's "already linked" fast path so both sites land on the
     /// same directory when the user has overridden `virtualStoreDir`.
     pub fn aube_dir_for(&self, project_dir: &Path) -> PathBuf {
-        self.aube_dir_override
-            .clone()
-            .unwrap_or_else(|| project_dir.join(&self.modules_dir_name).join(".aube"))
+        self.aube_dir_override.clone().unwrap_or_else(|| {
+            // Virtual-store leaf from the active embedder's name: `.<name>`.
+            // Standalone aube → `.aube`.
+            let leaf = format!(".{}", aube_util::embedder().name);
+            project_dir.join(&self.modules_dir_name).join(leaf)
+        })
     }
 
     /// Override the package-level linker worker count. Values below 1

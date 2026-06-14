@@ -9,14 +9,17 @@ pub struct CompletionArgs {
 }
 
 pub async fn run(args: CompletionArgs) -> Result<()> {
+    // Command name from the active embedder (standalone aube → "aube").
+    let name = aube_util::embedder().name;
+    let usage_cmd = format!("{name} usage");
     let output = Command::new("usage")
         .args([
             "g",
             "completion",
             &args.shell,
-            "aube",
+            name,
             "--usage-cmd",
-            "aube usage",
+            &usage_cmd,
             "--cache-key",
             env!("CARGO_PKG_VERSION"),
         ])

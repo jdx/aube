@@ -41,6 +41,10 @@ use std::sync::OnceLock;
 pub struct Embedder {
     /// Tool name, lowercase (e.g. `"aube"`). The proper noun users type and
     /// see in output, and the clap command name driving help/usage/errors.
+    /// Must be filesystem- and command-safe (no spaces, slashes, or shell
+    /// metacharacters); it is used verbatim in on-disk sidecar paths (e.g.
+    /// `.<name>_patch_state.json`, `.<name>-deploy-injected/`) and in command
+    /// invocations, so the embedder is responsible for supplying a safe slug.
     pub name: &'static str,
     /// High-visibility display name shown in the progress banner (e.g.
     /// `"aube"`). Usually equal to [`name`](Self::name); split out so an

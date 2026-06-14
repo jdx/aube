@@ -524,12 +524,21 @@ enum Commands {
 /// This is the whole embedding API: register-then-run in one call, so a host
 /// never has to separately wire identity and defaults.
 ///
-/// **Takes over the process.** This is intended to be the program's entire
-/// `main`: it parses argv, runs the selected command, and may terminate the
-/// process directly (e.g. `std::process::exit` on a non-zero command result).
-/// Do not call it expecting control to return normally for further work.
-pub fn cli_main(embedder: &'static aube_util::Embedder) {
-    cli_main_with_defaults(embedder, Vec::new());
+/// **Returns the exit code; it does not terminate the process.** It parses
+/// argv, runs the selected command, renders any diagnostic to stderr, and
+/// hands back the code the binary's `main` should exit with. Returning rather
+/// than calling `std::process::exit` keeps it embed-safe: a host that drives
+/// it in-process is not hard-killed by a non-zero result or an error. The
+/// standalone binary does `std::process::exit(cli_main(..))`.
+///
+/// `#[must_use]`: the `i32` is the exit code, not a side effect. An
+/// embedder migrating off the old `process::exit` entrypoint that drops
+/// it would silently exit 0 on every failure — Rust won't warn on an
+/// ignored return — so the lint nudges them to
+/// `std::process::exit(cli_main(..))`.
+#[must_use]
+pub fn cli_main(embedder: &'static aube_util::Embedder) -> i32 {
+    cli_main_with_defaults(embedder, Vec::new())
 }
 
 /// The clap [`Command`](clap::Command) for the CLI, with its version reset to
@@ -551,10 +560,14 @@ pub fn command() -> clap::Command {
 /// (Embedder-*fixed* behavior lives on [`aube_util::Embedder`] itself, not
 /// here.) Standalone aube passes an empty vec, so per-setting built-in
 /// defaults apply unchanged.
+///
+/// `#[must_use]` for the same reason as [`cli_main`]: the returned `i32`
+/// is the exit code the embedder must hand to `std::process::exit`.
+#[must_use]
 pub fn cli_main_with_defaults(
     embedder: &'static aube_util::Embedder,
     defaults: Vec<(String, String)>,
-) {
+) -> i32 {
     // Register the binary's embedder profile before anything reads branding,
     // and its setting defaults before anything resolves settings. Both are
     // idempotent — a no-op if already set (e.g. a test harness that
@@ -563,10 +576,10 @@ pub fn cli_main_with_defaults(
     aube_settings::set_embedder_defaults(defaults);
 
     // Two-phase wrapper: `inner_main` runs the real CLI and returns
-    // `Result<(), miette::Report>`. On Err we render via miette's
-    // fancy handler (matching the previous `Termination` behavior),
-    // then look up the diagnostic's `code()` against
-    // `aube_codes::exit::EXIT_TABLE` to pick a bespoke exit code.
+    // `Result<i32, miette::Report>` — the command's exit code on Ok. On
+    // Err we render via miette's fancy handler (matching the previous
+    // `Termination` behavior), then look up the diagnostic's `code()`
+    // against `aube_codes::exit::EXIT_TABLE` to pick a bespoke exit code.
     // Codes outside the table fall through to `EXIT_GENERIC` (1).
     //
     // Chain a panic hook that flushes the diag buffer before the
@@ -587,9 +600,17 @@ pub fn cli_main_with_defaults(
     // etc. — never hit that path and would otherwise silently lose
     // their slow-fetch warnings to the accumulator.
     aube_registry::slow_metadata::flush_summary();
-    if let Err(report) = result {
-        eprintln!("{report:?}");
-        std::process::exit(report_exit_code(&report));
+    // Return the exit code rather than terminating: only the binary's
+    // `main` calls `std::process::exit`, so a host embedding the command
+    // layer in-process isn't hard-killed by a non-zero result or an
+    // error. The diagnostic still renders to stderr here (matching the
+    // previous `Termination` behavior); only the exit itself moves out.
+    match result {
+        Ok(code) => code,
+        Err(report) => {
+            eprintln!("{report:?}");
+            report_exit_code(&report)
+        }
     }
 }
 
@@ -606,7 +627,7 @@ fn report_exit_code(report: &miette::Report) -> i32 {
     aube_codes::exit::EXIT_GENERIC
 }
 
-fn inner_main() -> miette::Result<()> {
+fn inner_main() -> miette::Result<i32> {
     let mut argv: Vec<OsString> = std::env::args_os().collect();
     // pnpm-compat: pull `--config.<key>[=<value>]` out of argv before
     // clap parses it. Stripping here means the rest of the binary sees
@@ -730,10 +751,13 @@ fn inner_main() -> miette::Result<()> {
         .wrap_err("failed to build tokio runtime")?;
     let exit_code = runtime.block_on(async_main(cli))?;
     drop(runtime);
-    if let Some(exit_code) = exit_code {
-        std::process::exit(exit_code);
-    }
-    Ok(())
+    // Return the command's exit code rather than terminating here: a
+    // non-zero result (e.g. `run`/`exec` propagating a child's status)
+    // must travel back up to the binary's `main`, which owns the single
+    // `std::process::exit`. Exiting here would hard-kill a host that
+    // embeds the command layer in-process. `None` means "no explicit
+    // code" — the normal success exit of 0.
+    Ok(exit_code.unwrap_or(0))
 }
 
 async fn async_main(cli: Cli) -> miette::Result<Option<i32>> {
@@ -969,7 +993,8 @@ async fn async_main(cli: Cli) -> miette::Result<Option<i32>> {
                 Some(_) | None => {
                     return Err(miette::miette!(
                         code = aube_codes::errors::ERR_AUBE_RECURSIVE_NOT_SUPPORTED,
-                        "aube recursive: command does not support recursive execution"
+                        "{} recursive: command does not support recursive execution",
+                        aube_util::embedder().name,
                     ));
                 }
             }

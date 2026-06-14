@@ -75,14 +75,17 @@ pub async fn run(args: LoginArgs) -> miette::Result<()> {
     Ok(())
 }
 
-/// Read the auth token from `$AUBE_AUTH_TOKEN`, then piped stdin, and
-/// finally an interactive `demand` prompt — in that order. The env var is
-/// the escape hatch for CI; the piped case is for
-/// `echo $TOKEN | aube login`; the prompt is the human path, rendered as
-/// a masked password field so the token doesn't echo to the terminal or
-/// end up in shell scrollback.
+/// Read the auth token from the branded `<PREFIX>_AUTH_TOKEN` env var
+/// (standalone aube → `$AUBE_AUTH_TOKEN`), then piped stdin, and finally an
+/// interactive `demand` prompt — in that order. The env var is the escape
+/// hatch for CI; the piped case is for `echo $TOKEN | … login`; the prompt is
+/// the human path, rendered as a masked password field so the token doesn't
+/// echo to the terminal or end up in shell scrollback. An embedder with no
+/// `env_prefix` reads no branded var and falls straight through to stdin.
 fn read_token() -> miette::Result<String> {
-    if let Ok(tok) = std::env::var("AUBE_AUTH_TOKEN") {
+    if let Some(prefix) = aube_util::embedder().env_prefix
+        && let Ok(tok) = std::env::var(format!("{prefix}_AUTH_TOKEN"))
+    {
         let tok = tok.trim();
         if !tok.is_empty() {
             return Ok(tok.to_string());
@@ -122,8 +125,8 @@ fn read_token() -> miette::Result<String> {
 /// 1. POST `{registry}-/v1/login` with `{hostname}`. The registry replies
 ///    with `{loginUrl, doneUrl}`.
 /// 2. Print `loginUrl` and — if we're on an interactive TTY and the user
-///    hasn't opted out via `AUBE_NO_BROWSER` — try to open it in the
-///    default browser.
+///    hasn't opted out via the branded `<PREFIX>_NO_BROWSER` (standalone
+///    aube → `AUBE_NO_BROWSER`) — try to open it in the default browser.
 /// 3. Poll `doneUrl`. The registry returns 202 (with optional
 ///    `Retry-After`) while the user hasn't finished, and 200 with
 ///    `{token}` once login succeeds. Give up after five minutes so a
@@ -137,14 +140,14 @@ async fn web_login(registry: &str) -> miette::Result<String> {
     let login_endpoint = format!("{base}-/v1/login");
 
     let client = aube_util::http::with_webpki_root_fallback(reqwest::Client::builder())
-        .user_agent(concat!("aube/", env!("CARGO_PKG_VERSION")))
+        .user_agent(aube_util::embedder().user_agent)
         .build()
         .into_diagnostic()
         .map_err(|e| miette!("failed to build http client: {e}"))?;
 
     let hostname = std::env::var("HOSTNAME")
         .or_else(|_| std::env::var("COMPUTERNAME"))
-        .unwrap_or_else(|_| "aube".to_string());
+        .unwrap_or_else(|_| aube_util::embedder().name.to_string());
 
     let resp = client
         .post(&login_endpoint)
@@ -180,7 +183,12 @@ async fn web_login(registry: &str) -> miette::Result<String> {
 
     eprintln!("Open this URL in your browser to sign in:");
     eprintln!("  {login_url}");
-    if std::io::stderr().is_terminal() && std::env::var_os("AUBE_NO_BROWSER").is_none() {
+    // Branded opt-out `<PREFIX>_NO_BROWSER` (standalone aube → AUBE_NO_BROWSER);
+    // an embedder with no env_prefix has no such knob, so it never opts out.
+    let no_browser = aube_util::embedder()
+        .env_prefix
+        .is_some_and(|prefix| std::env::var_os(format!("{prefix}_NO_BROWSER")).is_some());
+    if std::io::stderr().is_terminal() && !no_browser {
         let _ = open_browser(&login_url);
     }
     eprintln!("Waiting for authentication...");

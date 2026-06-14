@@ -144,8 +144,8 @@ where
     // An embedder whose `manifest_namespace` is `""` ("manifest root") writes
     // the setting at the **manifest root** unconditionally — `allowBuilds` /
     // `patchedDependencies` become top-level `package.json` keys, matching how
-    // the embedder's own migration writer emits them (e.g. nub's
-    // `apply_manifest_edits`) and where the read side looks. It must NOT divert
+    // the embedder's own migration writer emits them (e.g. an embedder's
+    // own `apply_manifest_edits`) and where the read side looks. It must NOT divert
     // to a pre-existing foreign-brand (`pnpm`) namespace, because under such an
     // embedder the read side gates that namespace off, so a nested write would
     // be orphaned. The empty namespace is signalled by `chosen_ns == None`.
@@ -184,8 +184,8 @@ where
 
     match chosen_ns {
         // Manifest-root target: read/insert/remove the setting key directly at
-        // top level. Matches the embedder's migration writer (e.g. nub's
-        // `apply_manifest_edits`, which writes `allowBuilds`/`patchedDependencies`
+        // top level. Matches the embedder's migration writer (e.g. an embedder's
+        // own `apply_manifest_edits`, which writes `allowBuilds`/`patchedDependencies`
         // at root and removes the `pnpm` object) and the read side, which skips
         // the empty self-namespace and (under a non-pnpm incumbent) the pnpm
         // namespace too — so a nested write would orphan.

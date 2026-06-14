@@ -2,7 +2,8 @@
 //!
 //! Workspace siblings + `file:` / `link:` / `portal:` targets reachable
 //! from the deployed package land at
-//! `<target>/.aube-deploy-injected/<id>/`. [`plan_injections`] BFS-walks
+//! `<target>/.<name>-deploy-injected/<id>/` (derived from the embedder name;
+//! standalone aube: `<target>/.aube-deploy-injected/<id>/`). [`plan_injections`] BFS-walks
 //! the deployed manifest plus every bundled sibling's manifest, records
 //! one [`Injection`] per distinct local-ref target,
 //! [`materialize_injections`] copies the bytes, and the rewrite layer
@@ -17,7 +18,8 @@ use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 
 /// Where a bundled local ref ends up under
-/// `<target>/.aube-deploy-injected/`. Distinct sources with distinct
+/// `<target>/.<name>-deploy-injected/` (derived from the embedder name;
+/// standalone aube: `.aube-deploy-injected/`). Distinct sources with distinct
 /// canonical paths each get their own entry — siblings shared between
 /// multiple parents bundle once.
 #[derive(Debug, Clone)]
@@ -56,14 +58,17 @@ pub(super) fn plan_injections(
     ws_index: &BTreeMap<String, (PathBuf, Option<String>)>,
     args: &DeployArgs,
 ) -> miette::Result<InjectionPlan> {
-    let injected_root = target_root.join(".aube-deploy-injected");
+    // Injected-deps staging leaf from the active embedder's name:
+    // `.<name>-deploy-injected`. Standalone aube → `.aube-deploy-injected`.
+    let injected_root =
+        target_root.join(format!(".{}-deploy-injected", aube_util::embedder().name));
     let mut plan: InjectionPlan = BTreeMap::new();
     // Track id collisions so a second sibling with the same encoded
     // name gets a `_2`, `_3`, ... suffix. Keyed by the encoded id.
     let mut used_ids: BTreeMap<String, u32> = BTreeMap::new();
     // Don't bundle the deployed package itself: a sibling B with a
     // back-dep `"@deployed-pkg": "workspace:*"` would otherwise duplicate
-    // the deploy root under `.aube-deploy-injected/` and break runtime
+    // the deploy root under the injected-deps dir and break runtime
     // singleton assumptions (two distinct module instances). The
     // rewriter handles back-refs separately.
     let deployed_canonical = super::canonicalize(deployed_pkg_dir);
@@ -210,10 +215,11 @@ fn iter_strippable_deps(manifest: &PackageJson, strip: StripFields) -> Vec<(Stri
     out
 }
 
-/// Pick a filesystem-safe id under `.aube-deploy-injected/`. Starts
-/// from `seed` (with `/` and any other unsafe characters sanitized) and
-/// disambiguates collisions with `_2`, `_3`, ... — collisions are rare
-/// and the suffix keeps the staged path readable when debugging.
+/// Pick a filesystem-safe id under the `.<name>-deploy-injected/` dir
+/// (standalone aube: `.aube-deploy-injected/`). Starts from `seed` (with `/`
+/// and any other unsafe characters sanitized) and disambiguates collisions with
+/// `_2`, `_3`, ... — collisions are rare and the suffix keeps the staged path
+/// readable when debugging.
 fn unique_id(seed: &str, used: &mut BTreeMap<String, u32>) -> String {
     let cleaned: String = seed
         .chars()

@@ -46,7 +46,7 @@ impl RuntimeProvenance {
     pub fn label(self) -> &'static str {
         match self {
             RuntimeProvenance::Mise => "mise",
-            RuntimeProvenance::AubeManaged => "aube",
+            RuntimeProvenance::AubeManaged => aube_util::embedder().name,
             RuntimeProvenance::System => "system",
         }
     }
@@ -558,7 +558,7 @@ impl CliProgress {
     }
 
     pub(crate) fn aube() -> Self {
-        Self::for_tool("aube")
+        Self::for_tool(aube_util::embedder().name)
     }
 
     fn for_tool(tool: &'static str) -> Self {

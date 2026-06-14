@@ -45,7 +45,8 @@ pub async fn check_and_notify(cwd: &Path) {
     if !enabled {
         return;
     }
-    let current = aube_util::embedder().version;
+    let id = aube_util::embedder();
+    let current = id.version;
     let Some(latest) = latest_version(cwd).await else {
         return;
     };
@@ -53,7 +54,7 @@ pub async fn check_and_notify(cwd: &Path) {
         return;
     }
     eprintln!();
-    eprintln!("  aube {latest} is available (current: {current})");
+    eprintln!("  {} {latest} is available (current: {current})", id.name);
     eprintln!("  upgrade: https://aube.jdx.dev");
 }
 

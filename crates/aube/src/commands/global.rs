@@ -46,7 +46,7 @@ impl GlobalLayout {
         // `bin_dir` and `pkg_dir` are independent: `globalBinDir` controls
         // where bin symlinks go (on PATH), `globalDir` controls where
         // package installs live. Neither inherits from the other — both
-        // fall back to the default home (AUBE_HOME → PNPM_HOME → platform).
+        // fall back to the default home (<PREFIX>_HOME → PNPM_HOME → platform).
         let (setting_bin, setting_pkg) = super::with_settings_ctx(&cwd, |ctx| {
             let bin = aube_settings::resolved::global_bin_dir(ctx)
                 .and_then(|raw| super::expand_setting_path(&raw, &cwd));
@@ -56,20 +56,25 @@ impl GlobalLayout {
         });
 
         let bin_dir = setting_bin.map_or_else(resolve_home, Ok)?;
+        // Package-install subdir named after the active embedder so we never
+        // step on a sibling pnpm install. Standalone aube → `global-aube`.
+        let pkg_subdir = format!("global-{}", aube_util::embedder().name);
         let pkg_dir = setting_pkg.map_or_else(
-            || resolve_home().map(|h| h.join("global-aube")),
-            |p| Ok(p.join("global-aube")),
+            || resolve_home().map(|h| h.join(&pkg_subdir)),
+            |p| Ok(p.join(&pkg_subdir)),
         )?;
 
         Ok(Self { bin_dir, pkg_dir })
     }
 }
 
-/// Resolve the PATH-visible root. Honors `AUBE_HOME`, then `PNPM_HOME` (so
-/// existing pnpm users already have the right dir on PATH), then a
-/// platform-specific pnpm-style default.
+/// Resolve the PATH-visible root. Honors the branded `<PREFIX>_HOME`
+/// (standalone aube → `AUBE_HOME`), then `PNPM_HOME` (so existing pnpm users
+/// already have the right dir on PATH), then a platform-specific pnpm-style
+/// default. An embedder with no `env_prefix` skips the branded var.
 fn resolve_home() -> miette::Result<PathBuf> {
-    if let Ok(v) = std::env::var("AUBE_HOME")
+    if let Some(prefix) = aube_util::embedder().env_prefix
+        && let Ok(v) = std::env::var(format!("{prefix}_HOME"))
         && !v.is_empty()
     {
         return Ok(PathBuf::from(v));
