@@ -106,6 +106,41 @@ _setup_no_shared_workspace() {
 	assert_equal "$(cat node_modules/.aube-state/state.json)" "$root_state_before"
 }
 
+@test "sharedWorkspaceLockfile=false: settings-only nested member yaml resolves to the parent root" {
+	_setup_no_shared_workspace
+
+	# The member drops a *settings-only* pnpm-workspace.yaml (no
+	# `packages:`) into its own dir. That configures the member; it does
+	# not declare a new workspace. Workspace-root discovery must walk
+	# past it to the real root — otherwise `cd member && aube install`
+	# resolves to the member-as-its-own-root, which can't see its
+	# `workspace:*` sibling and re-resolves the whole graph every run.
+	cat >packages/booking-engine-service/pnpm-workspace.yaml <<-'YAML'
+		minimumReleaseAge: 0
+	YAML
+
+	run aube install
+	assert_success
+	# The root install links the workspace sibling into the member.
+	assert_link_exists packages/booking-engine-service/node_modules/@ws/lib-a
+
+	cd packages/booking-engine-service
+	run aube install
+	assert_success
+	cd ../..
+
+	# Warm fast path: bare "Already up to date", no "(N packages)" count.
+	assert_output --partial "Already up to date"
+	refute_output --partial "up to date ("
+
+	# Resolved to the parent root: the member grew no install state of
+	# its own, and its workspace sibling is still linked (a member-rooted
+	# resolve would have dropped the sibling and rebuilt the member).
+	run test -e packages/booking-engine-service/node_modules/.aube-state
+	assert_failure
+	assert_link_exists packages/booking-engine-service/node_modules/@ws/lib-a
+}
+
 @test "sharedWorkspaceLockfile=false: repeat root install short-circuits on the warm path" {
 	_setup_no_shared_workspace
 

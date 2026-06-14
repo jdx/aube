@@ -133,19 +133,36 @@ fn find_workspace_root_uncached(start: &Path) -> Option<PathBuf> {
     // a workspaces field, and attach to that workspace. Cap the walk
     // at $HOME so that never happens.
     let stop = home_stop_boundary();
+    // A *settings-only* `pnpm-workspace.yaml` (no `packages:`) inside a
+    // member of an enclosing workspace configures that member; it does
+    // not declare a new workspace. Walk past it to the real root (the
+    // nearest ancestor that declares members) so `cd member && aube
+    // install` targets the workspace the member belongs to — otherwise
+    // the member resolves to itself, its workspace siblings (e.g.
+    // `@scope/lib`) can't be linked, and the warm path never settles.
+    // Only when no members-declaring root exists above do we fall back
+    // to the nearest settings-only yaml: a standalone single package
+    // that keeps its config in `pnpm-workspace.yaml` is still its own
+    // root.
+    let mut settings_only_root: Option<PathBuf> = None;
     for dir in start.ancestors() {
-        if aube_manifest::workspace::workspace_yaml_existing(dir).is_some() {
+        if aube_manifest::workspace::workspace_yaml_declares_members(dir) {
             return Some(dir.to_path_buf());
         }
         let pkg = dir.join("package.json");
         if pkg.is_file() && package_json_has_workspaces(&pkg) {
             return Some(dir.to_path_buf());
         }
+        if settings_only_root.is_none()
+            && aube_manifest::workspace::workspace_yaml_existing(dir).is_some()
+        {
+            settings_only_root = Some(dir.to_path_buf());
+        }
         if stop.as_deref() == Some(dir) {
-            return None;
+            break;
         }
     }
-    None
+    settings_only_root
 }
 
 /// Walk upward from `start` looking for the nearest ancestor that
@@ -357,6 +374,46 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write(&dir.path().join("package.json"), r#"{"name":"solo"}"#);
         assert!(find_workspace_root(dir.path()).is_none());
+    }
+
+    #[test]
+    fn find_workspace_root_walks_past_settings_only_member_yaml() {
+        // A member of a `packages:`-declaring workspace can drop a
+        // settings-only `pnpm-workspace.yaml` (no `packages:`) in its
+        // own directory to carry per-package config. That file must NOT
+        // make the member look like its own workspace root — discovery
+        // walks past it to the real root, so `cd member && aube install`
+        // targets the enclosing workspace where the member's workspace
+        // siblings actually live (otherwise the install never settles).
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &dir.path().join("pnpm-workspace.yaml"),
+            "packages:\n  - 'services/*'\n",
+        );
+        let member = dir.path().join("services/svc-a");
+        write(&member.join("package.json"), r#"{"name":"@t/svc-a"}"#);
+        write(
+            &member.join("pnpm-workspace.yaml"),
+            "# per-service settings, no packages:\nenableGlobalVirtualStore: true\n",
+        );
+
+        assert_eq!(find_workspace_root(&member).unwrap(), dir.path());
+    }
+
+    #[test]
+    fn find_workspace_root_keeps_standalone_settings_only_yaml() {
+        // With no members-declaring ancestor, a settings-only
+        // `pnpm-workspace.yaml` is a standalone single-package root (the
+        // pnpm v9+ "keep config in pnpm-workspace.yaml" shape). It must
+        // still resolve to itself, not fall through to None.
+        let dir = tempfile::tempdir().unwrap();
+        write(&dir.path().join("package.json"), r#"{"name":"solo"}"#);
+        write(
+            &dir.path().join("pnpm-workspace.yaml"),
+            "enableGlobalVirtualStore: true\n",
+        );
+
+        assert_eq!(find_workspace_root(dir.path()).unwrap(), dir.path());
     }
 
     #[test]

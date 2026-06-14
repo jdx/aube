@@ -262,6 +262,31 @@ fn check_needs_install_inner(
     project_dir: &Path,
     cli_flags: Option<&[(String, String)]>,
 ) -> Option<String> {
+    // Surface the warm-path verdict on the diagnostic pipeline. A miss
+    // re-runs the full resolve/fetch/delta/link pipeline (the visible
+    // "re-link even though nothing changed" symptom), so when someone
+    // reports an install that won't settle, `AUBE_LOG=debug aube
+    // install` now names the exact freshness input that drifted instead
+    // of leaving them to guess. Trace-level on a hit keeps the default
+    // output clean.
+    let reason = check_needs_install_compute(project_dir, cli_flags);
+    match &reason {
+        Some(reason) => tracing::debug!(
+            project_dir = %project_dir.display(),
+            "install warm path miss: {reason}"
+        ),
+        None => tracing::trace!(
+            project_dir = %project_dir.display(),
+            "install warm path hit: nothing to do"
+        ),
+    }
+    reason
+}
+
+fn check_needs_install_compute(
+    project_dir: &Path,
+    cli_flags: Option<&[(String, String)]>,
+) -> Option<String> {
     let _diag =
         aube_util::diag::Span::new(aube_util::diag::Category::Frozen, "check_needs_install");
     let (modules_dir, state_path) = resolve_paths(project_dir);

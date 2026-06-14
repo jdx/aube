@@ -758,6 +758,30 @@ pub fn workspace_yaml_existing(project_dir: &Path) -> Option<PathBuf> {
     None
 }
 
+/// Whether `project_dir` holds a workspace yaml that actually declares
+/// members (a non-empty `packages:` list).
+///
+/// Distinguishes a real workspace root from a *settings-only*
+/// `pnpm-workspace.yaml` — one carrying only per-package config
+/// (`minimumReleaseAge`, `pnpmfile`, `catalog`, etc.) with no
+/// `packages:`. pnpm treats *any* `pnpm-workspace.yaml` as a workspace
+/// root, but a member of an enclosing workspace that drops a
+/// settings-only yaml into its own directory is configuring itself, not
+/// declaring a new workspace. Workspace-root discovery walks past such
+/// a file to the real root so `cd member && aube install` still targets
+/// the workspace the member belongs to — otherwise the member resolves
+/// to itself, its workspace siblings can't be linked, and the install
+/// never settles.
+///
+/// Reads through the memoized [`WorkspaceConfig::load`] and is scoped to
+/// `project_dir` (no ancestor walk), so callers can probe one directory
+/// at a time.
+pub fn workspace_yaml_declares_members(project_dir: &Path) -> bool {
+    WorkspaceConfig::load(project_dir)
+        .map(|config| !config.packages.is_empty())
+        .unwrap_or(false)
+}
+
 /// Resolve which workspace-yaml path a writer should mutate in
 /// `project_dir`. Existing `aube-workspace.yaml` wins over
 /// `pnpm-workspace.yaml`; when neither exists, falls back to
