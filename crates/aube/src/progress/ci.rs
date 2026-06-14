@@ -196,22 +196,12 @@ impl CiState {
 
     /// Render the one-line header banner that prints once above the
     /// first heartbeat-emitted progress line. Plain whitespace
-    /// alignment, no frame: `aube VERSION by jdx.dev`.
+    /// alignment, no frame: `aube VERSION by jdx.dev` for standalone
+    /// aube, `<display_name> VERSION` for an embedder. The vendor
+    /// attribution is gated by `product_banner` so the engine brand
+    /// never leaks into a host's install output.
     fn render_header() -> String {
-        let id = aube_util::embedder();
-        match id.vendor {
-            Some(vendor) => format!(
-                "{} {} {}",
-                style::emagenta(id.display_name).bold(),
-                style::edim(crate::version::VERSION.as_str()),
-                style::edim(vendor),
-            ),
-            None => format!(
-                "{} {}",
-                style::emagenta(id.display_name).bold(),
-                style::edim(crate::version::VERSION.as_str()),
-            ),
-        }
+        super::product_banner("")
     }
 
     pub(super) fn spawn_heartbeat(state: &Arc<Self>) {
