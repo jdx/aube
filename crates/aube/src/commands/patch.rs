@@ -5,8 +5,10 @@
 //! Mirrors `pnpm patch`. Two directories are created under a unique
 //! temp parent: `source/` (the original, immutable, used as the diff
 //! base) and `user/` (the writable copy printed to the user). A
-//! `.aube_patch_state.json` sidecar carries the package identity so
-//! `patch-commit` can locate the source dir given just the user dir.
+//! `.<name>_patch_state.json` sidecar (derived from the embedder name via
+//! `patch_state_filename()`; standalone aube: `.aube_patch_state.json`) carries
+//! the package identity so `patch-commit` can locate the source dir given just
+//! the user dir.
 
 use crate::patches::copy_dir_all;
 use clap::Args;
@@ -197,9 +199,10 @@ fn default_edit_parent(name: &str, version: &str) -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// Read the `.aube_patch_state.json` sidecar that `aube patch` writes
-/// next to a user-edit dir. `patch-commit` calls this to recover the
-/// package identity (name, version) and the matching source dir.
+/// Read the `.<name>_patch_state.json` sidecar (standalone aube:
+/// `.aube_patch_state.json`) that `patch` writes next to a user-edit dir.
+/// `patch-commit` calls this to recover the package identity (name, version)
+/// and the matching source dir.
 pub fn read_state(edit_dir: &Path) -> Result<PatchState> {
     let parent = edit_dir
         .parent()
