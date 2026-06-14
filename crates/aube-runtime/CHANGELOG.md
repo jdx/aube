@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.21.0](https://github.com/jdx/aube/compare/aube-runtime-v1.20.0...aube-runtime-v1.21.0) - 2026-06-13
+
+### Fixed
+
+- *(packaging)* restore endevco npm scope ([#887](https://github.com/jdx/aube/pull/887))
+
 ## [1.20.0](https://github.com/jdx/aube/compare/aube-runtime-v1.19.0...aube-runtime-v1.20.0) - 2026-06-13
 
 ### Added

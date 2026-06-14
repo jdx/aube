@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.21.0](https://github.com/jdx/aube/compare/v1.20.0...v1.21.0) - 2026-06-13
+
+### Added
+
+- *(lockfile)* emit packageExtensionsChecksum and pnpmfileChecksum for pnpm parity ([#883](https://github.com/jdx/aube/pull/883))
+
+### Fixed
+
+- *(install)* map peer-suffixed source deps to their canonical store index ([#885](https://github.com/jdx/aube/pull/885))
+- *(install)* write the root workspace lockfile under sharedWorkspaceLockfile=false ([#882](https://github.com/jdx/aube/pull/882))
+- *(packaging)* restore endevco npm scope ([#887](https://github.com/jdx/aube/pull/887))
+- *(install)* stop double-counting link deps in the progress bar ([#884](https://github.com/jdx/aube/pull/884))
+
 ## [1.20.0](https://github.com/jdx/aube/compare/v1.19.0...v1.20.0) - 2026-06-13
 
 ### Added
