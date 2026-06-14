@@ -38,6 +38,8 @@ pub(crate) async fn maybe_switch(settings: &crate::startup::StartupSettings) -> 
     if !settings.manage_package_manager_versions {
         return Ok(());
     }
+    // Product name for user-facing messages (standalone aube → "aube").
+    let name = aube_util::embedder().name;
     let cwd = std::env::current_dir().into_diagnostic()?;
     let Some(root) = crate::dirs::find_workspace_root(&cwd)
         .filter(|root| root.join("package.json").is_file())
@@ -86,7 +88,7 @@ pub(crate) async fn maybe_switch(settings: &crate::startup::StartupSettings) -> 
                                 .cloned();
                             best.ok_or_else(|| {
                                 format!(
-                                    "no published aube satisfies {} (newest release: {})",
+                                    "no published {name} satisfies {} (newest release: {})",
                                     pin.raw,
                                     published
                                         .iter()
@@ -109,7 +111,7 @@ pub(crate) async fn maybe_switch(settings: &crate::startup::StartupSettings) -> 
                                             aube_codes::warnings::WARN_AUBE_RUNTIME_VERSION_MISMATCH,
                                         requested = pin.raw,
                                         running = running_version(),
-                                        "{detail}; continuing on this aube"
+                                        "{detail}; continuing on this {name}"
                                     );
                                     Ok(())
                                 }
@@ -134,7 +136,7 @@ pub(crate) async fn maybe_switch(settings: &crate::startup::StartupSettings) -> 
             requested = pin.raw,
             running = running_version(),
             target = %target,
-            "switched aube binary still does not satisfy the project's pin; continuing"
+            "switched {name} binary still does not satisfy the project's pin; continuing"
         );
         return Ok(());
     }
@@ -151,14 +153,14 @@ pub(crate) async fn maybe_switch(settings: &crate::startup::StartupSettings) -> 
                     requested = pin.raw,
                     running = running_version(),
                     source = pin.source,
-                    "project pins a different aube version (onFail: warn); continuing on this one"
+                    "project pins a different {name} version (onFail: warn); continuing on this one"
                 );
                 return Ok(());
             }
             aube_manifest::OnFail::Error => {
                 return self_pin_unsatisfied(
                     &pin,
-                    format!("aube@{target} is not installed and onFail is \"error\""),
+                    format!("{name}@{target} is not installed and onFail is \"error\""),
                 );
             }
             aube_manifest::OnFail::Download => {
@@ -173,7 +175,7 @@ pub(crate) async fn maybe_switch(settings: &crate::startup::StartupSettings) -> 
                     retries: 2,
                 };
                 crate::progress::safe_eprintln(&format!(
-                    "Switching to aube@{target} (pinned by {})…",
+                    "Switching to {name}@{target} (pinned by {})…",
                     pin.source
                 ));
                 aube_runtime::install_aube(&cfg, &target, &crate::runtime::CliProgress::aube())
@@ -187,10 +189,15 @@ pub(crate) async fn maybe_switch(settings: &crate::startup::StartupSettings) -> 
 }
 
 fn self_pin_unsatisfied(pin: &SelfPin, detail: String) -> miette::Result<()> {
+    // Product name in the spec syntax shown to the user (standalone aube →
+    // "aube"): the pin reads `packageManager: "<name>@<version>"`.
+    let name = aube_util::embedder().name;
     Err(miette!(
         code = aube_codes::errors::ERR_AUBE_RUNTIME_VERSION_UNSATISFIED,
-        help = "pin an exact released version (e.g. `packageManager: \"aube@<version>\"`), or set managePackageManagerVersions=false to skip switching",
-        "the project pins aube@{} via {}, but this is aube@{} and {detail}",
+        help = format!(
+            "pin an exact released version (e.g. `packageManager: \"{name}@<version>\"`), or set managePackageManagerVersions=false to skip switching"
+        ),
+        "the project pins {name}@{} via {}, but this is {name}@{} and {detail}",
         pin.raw,
         pin.source,
         running_version(),
@@ -222,7 +229,7 @@ fn extract_pin(manifest: &aube_manifest::PackageJson) -> Option<SelfPin> {
     }
     let raw = manifest.extra.get("packageManager")?.as_str()?;
     let (name, version) = raw.rsplit_once('@')?;
-    if name != "aube" {
+    if !aube_util::embedder().self_names.contains(&name) {
         return None;
     }
     // Strip a corepack `+<hash>` suffix.

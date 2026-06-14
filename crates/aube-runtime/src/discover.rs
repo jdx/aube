@@ -15,7 +15,7 @@ pub enum InstallOrigin {
 impl InstallOrigin {
     pub fn label(self) -> &'static str {
         match self {
-            InstallOrigin::Aube => "aube",
+            InstallOrigin::Aube => aube_util::embedder().name,
             InstallOrigin::Mise => "mise",
         }
     }

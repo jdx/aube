@@ -47,11 +47,13 @@ pub enum Engine {
 }
 
 impl Engine {
-    /// The literal key as it appears under `engines.<key>` in package.json.
+    /// The key as it appears under `engines.<key>` in package.json. The
+    /// tool's own key is the active embedder's manifest namespace
+    /// (standalone aube → `"aube"`).
     pub fn key(self) -> &'static str {
         match self {
             Self::Node => "node",
-            Self::Aube => "aube",
+            Self::Aube => aube_util::embedder().manifest_namespace,
         }
     }
 }
@@ -178,7 +180,7 @@ fn check_manifest_engines(
             current: node_v.to_string(),
         });
     }
-    if let Some(declared) = check_engine_field(&manifest.engines, "aube", aube_v) {
+    if let Some(declared) = check_engine_field(&manifest.engines, Engine::Aube.key(), aube_v) {
         out.push(Mismatch {
             engine: Engine::Aube,
             package: label.to_string(),

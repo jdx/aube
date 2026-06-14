@@ -236,8 +236,10 @@ where
     *hasher.finalize().as_bytes()
 }
 
+/// Manifest fields, other than the tool's own namespace, that shape the
+/// install. The active embedder's `manifest_namespace` is folded in at the
+/// digest site (it sorts ahead of these for standalone aube → `"aube"`).
 pub const INSTALL_SHAPE_FIELDS: &[&str] = &[
-    "aube",
     "bundleDependencies",
     "bundledDependencies",
     "catalog",
@@ -264,8 +266,17 @@ pub fn manifest_install_shape_digest(manifest: &serde_json::Value) -> [u8; 32] {
     };
     let mut hasher = blake3::Hasher::new();
     hasher.update(b"aube-manifest-v1\n");
-    for field in INSTALL_SHAPE_FIELDS {
-        if let Some(v) = obj.get(*field) {
+    // The tool's own manifest namespace shapes the install too, but it's
+    // embedder-derived rather than fixed. Hash it ahead of the static fields
+    // so standalone aube (`manifest_namespace == "aube"`) reproduces the
+    // historical order; an embedder with no namespace (`""`) skips it, and a
+    // switch self-heals — the digest invalidates once, forcing one re-derive.
+    let namespace = crate::embedder().manifest_namespace;
+    let fields = std::iter::once(namespace)
+        .filter(|ns| !ns.is_empty())
+        .chain(INSTALL_SHAPE_FIELDS.iter().copied());
+    for field in fields {
+        if let Some(v) = obj.get(field) {
             hasher.update(field.as_bytes());
             hasher.update(b"=");
             canonical_json(v, &mut hasher);

@@ -265,9 +265,17 @@ fn run_global(packages: &[String]) -> miette::Result<()> {
 fn prune_sidecar_entries_json(obj: &mut serde_json::Map<String, serde_json::Value>, name: &str) {
     // shift_remove (not remove → swap_remove) keeps the surrounding
     // keys in their original on-disk position. Same rationale as the
-    // dep-section pruning above: `aube remove` must not reshuffle the
-    // user's manifest as a side effect.
-    for ns_key in ["pnpm", "aube"] {
+    // dep-section pruning above: `remove` must not reshuffle the user's
+    // manifest as a side effect.
+    // Compat namespaces plus the embedder's own (standalone aube →
+    // ["pnpm", "aube"]); an embedder with no namespace ("") skips it.
+    let id = aube_util::embedder();
+    let ns_keys = id
+        .compatible_names
+        .iter()
+        .copied()
+        .chain(std::iter::once(id.manifest_namespace).filter(|ns| !ns.is_empty()));
+    for ns_key in ns_keys {
         let remove_ns = if let Some(ns) = obj.get_mut(ns_key).and_then(|v| v.as_object_mut()) {
             for map_key in ["allowBuilds", "overrides", "peerDependencyRules"] {
                 if let Some(inner) = ns.get_mut(map_key).and_then(|v| v.as_object_mut()) {
@@ -321,8 +329,16 @@ fn prune_sidecar_entries_json(obj: &mut serde_json::Map<String, serde_json::Valu
 /// namespace block if its last entry was the one we just dropped.
 /// Safe no-op if the manifest has none of these fields.
 fn prune_sidecar_entries(manifest: &mut aube_manifest::PackageJson, name: &str) {
-    // Namespaced (pnpm.* / aube.*) allowlists, overrides, denylists.
-    for ns_key in ["pnpm", "aube"] {
+    // Namespaced allowlists, overrides, denylists: the compat namespaces
+    // plus the embedder's own (standalone aube → pnpm.* / aube.*); an
+    // embedder with no namespace ("") skips it.
+    let id = aube_util::embedder();
+    let ns_keys = id
+        .compatible_names
+        .iter()
+        .copied()
+        .chain(std::iter::once(id.manifest_namespace).filter(|ns| !ns.is_empty()));
+    for ns_key in ns_keys {
         let Some(ns) = manifest.extra.get_mut(ns_key) else {
             continue;
         };

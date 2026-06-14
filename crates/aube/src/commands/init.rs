@@ -95,10 +95,13 @@ fn render(name: &str, args: &InitArgs) -> String {
     push(&mut out, &mut first, "\"version\": \"1.0.0\"");
 
     if args.init_package_manager {
+        // packageManager pin from the active embedder (standalone aube →
+        // "aube@<version>").
+        let id = aube_util::embedder();
         push(
             &mut out,
             &mut first,
-            &format!("\"packageManager\": \"aube@{}\"", env!("CARGO_PKG_VERSION")),
+            &format!("\"packageManager\": \"{}@{}\"", id.name, id.version),
         );
     }
 

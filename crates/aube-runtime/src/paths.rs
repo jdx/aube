@@ -4,7 +4,7 @@
 //! in the CAS machinery for three path joins).
 //!
 //! ```text
-//! $XDG_DATA_HOME/aube/nodejs/
+//! $XDG_DATA_HOME/<data_namespace>/nodejs/
 //! ├── 24.1.0/              # native layout: unix bin/node, win node.exe
 //! ├── .downloads/          # in-flight archive downloads
 //! ├── .tmp/                # extraction staging (rename source)
@@ -14,22 +14,24 @@
 use std::path::PathBuf;
 
 /// Root of aube-managed Node installs. `AUBE_RUNTIME_DIR` overrides
-/// for tests and unusual setups.
+/// for tests and unusual setups. The data namespace comes from the
+/// active embedder (standalone aube → `"aube"`).
 pub fn runtime_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("AUBE_RUNTIME_DIR")
         && !dir.is_empty()
     {
         return Some(PathBuf::from(dir));
     }
+    let ns = aube_util::embedder().data_namespace;
     #[cfg(windows)]
     if let Ok(local) = std::env::var("LOCALAPPDATA") {
-        return Some(PathBuf::from(local).join("aube/nodejs"));
+        return Some(PathBuf::from(local).join(ns).join("nodejs"));
     }
     let data_home = match aube_util::env::xdg_data_home() {
         Some(xdg) => xdg,
         None => aube_util::env::home_dir()?.join(".local/share"),
     };
-    Some(data_home.join("aube/nodejs"))
+    Some(data_home.join(ns).join("nodejs"))
 }
 
 /// The install dir for an exact version: `<runtime_dir>/24.1.0/`.

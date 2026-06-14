@@ -969,7 +969,8 @@ async fn async_main(cli: Cli) -> miette::Result<Option<i32>> {
                 Some(_) | None => {
                     return Err(miette::miette!(
                         code = aube_codes::errors::ERR_AUBE_RECURSIVE_NOT_SUPPORTED,
-                        "aube recursive: command does not support recursive execution"
+                        "{} recursive: command does not support recursive execution",
+                        aube_util::embedder().name,
                     ));
                 }
             }

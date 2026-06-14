@@ -56,7 +56,10 @@ pub(super) fn plan_injections(
     ws_index: &BTreeMap<String, (PathBuf, Option<String>)>,
     args: &DeployArgs,
 ) -> miette::Result<InjectionPlan> {
-    let injected_root = target_root.join(".aube-deploy-injected");
+    // Injected-deps staging leaf from the active embedder's name:
+    // `.<name>-deploy-injected`. Standalone aube → `.aube-deploy-injected`.
+    let injected_root =
+        target_root.join(format!(".{}-deploy-injected", aube_util::embedder().name));
     let mut plan: InjectionPlan = BTreeMap::new();
     // Track id collisions so a second sibling with the same encoded
     // name gets a `_2`, `_3`, ... suffix. Keyed by the encoded id.

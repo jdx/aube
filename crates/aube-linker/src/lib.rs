@@ -197,11 +197,12 @@ pub struct Linker {
     /// pnpm's `virtual-store-dir`: absolute path of the per-project
     /// virtual store (what pnpm calls `node_modules/.pnpm`). `None`
     /// means "derive from `modules_dir_name` at link time":
-    /// `<project_dir>/<modules_dir_name>/.aube`, matching the default
-    /// behavior every caller expected before this knob existed. When
-    /// set by the install driver via `with_aube_dir_override`, it
-    /// overrides that derivation — the linker writes its
-    /// `.aube/<dep_path>/` tree into the supplied path instead. The
+    /// `<project_dir>/<modules_dir_name>/.<name>` (standalone aube →
+    /// `.aube`), matching the default behavior every caller expected
+    /// before this knob existed. When set by the install driver via
+    /// `with_aube_dir_override`, it overrides that derivation — the
+    /// linker writes its `.<name>/<dep_path>/` tree into the supplied
+    /// path instead. The
     /// path is *absolute*; relative overrides from `.npmrc` /
     /// `pnpm-workspace.yaml` get resolved against the project dir by
     /// the caller (see

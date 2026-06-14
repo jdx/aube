@@ -39,6 +39,14 @@ pub struct PatchArgs {
     pub ignore_existing: bool,
 }
 
+/// The patch-state sidecar filename, derived from the active embedder's
+/// name: `.<name>_patch_state.json`. Standalone aube:
+/// `.aube_patch_state.json`. Used by both the writer (`run`) and the
+/// reader (`read_state`), so they stay paired.
+fn patch_state_filename() -> String {
+    format!(".{}_patch_state.json", aube_util::embedder().name)
+}
+
 pub async fn run(args: PatchArgs) -> Result<()> {
     // Mirror install's resolution: workspace-first so `aube patch`
     // from a workspace member finds the shared `.aube/` store at the
@@ -91,7 +99,7 @@ pub async fn run(args: PatchArgs) -> Result<()> {
         "project": cwd.display().to_string(),
     });
     std::fs::write(
-        parent.join(".aube_patch_state.json"),
+        parent.join(patch_state_filename()),
         serde_json::to_string_pretty(&state).unwrap(),
     )
     .into_diagnostic()
@@ -196,7 +204,7 @@ pub fn read_state(edit_dir: &Path) -> Result<PatchState> {
     let parent = edit_dir
         .parent()
         .ok_or_else(|| miette!("edit dir {} has no parent", edit_dir.display()))?;
-    let state_path = parent.join(".aube_patch_state.json");
+    let state_path = parent.join(patch_state_filename());
     let raw = std::fs::read_to_string(&state_path)
         .into_diagnostic()
         .map_err(|e| {
