@@ -22,8 +22,8 @@ mod yaml_patch;
 
 pub use config::{
     ConfigWriteTarget, JailBuildPermission, SupportedArchitectures, WorkspaceConfig,
-    config_write_target, load_both, load_raw, workspace_yaml_existing, workspace_yaml_names,
-    workspace_yaml_target,
+    WorkspaceYamlKind, config_write_target, load_both, load_raw, workspace_yaml_existing,
+    workspace_yaml_kind, workspace_yaml_names, workspace_yaml_target,
 };
 pub use edits::{
     edit_setting_map, edit_workspace_yaml, remove_map_entry, remove_setting_entry, upsert_map_entry,
